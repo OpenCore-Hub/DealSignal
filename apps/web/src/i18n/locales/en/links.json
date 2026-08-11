@@ -13,13 +13,23 @@
     "document": "Document",
     "accessCount": "Visits",
     "accessCountValue": "{{count}} visits",
-    "avgDuration": "Avg. time",
+    "avgDuration": "Avg",
     "lastViewed": "Last Viewed",
+    "createTime": "Create Time",
     "heat": "Heat",
     "status": "Status",
     "totalLinks": "{{count}} links",
     "clearFilter": "Clear filter",
-    "copyLink": "Copy Link"
+    "copyLink": "Copy Link",
+    "searchPlaceholder": "Search links…",
+    "createdWithinLabel": "Create time",
+    "createdWithin": {
+      "all": "All",
+      "24h": "Last 24 hours",
+      "7d": "Last 7 days",
+      "30d": "Last 30 days",
+      "90d": "Last 90 days"
+    }
   },
   "accessRequests": {
     "inboxTitle": "Pending access requests",
@@ -55,7 +65,10 @@
     "description": "Configure permissions and create links to track investor and buyer engagement.",
     "createLink": "Create Link",
     "filteredTitle": "No links for \"{{title}}\"",
-    "filteredDescription": "Create a link for this document to start tracking engagement."
+    "filteredDescription": "Create a link for this document to start tracking engagement.",
+    "noMatchesTitle": "No matching links",
+    "noMatchesDescription": "Try a different search or create-time window, or clear filters to see all links.",
+    "clearFilters": "Clear filters"
   },
   "delete": {
     "title": "Delete Link",
@@ -75,7 +88,7 @@
     "permissionConfig": "Permission Settings",
     "expiresAt": "Expires {{time}}",
     "trendTitle": "Visit trend",
-    "pageDurationTitle": "Avg. time per page",
+    "pageDurationTitle": "Time on Page",
     "pageLabel": "Page {{page}}",
     "pageAxisTitle": "Page",
     "durationAxisTitle": "Duration (s)",

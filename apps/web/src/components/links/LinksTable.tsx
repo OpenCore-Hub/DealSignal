@@ -9,7 +9,17 @@ import {
   type ColumnDef,
   type SortingState,
 } from "@tanstack/react-table";
-import { Copy, Export, DownloadSimple, Trash, ArrowRight, Link as LinkIcon, X, PencilSimple } from "@phosphor-icons/react";
+import {
+  Copy,
+  Export,
+  DownloadSimple,
+  Trash,
+  ArrowRight,
+  Link as LinkIcon,
+  MagnifyingGlass,
+  X,
+  PencilSimple,
+} from "@phosphor-icons/react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -33,12 +43,18 @@ import { HeatBadge } from "@/components/common/HeatBadge";
 import { RowActions } from "@/components/common/RowActions";
 import { EmptyState } from "@/components/common/EmptyState";
 import { SkeletonList } from "@/components/common/SkeletonLayout";
+import { SortableColumnHeader } from "@/components/common/SortableColumnHeader";
 import { ShareAccessRequestsPanel } from "@/components/links/ShareAccessRequestsPanel";
 import { api } from "@/lib/api";
 import { documentsCreateLinkPath, documentsSharePath } from "@/lib/documentsSharePath";
 import { exportLinkAccessLogsCsv } from "@/lib/exportLinkAccessLogs";
 import { formatDuration, formatRelativeTime } from "@/lib/formatters";
 import { copyToClipboard } from "@/lib/clipboard";
+import {
+  filterLinksForShareView,
+  hasActiveShareListFilters,
+  type LinkCreatedWithin,
+} from "@/lib/shareLinksFilter";
 import { useAsyncData } from "@/hooks/useAsyncData";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -49,6 +65,12 @@ interface LinksTableProps {
   documentTitle?: string;
   /** Compact layout when embedded in Document Library → Share tab. */
   embedded?: boolean;
+  /** Client-side search over URL / document title / link name. */
+  searchQuery?: string;
+  /** Filter by link create time window. */
+  createdWithin?: LinkCreatedWithin;
+  /** Clears Share-tab search + create-time filters (parent owns URL/state). */
+  onClearListFilters?: () => void;
 }
 
 /** Column layout: long URL/title truncate; table scrolls horizontally when narrow. */
@@ -60,11 +82,15 @@ function linksColumnClass(columnId: string): string {
     case "documentTitle":
       return "w-[16rem] max-w-[16rem] overflow-hidden";
     case "accessCount":
+      return "w-[6.5rem] whitespace-nowrap";
     case "avgDurationSeconds":
-    case "lastViewedAt":
+      return "w-[4rem] whitespace-nowrap";
+    case "createdAt":
+      return "w-[8.5rem] whitespace-nowrap";
     case "heatLevel":
+      return "w-[5.5rem] whitespace-nowrap";
     case "isActive":
-      return "whitespace-nowrap";
+      return "w-[6.5rem] whitespace-nowrap";
     case "actions":
       return "w-[3.75rem]";
     default:
@@ -72,11 +98,20 @@ function linksColumnClass(columnId: string): string {
   }
 }
 
-export function LinksTable({ documentId, documentTitle, embedded = false }: LinksTableProps) {
+export function LinksTable({
+  documentId,
+  documentTitle,
+  embedded = false,
+  searchQuery = "",
+  createdWithin = "all",
+  onClearListFilters,
+}: LinksTableProps) {
   "use no memo";
   const navigate = useNavigate();
   const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
   const location = useLocation();
+  const { t } = useTranslation("links");
+  const { t: tc } = useTranslation("common");
 
   const openLink = (linkId: string) => {
     navigate(`/${workspaceSlug}/links/${linkId}`, {
@@ -86,8 +121,6 @@ export function LinksTable({ documentId, documentTitle, embedded = false }: Link
       },
     });
   };
-  const { t } = useTranslation("links");
-  const { t: tc } = useTranslation("common");
   const isFiltered = !!documentId;
   const { data: fetchedData, loading, error, refetch } = useAsyncData(async () => {
     const res = isFiltered && documentId
@@ -96,8 +129,17 @@ export function LinksTable({ documentId, documentTitle, embedded = false }: Link
     // Defense in depth: Document Library must never render deal-room shares.
     return res.data.filter((link) => !link.dealRoomId);
   }, [documentId, isFiltered]);
-  const data = fetchedData ?? [];
-  const [sorting, setSorting] = useState<SortingState>([]);
+  const allLinks = useMemo(() => fetchedData ?? [], [fetchedData]);
+  const listFiltersActive = hasActiveShareListFilters({ searchQuery, createdWithin });
+  const data = useMemo(
+    () =>
+      filterLinksForShareView(allLinks, {
+        searchQuery,
+        createdWithin,
+      }),
+    [allLinks, searchQuery, createdWithin],
+  );
+  const [sorting, setSorting] = useState<SortingState>([{ id: "createdAt", desc: true }]);
   const [linkToDelete, setLinkToDelete] = useState<Link | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [busyLinkId, setBusyLinkId] = useState<string | null>(null);
@@ -209,11 +251,14 @@ export function LinksTable({ documentId, documentTitle, embedded = false }: Link
         ),
       },
       {
-        accessorKey: "lastViewedAt",
-        header: t("table.lastViewed"),
+        accessorKey: "createdAt",
+        enableSorting: true,
+        header: ({ column }) => (
+          <SortableColumnHeader column={column} label={t("table.createTime")} />
+        ),
         cell: ({ row }) => (
           <span className="text-caption text-muted-foreground">
-            {formatRelativeTime(row.original.lastViewedAt)}
+            {formatRelativeTime(row.original.createdAt)}
           </span>
         ),
       },
@@ -292,7 +337,6 @@ export function LinksTable({ documentId, documentTitle, embedded = false }: Link
     ],
   );
 
-  // eslint-disable-next-line react-hooks/incompatible-library
   const table = useReactTable({
     data,
     columns,
@@ -300,9 +344,13 @@ export function LinksTable({ documentId, documentTitle, embedded = false }: Link
     onSortingChange: setSorting,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
+    // Only Create Time is sortable; keep toggling between asc/desc (default desc).
+    enableSorting: false,
+    enableSortingRemoval: false,
   });
 
-  const linkIds = useMemo(() => data.map((link) => link.id), [data]);
+  // Inbox scopes to the full share surface, not the current search/time slice.
+  const linkIds = useMemo(() => allLinks.map((link) => link.id), [allLinks]);
 
   if (error) {
     return (
@@ -322,6 +370,27 @@ export function LinksTable({ documentId, documentTitle, embedded = false }: Link
   const accessInbox = <ShareAccessRequestsPanel linkIds={linkIds} />;
 
   if (data.length === 0) {
+    if (listFiltersActive && allLinks.length > 0) {
+      return (
+        <div className="space-y-4">
+          {accessInbox}
+          <EmptyState
+            icon={<MagnifyingGlass size={64} />}
+            title={t("empty.noMatchesTitle")}
+            description={t("empty.noMatchesDescription")}
+            action={
+              onClearListFilters
+                ? {
+                    label: t("empty.clearFilters"),
+                    onClick: onClearListFilters,
+                  }
+                : undefined
+            }
+          />
+        </div>
+      );
+    }
+
     const emptyTitle = isFiltered && documentTitle ? t("empty.filteredTitle", { title: documentTitle }) : t("empty.title");
     const emptyDescription = isFiltered && documentTitle ? t("empty.filteredDescription") : t("empty.description");
     // Parent Document Library Share tab already exposes Create Link.
@@ -385,18 +454,33 @@ export function LinksTable({ documentId, documentTitle, embedded = false }: Link
         </span>
       </div>
 
-      <div className="rounded-lg border border-border bg-card">
-        <Table className="min-w-[56rem] table-fixed">
+      <div className="overflow-x-auto rounded-lg border border-border bg-card">
+        <Table className="min-w-[72rem] table-fixed">
           <TableHeader>
             {table.getHeaderGroups().map((headerGroup) => (
               <TableRow key={headerGroup.id}>
-                {headerGroup.headers.map((header) => (
-                  <TableHead key={header.id} className={linksColumnClass(header.column.id)}>
-                    {header.isPlaceholder
-                      ? null
-                      : flexRender(header.column.columnDef.header, header.getContext())}
-                  </TableHead>
-                ))}
+                {headerGroup.headers.map((header) => {
+                  const sorted = header.column.getIsSorted();
+                  const ariaSort =
+                    sorted === "asc"
+                      ? "ascending"
+                      : sorted === "desc"
+                        ? "descending"
+                        : header.column.getCanSort()
+                          ? "none"
+                          : undefined;
+                  return (
+                    <TableHead
+                      key={header.id}
+                      className={linksColumnClass(header.column.id)}
+                      aria-sort={ariaSort}
+                    >
+                      {header.isPlaceholder
+                        ? null
+                        : flexRender(header.column.columnDef.header, header.getContext())}
+                    </TableHead>
+                  );
+                })}
               </TableRow>
             ))}
           </TableHeader>

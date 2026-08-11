@@ -63,6 +63,31 @@ describe("sanitizeDocumentsLibrarySearchParams", () => {
     expect(stripped?.toString()).toBe("tab=archived");
   });
 
+  it("keeps share list filters on shared tab and strips them elsewhere", () => {
+    expect(
+      sanitizeDocumentsLibrarySearchParams(
+        new URLSearchParams("tab=shared&shareQ=deck&createdWithin=7d"),
+      ),
+    ).toBeNull();
+
+    const stripped = sanitizeDocumentsLibrarySearchParams(
+      new URLSearchParams("tab=archived&shareQ=deck&createdWithin=7d"),
+    );
+    expect(stripped?.toString()).toBe("tab=archived");
+  });
+
+  it("drops invalid or redundant createdWithin on shared tab", () => {
+    const invalid = sanitizeDocumentsLibrarySearchParams(
+      new URLSearchParams("tab=shared&createdWithin=7"),
+    );
+    expect(invalid?.toString()).toBe("tab=shared");
+
+    const redundantAll = sanitizeDocumentsLibrarySearchParams(
+      new URLSearchParams("tab=shared&createdWithin=all"),
+    );
+    expect(redundantAll?.toString()).toBe("tab=shared");
+  });
+
   it("preserves unrelated params when dropping invalid tab", () => {
     const next = sanitizeDocumentsLibrarySearchParams(
       new URLSearchParams("tab=bogus&q=deck"),

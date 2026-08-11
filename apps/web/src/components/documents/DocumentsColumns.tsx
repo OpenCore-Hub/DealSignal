@@ -5,9 +5,6 @@ import {
   Archive,
   ArrowCounterClockwise,
   Buildings,
-  CaretDown,
-  CaretUp,
-  CaretUpDown,
   DownloadSimple,
   Eye,
   Link as LinkIcon,
@@ -20,6 +17,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { FileTypeIcon } from "@/components/common/FileTypeIcon";
 import { HeatBadge } from "@/components/common/HeatBadge";
+import { SortableColumnHeader } from "@/components/common/SortableColumnHeader";
 import { DocumentStatusBadge } from "./DocumentStatusBadge";
 import { DocumentCategoryBadge } from "./DocumentCategoryBadge";
 import { RowActions } from "@/components/common/RowActions";
@@ -27,7 +25,7 @@ import { formatDate, formatFileSize } from "@/lib/formatters";
 import { documentsSharePath } from "@/lib/documentsSharePath";
 import { canAddDocumentToDealRoom } from "@/lib/documentCategory";
 import { cn } from "@/lib/utils";
-import type { Column, ColumnDef } from "@tanstack/react-table";
+import type { ColumnDef } from "@tanstack/react-table";
 import { documentHeatFromLinks } from "@/lib/heat/documentHeat";
 import type { Document, HeatLevel, Link } from "@/types";
 
@@ -70,31 +68,6 @@ interface UseDocumentColumnsOptions {
   onDelete?: (doc: DocumentRow) => void;
   returnTo?: string;
   returnLabel?: string;
-}
-
-function SortableHeader({ column, label }: { column: Column<DocumentRow>; label: string }) {
-  const sorted = column.getIsSorted();
-  return (
-    <Button
-      variant="ghost"
-      size="sm"
-      className={cn(
-        "-ml-2 h-8 gap-1 px-2",
-        "text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/70",
-        "hover:bg-transparent hover:text-foreground",
-      )}
-      onClick={column.getToggleSortingHandler()}
-    >
-      {label}
-      {sorted === "asc" ? (
-        <CaretUp size={12} />
-      ) : sorted === "desc" ? (
-        <CaretDown size={12} />
-      ) : (
-        <CaretUpDown size={12} className="opacity-50" />
-      )}
-    </Button>
-  );
 }
 
 export function useDocumentColumns({
@@ -167,7 +140,7 @@ export function useDocumentColumns({
       {
         accessorKey: "heatLevel",
         header: ({ column }) => (
-          <SortableHeader column={column} label={t("documents:columns.heat")} />
+          <SortableColumnHeader column={column} label={t("documents:columns.heat")} />
         ),
         sortingFn: (rowA, rowB) => {
           const rank = { hot: 2, warm: 1, cold: 0 } as const;
@@ -183,7 +156,7 @@ export function useDocumentColumns({
       {
         accessorKey: "totalViews",
         header: ({ column }) => (
-          <SortableHeader column={column} label={t("documents:columns.views")} />
+          <SortableColumnHeader column={column} label={t("documents:columns.views")} />
         ),
         sortingFn: "basic",
         cell: ({ row }) => (

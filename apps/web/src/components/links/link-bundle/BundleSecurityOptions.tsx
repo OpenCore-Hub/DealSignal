@@ -166,7 +166,8 @@ export function BundleSecurityOptions({
         <OptionRow
           icon={EnvelopeIcon}
           label={t("creator.requireEmailVerification")}
-          checked={config.requireEmailVerification}
+          // NDA forces email verification (same as Create link / toCreateLinkPayload).
+          checked={config.requireEmailVerification || config.ndaEnabled}
           disabled={config.ndaEnabled}
           onCheckedChange={(checked) =>
             update({
@@ -176,7 +177,9 @@ export function BundleSecurityOptions({
           }
           data-testid="security-switch-requireEmailVerification"
         >
-          {config.requireEmailVerification ? contactSelector : null}
+          {config.requireEmailVerification || config.ndaEnabled
+            ? contactSelector
+            : null}
         </OptionRow>
       </Section>
 

@@ -24,3 +24,10 @@ export function isLibraryShareableUpload(
   const category = (detail.category ?? "general").trim().toLowerCase();
   return category === "general" || category === "";
 }
+
+/** Share dialog must not open until ingestion finishes (upload HTTP ≠ ready). */
+export function isDocumentReadyForLibraryShare(
+  status: string | undefined | null,
+): boolean {
+  return (status ?? "").trim().toLowerCase() === "ready";
+}

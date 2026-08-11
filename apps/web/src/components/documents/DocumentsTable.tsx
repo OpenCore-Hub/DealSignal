@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useDeferredValue, useEffect, useRef, useState, type ReactNode } from "react";
 import { apiErrorMessage } from "@/lib/apiErrors";
 import { filterUploadSelection, notifyUploadSelectionFiltered } from "@/lib/uploadFileFilters";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router";
@@ -10,13 +10,19 @@ import {
   flexRender,
   type SortingState,
 } from "@tanstack/react-table";
-import { FilePdf, Link as LinkIcon, MagnifyingGlass, Plus, Download } from "@phosphor-icons/react";
+import { CalendarBlank, FilePdf, Link as LinkIcon, MagnifyingGlass, Plus, Download } from "@phosphor-icons/react";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { DocumentFilter } from "@/types";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+} from "@/components/ui/select";
 import {
   Dialog,
   DialogContent,
@@ -55,6 +61,14 @@ import {
   documentsCreateLinkPath,
   sanitizeDocumentsLibrarySearchParams,
 } from "@/lib/documentsSharePath";
+import {
+  isLinkCreatedWithin,
+  LINK_CREATED_WITHIN_VALUES,
+  parseLinkCreatedWithin,
+  SHARE_CREATED_WITHIN_PARAM,
+  SHARE_SEARCH_PARAM,
+  type LinkCreatedWithin,
+} from "@/lib/shareLinksFilter";
 import { AgreementDocumentCard } from "./AgreementDocumentCard";
 import { buildDocumentRows, useDocumentColumns, type DocumentRow } from "./DocumentsColumns";
 import { AddToDealRoomDialog } from "./AddToDealRoomDialog";
@@ -62,6 +76,7 @@ import { DocumentShareDialog } from "./DocumentShareDialog";
 import {
   DOCUMENTS_UPLOADED_EVENT,
   dispatchDocumentsUploaded,
+  isDocumentReadyForLibraryShare,
   isLibraryShareableUpload,
   type DocumentsUploadedDetail,
 } from "@/lib/documentsUploadedEvent";
@@ -106,6 +121,62 @@ export function DocumentsTable({ category }: DocumentsTableProps) {
   const shareDocumentId = searchParams.get("documentId") ?? undefined;
   const shareDocumentTitle = searchParams.get("documentTitle") ?? undefined;
   const showShareTab = !category && filter === "shared";
+  const shareQFromUrl = searchParams.get(SHARE_SEARCH_PARAM) ?? "";
+  const shareCreatedWithin = parseLinkCreatedWithin(
+    searchParams.get(SHARE_CREATED_WITHIN_PARAM),
+  );
+  const [shareSearchInput, setShareSearchInput] = useState(shareQFromUrl);
+  const deferredShareSearch = useDeferredValue(shareSearchInput);
+  // Prevent URL echo from clobbering in-flight keystrokes after we write shareQ.
+  const lastWrittenShareQRef = useRef(shareQFromUrl);
+
+  // External URL changes only (back/forward / sanitize) — skip our own writes.
+  useEffect(() => {
+    if (shareQFromUrl === lastWrittenShareQRef.current) return;
+    lastWrittenShareQRef.current = shareQFromUrl;
+    setShareSearchInput(shareQFromUrl);
+  }, [shareQFromUrl]);
+
+  // Persist settled search to the URL without depending on searchParams identity.
+  useEffect(() => {
+    if (!showShareTab) return;
+    const nextQ = deferredShareSearch.trim();
+    if (nextQ === lastWrittenShareQRef.current) return;
+    lastWrittenShareQRef.current = nextQ;
+    setSearchParams((prev) => {
+      const currentQ = prev.get(SHARE_SEARCH_PARAM) ?? "";
+      if (nextQ === currentQ) return prev;
+      const next = new URLSearchParams(prev);
+      if (nextQ) next.set(SHARE_SEARCH_PARAM, nextQ);
+      else next.delete(SHARE_SEARCH_PARAM);
+      return next;
+    }, { replace: true });
+  }, [deferredShareSearch, showShareTab, setSearchParams]);
+
+  const patchShareListParams = (
+    patch: { shareQ?: string | null; createdWithin?: LinkCreatedWithin | null },
+  ) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if ("shareQ" in patch) {
+        const q = patch.shareQ?.trim() ?? "";
+        if (q) next.set(SHARE_SEARCH_PARAM, q);
+        else next.delete(SHARE_SEARCH_PARAM);
+      }
+      if ("createdWithin" in patch) {
+        const within = patch.createdWithin ?? "all";
+        if (within === "all") next.delete(SHARE_CREATED_WITHIN_PARAM);
+        else next.set(SHARE_CREATED_WITHIN_PARAM, within);
+      }
+      return next;
+    }, { replace: true });
+  };
+
+  const clearShareListFilters = () => {
+    setShareSearchInput("");
+    lastWrittenShareQRef.current = "";
+    patchShareListParams({ shareQ: null, createdWithin: "all" });
+  };
 
   const openUpload = () => {
     if (isAgreement) {
@@ -185,6 +256,11 @@ export function DocumentsTable({ category }: DocumentsTableProps) {
 
   const [docToAddToRoom, setDocToAddToRoom] = useState<DocumentRow | null>(null);
   const [docToShare, setDocToShare] = useState<DocumentRow | null>(null);
+  /** Upload handoff: open Share only after this document becomes ready. */
+  const [pendingShareHandoff, setPendingShareHandoff] = useState<{
+    documentId: string;
+    documentTitle: string;
+  } | null>(null);
   const [docToArchive, setDocToArchive] = useState<DocumentRow | null>(null);
   const [archiveImpact, setArchiveImpact] = useState<{
     activeLinkCount: number;
@@ -289,35 +365,41 @@ export function DocumentsTable({ category }: DocumentsTableProps) {
     return () => clearInterval(interval);
   }, [data, refetch]);
 
-  const buildShareRow = (detail: DocumentsUploadedDetail): DocumentRow => ({
-    id: detail.documentId,
-    title: detail.documentTitle,
-    sourceType: "pdf",
-    fileName: detail.documentTitle,
-    fileType: "pdf",
-    fileSize: 0,
-    pageCount: 0,
-    status: (detail.status as DocumentRow["status"]) || "processing",
-    category: detail.category,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    links: [],
-    totalViews: 0,
-    heatLevel: "cold" as HeatLevel,
-  });
+  const buildShareRow = (detail: DocumentsUploadedDetail): DocumentRow => {
+    const category =
+      detail.category === "general" ||
+      detail.category === "agreement" ||
+      detail.category === "deal_room"
+        ? detail.category
+        : "general";
+    return {
+      id: detail.documentId,
+      title: detail.documentTitle,
+      sourceType: "pdf",
+      fileName: detail.documentTitle,
+      fileType: "pdf",
+      fileSize: 0,
+      pageCount: 0,
+      status: (detail.status as DocumentRow["status"]) || "processing",
+      category,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      links: [],
+      totalViews: 0,
+      heatLevel: "cold" as HeatLevel,
+    };
+  };
 
-  // Upload page handoff: ?shareDocumentId=… opens Share dialog after navigate.
+  // Upload page handoff: never open Share while status is still processing/uploading.
+  // Root cause: POST /documents returns before ingestion is ready; old code opened the
+  // dialog immediately with notReady, right after "Upload now".
   useEffect(() => {
     if (isAgreement || category) return;
-    const documentId = searchParams.get("shareDocumentId");
+    const documentId = searchParams.get("shareDocumentId")?.trim();
     if (!documentId) return;
-    const detail: DocumentsUploadedDetail = {
-      documentId,
-      documentTitle: searchParams.get("shareDocumentTitle") || documentId,
-      status: searchParams.get("shareDocumentStatus") || "processing",
-      category: "general",
-    };
-    setDocToShare(buildShareRow(detail));
+    const documentTitle =
+      searchParams.get("shareDocumentTitle")?.trim() || documentId;
+    const status = searchParams.get("shareDocumentStatus") || "processing";
     setSearchParams(
       (prev) => {
         const next = new URLSearchParams(prev);
@@ -328,7 +410,34 @@ export function DocumentsTable({ category }: DocumentsTableProps) {
       },
       { replace: true },
     );
+    if (isDocumentReadyForLibraryShare(status)) {
+      setDocToShare(
+        buildShareRow({
+          documentId,
+          documentTitle,
+          status: "ready",
+          category: "general",
+        }),
+      );
+      return;
+    }
+    setPendingShareHandoff({ documentId, documentTitle });
   }, [category, isAgreement, searchParams, setSearchParams]);
+
+  // Open deferred Share once list polling marks the uploaded doc ready.
+  useEffect(() => {
+    if (!pendingShareHandoff || !data?.length) return;
+    const row = data.find((doc) => doc.id === pendingShareHandoff.documentId);
+    if (!row) return;
+    if (isDocumentReadyForLibraryShare(row.status)) {
+      setDocToShare(row);
+      setPendingShareHandoff(null);
+      return;
+    }
+    if (row.status === "failed" || row.status === "archived") {
+      setPendingShareHandoff(null);
+    }
+  }, [data, pendingShareHandoff]);
 
   // Refresh after in-page upload; toast Share action for general library uploads.
   useEffect(() => {
@@ -340,7 +449,16 @@ export function DocumentsTable({ category }: DocumentsTableProps) {
       toast.success(t("documents:share.uploadSuccess"), {
         action: {
           label: t("documents:share.uploadShareAction"),
-          onClick: () => setDocToShare(buildShareRow(detail!)),
+          onClick: () => {
+            if (isDocumentReadyForLibraryShare(detail!.status)) {
+              setDocToShare(buildShareRow(detail!));
+              return;
+            }
+            setPendingShareHandoff({
+              documentId: detail!.documentId,
+              documentTitle: detail!.documentTitle,
+            });
+          },
         },
       });
     };
@@ -408,6 +526,47 @@ export function DocumentsTable({ category }: DocumentsTableProps) {
         {filterTabs}
         <div className="space-y-4">
           <div className="flex flex-wrap items-center justify-end gap-3">
+            <div className="relative w-full min-w-[12rem] max-w-xs sm:w-56">
+              <MagnifyingGlass
+                size={16}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+              />
+              <Input
+                placeholder={t("links:table.searchPlaceholder")}
+                value={shareSearchInput}
+                onChange={(e) => setShareSearchInput(e.target.value)}
+                className="h-9 border-border/70 bg-background/80 pl-9 text-sm shadow-none backdrop-blur-sm"
+                data-testid="share-links-search"
+                aria-label={t("links:table.searchPlaceholder")}
+              />
+            </div>
+            <Select
+              value={shareCreatedWithin}
+              onValueChange={(value) => {
+                if (!isLinkCreatedWithin(value)) return;
+                patchShareListParams({ createdWithin: value });
+              }}
+            >
+              <SelectTrigger
+                className="h-9 min-w-[11.5rem] border-border/70 bg-background/80 shadow-none"
+                data-testid="share-created-within"
+                aria-label={t("links:table.createdWithinLabel")}
+              >
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <CalendarBlank size={14} className="shrink-0 text-muted-foreground" />
+                  <span className="truncate">
+                    {t(`links:table.createdWithin.${shareCreatedWithin}`)}
+                  </span>
+                </span>
+              </SelectTrigger>
+              <SelectContent align="end" alignItemWithTrigger={false}>
+                {LINK_CREATED_WITHIN_VALUES.map((value) => (
+                  <SelectItem key={value} value={value}>
+                    {t(`links:table.createdWithin.${value}`)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <Button
               onClick={() =>
                 navigate(
@@ -417,6 +576,7 @@ export function DocumentsTable({ category }: DocumentsTableProps) {
                 )
               }
               className="gap-1.5 shrink-0"
+              data-testid="share-create-link"
             >
               <Plus size={16} weight="bold" />
               {t("links:page.createLink")}
@@ -426,6 +586,9 @@ export function DocumentsTable({ category }: DocumentsTableProps) {
             embedded
             documentId={shareDocumentId}
             documentTitle={shareDocumentTitle}
+            searchQuery={deferredShareSearch}
+            createdWithin={shareCreatedWithin}
+            onClearListFilters={clearShareListFilters}
           />
         </div>
       </div>

@@ -3,6 +3,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   DOCUMENTS_UPLOADED_EVENT,
   dispatchDocumentsUploaded,
+  isDocumentReadyForLibraryShare,
   isLibraryShareableUpload,
 } from "./documentsUploadedEvent";
 
@@ -46,6 +47,13 @@ describe("documentsUploadedEvent", () => {
         category: "deal_room",
       }),
     ).toBe(false);
+  });
+
+  it("only treats ready as shareable for the Share dialog", () => {
+    expect(isDocumentReadyForLibraryShare("ready")).toBe(true);
+    expect(isDocumentReadyForLibraryShare("processing")).toBe(false);
+    expect(isDocumentReadyForLibraryShare("uploading")).toBe(false);
+    expect(isDocumentReadyForLibraryShare(undefined)).toBe(false);
   });
 
   it("dispatches a CustomEvent with detail", () => {

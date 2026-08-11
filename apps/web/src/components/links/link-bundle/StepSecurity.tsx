@@ -72,7 +72,8 @@ export function StepSecurity({ contacts = [] }: StepSecurityProps) {
           onChange={handleConfigChange}
           excludeNdaDocumentIds={state.selectedDocuments.map((d) => d.id)}
           contactSelector={
-            state.config.requireEmailVerification && workspaceSlug ? (
+            (state.config.requireEmailVerification || state.config.ndaEnabled) &&
+            workspaceSlug ? (
               <div className="animate-in fade-in-0 slide-in-from-top-1 duration-200">
                 <ContactSelector
                   workspaceSlug={workspaceSlug}
