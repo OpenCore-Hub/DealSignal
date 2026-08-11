@@ -966,6 +966,9 @@ export function PublicViewerPage() {
       }
     }, 50);
     return () => window.clearInterval(frame);
+    // The full tip object is intentionally excluded: restarting on progress
+    // renders would reset the 10s countdown.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [floatingTip?.id]);
 
   const selectedDoc = useMemo(() => {
