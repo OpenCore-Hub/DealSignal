@@ -1185,7 +1185,7 @@ type CountRecentActionOutcomesByWorkspaceRow struct {
 	Count   int64
 }
 
-// Closed-loop learning for Deal Radar: 30d done outcomes by signal subtype / action type.
+// Closed-loop learning for Deal Radar: 30d done outcomes by eventType / subtype / action type.
 func (q *Queries) CountRecentActionOutcomesByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]CountRecentActionOutcomesByWorkspaceRow, error) {
 	rows, err := q.db.Query(ctx, countRecentActionOutcomesByWorkspace, workspaceID)
 	if err != nil {
@@ -7074,6 +7074,114 @@ func (q *Queries) GetLatestKnowledgeSyncJobForRoom(ctx context.Context, roomID p
 		&i.Status,
 		&i.Attempts,
 		&i.LastError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getLatestPendingLinkAccessRequestByLink = `-- name: GetLatestPendingLinkAccessRequestByLink :one
+SELECT id, email, reason, signer_name, status, created_at, updated_at
+FROM link_access_requests r
+WHERE r.link_id = $1
+  AND r.status = 'pending'
+  AND (
+    $2::text IS NULL
+    OR BTRIM($2::text) = ''
+    OR LOWER(r.email) = LOWER(BTRIM($2::text))
+  )
+  AND NOT EXISTS (
+      SELECT 1
+      FROM workspace_members wm
+      JOIN users u ON u.id = wm.user_id
+      WHERE wm.workspace_id = r.workspace_id
+        AND LOWER(u.email) = LOWER(r.email)
+  )
+ORDER BY r.created_at DESC
+LIMIT 1
+`
+
+type GetLatestPendingLinkAccessRequestByLinkParams struct {
+	LinkID         pgtype.UUID
+	ApplicantEmail pgtype.Text
+}
+
+type GetLatestPendingLinkAccessRequestByLinkRow struct {
+	ID         pgtype.UUID
+	Email      string
+	Reason     pgtype.Text
+	SignerName pgtype.Text
+	Status     string
+	CreatedAt  pgtype.Timestamptz
+	UpdatedAt  pgtype.Timestamptz
+}
+
+// Radar Diligence-gate evidence: pending share-link access request.
+// When applicant_email is set, match that applicant (action title attribution).
+// Otherwise newest pending. Always exclude workspace members (same policy as
+// ListPendingDocumentLinkAccessRequestsByWorkspace / radar sync).
+func (q *Queries) GetLatestPendingLinkAccessRequestByLink(ctx context.Context, arg GetLatestPendingLinkAccessRequestByLinkParams) (GetLatestPendingLinkAccessRequestByLinkRow, error) {
+	row := q.db.QueryRow(ctx, getLatestPendingLinkAccessRequestByLink, arg.LinkID, arg.ApplicantEmail)
+	var i GetLatestPendingLinkAccessRequestByLinkRow
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.Reason,
+		&i.SignerName,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getLatestPendingRoomAccessRequestByRoom = `-- name: GetLatestPendingRoomAccessRequestByRoom :one
+SELECT id, email, reason, status, created_at, updated_at
+FROM room_access_requests r
+WHERE r.room_id = $1
+  AND r.status = 'pending'
+  AND (
+    $2::text IS NULL
+    OR BTRIM($2::text) = ''
+    OR LOWER(r.email) = LOWER(BTRIM($2::text))
+  )
+  AND NOT EXISTS (
+      SELECT 1
+      FROM workspace_members wm
+      JOIN users u ON u.id = wm.user_id
+      WHERE wm.workspace_id = r.workspace_id
+        AND LOWER(u.email) = LOWER(r.email)
+  )
+ORDER BY r.created_at DESC
+LIMIT 1
+`
+
+type GetLatestPendingRoomAccessRequestByRoomParams struct {
+	RoomID         pgtype.UUID
+	ApplicantEmail pgtype.Text
+}
+
+type GetLatestPendingRoomAccessRequestByRoomRow struct {
+	ID        pgtype.UUID
+	Email     string
+	Reason    pgtype.Text
+	Status    string
+	CreatedAt pgtype.Timestamptz
+	UpdatedAt pgtype.Timestamptz
+}
+
+// Radar Diligence-gate evidence: pending room membership request.
+// When applicant_email is set, match that applicant (action title attribution).
+// Otherwise newest pending. Always exclude workspace members (same policy as
+// ListPendingRoomAccessRequestsByWorkspace / radar sync).
+func (q *Queries) GetLatestPendingRoomAccessRequestByRoom(ctx context.Context, arg GetLatestPendingRoomAccessRequestByRoomParams) (GetLatestPendingRoomAccessRequestByRoomRow, error) {
+	row := q.db.QueryRow(ctx, getLatestPendingRoomAccessRequestByRoom, arg.RoomID, arg.ApplicantEmail)
+	var i GetLatestPendingRoomAccessRequestByRoomRow
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.Reason,
+		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -14880,7 +14988,14 @@ SELECT
             LIMIT 1
         ),
         COALESCE(l.name, '')
-    )::text AS document_title
+    )::text AS document_title,
+    EXISTS (
+        SELECT 1
+        FROM workspace_members wm
+        JOIN users u ON u.id = wm.user_id
+        WHERE wm.workspace_id = r.workspace_id
+          AND LOWER(u.email) = LOWER(r.email)
+    ) AS is_workspace_member
 FROM link_access_requests r
 JOIN links l ON l.id = r.link_id
 WHERE r.workspace_id = $1
@@ -14899,22 +15014,24 @@ type ListPendingDealRoomLinkAccessRequestsDetailedByWorkspaceParams struct {
 }
 
 type ListPendingDealRoomLinkAccessRequestsDetailedByWorkspaceRow struct {
-	ID            pgtype.UUID
-	LinkID        pgtype.UUID
-	Email         string
-	Reason        pgtype.Text
-	SignerName    pgtype.Text
-	Status        string
-	CreatedAt     pgtype.Timestamptz
-	UpdatedAt     pgtype.Timestamptz
-	LinkName      pgtype.Text
-	PublicToken   string
-	CustomDomain  pgtype.Text
-	DocumentTitle string
+	ID                pgtype.UUID
+	LinkID            pgtype.UUID
+	Email             string
+	Reason            pgtype.Text
+	SignerName        pgtype.Text
+	Status            string
+	CreatedAt         pgtype.Timestamptz
+	UpdatedAt         pgtype.Timestamptz
+	LinkName          pgtype.Text
+	PublicToken       string
+	CustomDomain      pgtype.Text
+	DocumentTitle     string
+	IsWorkspaceMember bool
 }
 
 // Deal-room share inbox: pending requests for links in one room only.
 // Creator-scoped: only link.created_by may see applicant emails.
+// is_workspace_member mirrors radar/action sync internal-actor filter.
 func (q *Queries) ListPendingDealRoomLinkAccessRequestsDetailedByWorkspace(ctx context.Context, arg ListPendingDealRoomLinkAccessRequestsDetailedByWorkspaceParams) ([]ListPendingDealRoomLinkAccessRequestsDetailedByWorkspaceRow, error) {
 	rows, err := q.db.Query(ctx, listPendingDealRoomLinkAccessRequestsDetailedByWorkspace, arg.WorkspaceID, arg.CreatedBy, arg.DealRoomID)
 	if err != nil {
@@ -14937,6 +15054,7 @@ func (q *Queries) ListPendingDealRoomLinkAccessRequestsDetailedByWorkspace(ctx c
 			&i.PublicToken,
 			&i.CustomDomain,
 			&i.DocumentTitle,
+			&i.IsWorkspaceMember,
 		); err != nil {
 			return nil, err
 		}
@@ -15029,7 +15147,14 @@ SELECT
             LIMIT 1
         ),
         COALESCE(l.name, '')
-    )::text AS document_title
+    )::text AS document_title,
+    EXISTS (
+        SELECT 1
+        FROM workspace_members wm
+        JOIN users u ON u.id = wm.user_id
+        WHERE wm.workspace_id = r.workspace_id
+          AND LOWER(u.email) = LOWER(r.email)
+    ) AS is_workspace_member
 FROM link_access_requests r
 JOIN links l ON l.id = r.link_id
 WHERE r.workspace_id = $1
@@ -15048,22 +15173,25 @@ type ListPendingDocumentLinkAccessRequestsDetailedByWorkspaceParams struct {
 }
 
 type ListPendingDocumentLinkAccessRequestsDetailedByWorkspaceRow struct {
-	ID            pgtype.UUID
-	LinkID        pgtype.UUID
-	Email         string
-	Reason        pgtype.Text
-	SignerName    pgtype.Text
-	Status        string
-	CreatedAt     pgtype.Timestamptz
-	UpdatedAt     pgtype.Timestamptz
-	LinkName      pgtype.Text
-	PublicToken   string
-	CustomDomain  pgtype.Text
-	DocumentTitle string
+	ID                pgtype.UUID
+	LinkID            pgtype.UUID
+	Email             string
+	Reason            pgtype.Text
+	SignerName        pgtype.Text
+	Status            string
+	CreatedAt         pgtype.Timestamptz
+	UpdatedAt         pgtype.Timestamptz
+	LinkName          pgtype.Text
+	PublicToken       string
+	CustomDomain      pgtype.Text
+	DocumentTitle     string
+	IsWorkspaceMember bool
 }
 
 // Document Library share inbox: document links only (never deal-room shares).
 // Creator-scoped: only link.created_by may see applicant emails.
+// is_workspace_member mirrors radar/action sync internal-actor filter so the
+// host inbox can label members (still actionable) without implying Deal Radar.
 func (q *Queries) ListPendingDocumentLinkAccessRequestsDetailedByWorkspace(ctx context.Context, arg ListPendingDocumentLinkAccessRequestsDetailedByWorkspaceParams) ([]ListPendingDocumentLinkAccessRequestsDetailedByWorkspaceRow, error) {
 	rows, err := q.db.Query(ctx, listPendingDocumentLinkAccessRequestsDetailedByWorkspace, arg.WorkspaceID, arg.CreatedBy)
 	if err != nil {
@@ -15086,6 +15214,7 @@ func (q *Queries) ListPendingDocumentLinkAccessRequestsDetailedByWorkspace(ctx c
 			&i.PublicToken,
 			&i.CustomDomain,
 			&i.DocumentTitle,
+			&i.IsWorkspaceMember,
 		); err != nil {
 			return nil, err
 		}

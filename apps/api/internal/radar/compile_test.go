@@ -594,6 +594,31 @@ func TestCompileDealNameHasNoEnglishFallback(t *testing.T) {
 	}
 }
 
+func TestCompileAccessRequestActorFromTitle(t *testing.T) {
+	now := time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC)
+	feed := Compile(CompileInput{
+		WorkspaceSlug: "acme",
+		Now:           now,
+		Actions: []db.ActionItem{{
+			ID: mustUUID(uuid.New()),
+			Title: "Approve access request from buyer@acme.test for Pitch",
+			Impact: "high", Status: "pending",
+			ActionType: "approve", SourceType: pgText(action.SourceTypeLinkAccessRequest),
+			SourceID: pgText(uuid.New().String()),
+			CreatedAt: pgTime(now), DueAt: pgTime(now.Add(time.Hour)), UpdatedAt: pgTime(now),
+		}},
+	})
+	if len(feed.Items) != 1 {
+		t.Fatalf("items=%d", len(feed.Items))
+	}
+	if feed.Items[0].ContactEmail != "buyer@acme.test" {
+		t.Fatalf("contactEmail=%q", feed.Items[0].ContactEmail)
+	}
+	if feed.Items[0].Actor != "buyer@acme.test" {
+		t.Fatalf("actor=%q", feed.Items[0].Actor)
+	}
+}
+
 // sameDualProductActions builds one diligence_gate + one buying_window pair for scenario rank tests.
 func sameDualProductActions(now time.Time, roomID string, sigHot uuid.UUID) []db.ActionItem {
 	return []db.ActionItem{

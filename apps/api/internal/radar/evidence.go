@@ -4,11 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/action"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/signal"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // ErrItemNotFound is returned when the radar work item (action) is missing.
@@ -30,15 +33,27 @@ type EvidencePack struct {
 	NavigatePath   string            `json:"navigatePath,omitempty"`
 	EvidencePath   string            `json:"evidencePath,omitempty"`
 	InsightsPath   string            `json:"insightsPath,omitempty"`
-	Metrics        *EvidenceMetrics  `json:"metrics,omitempty"`
-	KeyPageTitles  []string          `json:"keyPageTitles,omitempty"`
-	TopPages       []EvidencePage    `json:"topPages,omitempty"`
-	RecentVisitors []EvidenceVisitor `json:"recentVisitors,omitempty"`
-	SecurityEvents []EvidenceEvent   `json:"securityEvents,omitempty"`
+	Metrics        *EvidenceMetrics       `json:"metrics,omitempty"`
+	AccessRequest  *EvidenceAccessRequest `json:"accessRequest,omitempty"`
+	KeyPageTitles  []string               `json:"keyPageTitles,omitempty"`
+	TopPages       []EvidencePage         `json:"topPages,omitempty"`
+	RecentVisitors []EvidenceVisitor      `json:"recentVisitors,omitempty"`
+	SecurityEvents []EvidenceEvent        `json:"securityEvents,omitempty"`
 	// DegradedSections lists evidence facets that failed to load. Empty means
 	// complete enrichment (or no link to enrich). Never silently pretend a
 	// failed metrics query is "zero engagement".
 	DegradedSections []string `json:"degradedSections,omitempty"`
+}
+
+// EvidenceAccessRequest is the pending authorization application for Diligence gate.
+type EvidenceAccessRequest struct {
+	Email       string `json:"email"`
+	Reason      string `json:"reason,omitempty"`
+	SignerName  string `json:"signerName,omitempty"`
+	Status      string `json:"status"`
+	RequestedAt string `json:"requestedAt"`
+	// Surface: document_link | deal_room_link | room
+	Surface string `json:"surface"`
 }
 
 func (p *EvidencePack) noteDegraded(section string) {
@@ -174,6 +189,9 @@ func (s *Service) GetEvidence(ctx context.Context, workspaceID, itemID, workspac
 		}
 	}
 
+	src := textOrEmpty(action.SourceType)
+	s.enrichAccessRequestEvidence(ctx, &pack, product, src, item)
+
 	if item.LinkID == "" {
 		return pack, nil
 	}
@@ -202,6 +220,8 @@ func (s *Service) GetEvidence(ctx context.Context, workspaceID, itemID, workspac
 		pack.Metrics.CaptureAttempts24h = int(captures)
 	}
 
+	// Engagement trail is secondary for Diligence gate (visitor often still blocked).
+	// Still load when present so hosts see post-access activity if any.
 	if pages, err := s.queries.ListTopPagesByLink(ctx, linkUUID); err != nil {
 		pack.noteDegraded("top_pages")
 	} else {
@@ -238,7 +258,7 @@ func (s *Service) GetEvidence(ctx context.Context, workspaceID, itemID, workspac
 		}
 	}
 
-	if product == ProductLeakWatch || product == ProductAbuseGuard || product == ProductAccessDecay {
+	if includeLinkSecurityEvents(product) {
 		if events, err := s.queries.ListRecentSecurityEventsByLink(ctx, linkUUID); err != nil {
 			pack.noteDegraded("security_events")
 		} else {
@@ -259,6 +279,108 @@ func (s *Service) GetEvidence(ctx context.Context, workspaceID, itemID, workspac
 	}
 
 	return pack, nil
+}
+
+func includeLinkSecurityEvents(product Product) bool {
+	switch product {
+	case ProductLeakWatch, ProductAbuseGuard, ProductAccessDecay, ProductDiligenceGate:
+		return true
+	default:
+		return false
+	}
+}
+
+// diligenceApplicantEmail resolves the external applicant attributed on the
+// radar card. Prefer structured contactEmail/actor; fall back to the action
+// title ("… from <email> for|on …") used by sync/compile internal-actor filter.
+func diligenceApplicantEmail(item WorkItem) string {
+	if email := strings.TrimSpace(item.ContactEmail); email != "" {
+		return email
+	}
+	if actor := strings.TrimSpace(item.Actor); strings.Count(actor, "@") == 1 {
+		return actor
+	}
+	return emailFromActionTitle(item.Headline)
+}
+
+func applicantEmailArg(email string) pgtype.Text {
+	email = strings.TrimSpace(email)
+	if email == "" {
+		return pgtype.Text{}
+	}
+	return pgtype.Text{String: email, Valid: true}
+}
+
+func (s *Service) enrichAccessRequestEvidence(
+	ctx context.Context,
+	pack *EvidencePack,
+	product Product,
+	sourceType string,
+	item WorkItem,
+) {
+	if pack == nil || product != ProductDiligenceGate {
+		return
+	}
+	applicant := diligenceApplicantEmail(item)
+	switch sourceType {
+	case action.SourceTypeLinkAccessRequest, action.SourceTypeDealRoomLinkAccessRequest:
+		if item.LinkID == "" {
+			return
+		}
+		linkUUID, err := pgUUID(item.LinkID)
+		if err != nil {
+			pack.noteDegraded("access_request")
+			return
+		}
+		row, err := s.queries.GetLatestPendingLinkAccessRequestByLink(ctx, db.GetLatestPendingLinkAccessRequestByLinkParams{
+			LinkID:          linkUUID,
+			ApplicantEmail:  applicantEmailArg(applicant),
+		})
+		if err != nil {
+			if !errors.Is(err, pgx.ErrNoRows) {
+				pack.noteDegraded("access_request")
+			}
+			return
+		}
+		surface := "document_link"
+		if sourceType == action.SourceTypeDealRoomLinkAccessRequest {
+			surface = "deal_room_link"
+		}
+		pack.AccessRequest = &EvidenceAccessRequest{
+			Email:       row.Email,
+			Reason:      textOrEmpty(row.Reason),
+			SignerName:  textOrEmpty(row.SignerName),
+			Status:      row.Status,
+			RequestedAt: row.CreatedAt.Time.UTC().Format(time.RFC3339),
+			Surface:     surface,
+		}
+	case action.SourceTypeRoomAccessRequest:
+		if item.DealRoomID == "" {
+			return
+		}
+		roomUUID, err := pgUUID(item.DealRoomID)
+		if err != nil {
+			pack.noteDegraded("access_request")
+			return
+		}
+		row, err := s.queries.GetLatestPendingRoomAccessRequestByRoom(ctx, db.GetLatestPendingRoomAccessRequestByRoomParams{
+			RoomID:         roomUUID,
+			ApplicantEmail: applicantEmailArg(applicant),
+		})
+		if err != nil {
+			if !errors.Is(err, pgx.ErrNoRows) {
+				pack.noteDegraded("access_request")
+			}
+			return
+		}
+		pack.AccessRequest = &EvidenceAccessRequest{
+			Email:       row.Email,
+			Reason:      textOrEmpty(row.Reason),
+			Status:      row.Status,
+			RequestedAt: row.CreatedAt.Time.UTC().Format(time.RFC3339),
+			Surface:     "room",
+		}
+	}
 }
 
 func insightsPath(slug, linkID, documentID string) string {

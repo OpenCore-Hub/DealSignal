@@ -89,6 +89,9 @@ func TestPendingAccessRequestInboxSQLScopes(t *testing.T) {
 	if !strings.Contains(doc, "created_by") {
 		t.Fatal("document pending inbox must remain creator-scoped")
 	}
+	if !strings.Contains(doc, "is_workspace_member") {
+		t.Fatal("document pending inbox must expose is_workspace_member for radar honesty labels")
+	}
 
 	room := extractNamedQuery(sql, "ListPendingDealRoomLinkAccessRequestsDetailedByWorkspace")
 	if room == "" {
@@ -99,6 +102,9 @@ func TestPendingAccessRequestInboxSQLScopes(t *testing.T) {
 	}
 	if !strings.Contains(room, "created_by") {
 		t.Fatal("deal-room pending inbox must remain creator-scoped")
+	}
+	if !strings.Contains(room, "is_workspace_member") {
+		t.Fatal("deal-room pending inbox must expose is_workspace_member for radar honesty labels")
 	}
 
 	// Unscoped detailed inbox must not exist — that would mix applicant PII.
@@ -123,6 +129,24 @@ func TestPendingAccessRequestInboxSQLScopes(t *testing.T) {
 	}
 	if extractNamedQuery(sql, "ListPendingLinkAccessRequestsByWorkspace") != "" {
 		t.Fatal("unscoped ListPendingLinkAccessRequestsByWorkspace must be removed")
+	}
+
+	// Diligence Evidence enrichment must exclude workspace members and support
+	// applicant-email attribution (not "any latest pending on the link/room").
+	for _, name := range []string{
+		"GetLatestPendingLinkAccessRequestByLink",
+		"GetLatestPendingRoomAccessRequestByRoom",
+	} {
+		q := extractNamedQuery(sql, name)
+		if q == "" {
+			t.Fatalf("missing %s", name)
+		}
+		if !strings.Contains(q, "workspace_members") || !strings.Contains(q, "NOT EXISTS") {
+			t.Fatalf("%s must exclude workspace-member applicants", name)
+		}
+		if !strings.Contains(q, "applicant_email") {
+			t.Fatalf("%s must accept applicant_email for action attribution", name)
+		}
 	}
 
 	feed := extractNamedQuery(sql, "ListActionItemsByWorkspaceForUser")

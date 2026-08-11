@@ -379,6 +379,24 @@ components:
               lastAccessAt:
                 type: string
                 format: date-time
+        accessRequest:
+          type: object
+          description: Pending authorization request (Diligence gate primary evidence).
+          properties:
+            email:
+              type: string
+            reason:
+              type: string
+            signerName:
+              type: string
+            status:
+              type: string
+            requestedAt:
+              type: string
+              format: date-time
+            surface:
+              type: string
+              enum: [document_link, deal_room_link, room]
         securityEvents:
           type: array
           items:
@@ -398,7 +416,7 @@ components:
           description: Facets that failed to load — empty counters are not zero engagement.
           items:
             type: string
-            enum: [metrics, top_pages, recent_visitors, security_events, link_id]
+            enum: [metrics, top_pages, recent_visitors, security_events, link_id, access_request]
     UpdateRadarItemRequest:
       type: object
       required: [status]
