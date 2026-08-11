@@ -136,15 +136,14 @@
     "snooze3d": "Snooze 3 days",
     "snooze7d": "Snooze 7 days",
     "snoozed": "Suggestion snoozed for {{hours}}h",
-    "emailSubject": "Follow-up: {{document}}",
-    "emailBody": "Hi,\n\nFollowing up on {{document}} (regarding {{action}}).\n\nBest regards",
     "score": "{{score}} pts"
   },
   "access": {
     "title": "Access audit",
     "description": "Permission and gate failures — slice by type, data room, link owner, and folder.",
+    "scopeHint": "This tab audits permission and gate failures only. Pending authorization requests are reviewed in Share and are not counted in Denied attempts.",
     "kpiTotal": "Denied attempts",
-    "kpiTotalHint": "Last {{days}} days (UTC)",
+    "kpiTotalHint": "Gate failures only · last {{days}} days (UTC)",
     "byTypeTitle": "By event type",
     "byRoomTitle": "By data room",
     "byMemberTitle": "By link owner",
@@ -157,10 +156,14 @@
     "activeFilters": "Filters:",
     "clearFilters": "Clear",
     "emptyTitle": "No access denials",
-    "emptyDescription": "Blocked emails, password failures, and invite issues appear here when visitors hit a gate.",
+    "emptyDescription": "Blocked emails, password failures, and invite issues appear here when visitors hit a gate. Authorization requests live in Documents → Share.",
+    "pendingRequestsBanner_one": "{{count}} pending access request is waiting in Share (not counted above).",
+    "pendingRequestsBanner_other": "{{count}} pending access requests are waiting in Share (not counted above).",
+    "pendingRequestsCta": "Open Share",
     "eventsTitle": "Recent events",
     "colTime": "Time",
     "colType": "Type",
+    "colEvent": "Event",
     "colActor": "Visitor",
     "colTarget": "Target",
     "colMember": "Link owner",
@@ -187,6 +190,15 @@
       "invite_token_expired": "Invite expired",
       "invite_token_revoked": "Invite revoked",
       "rate_limit_exceeded": "Rate limit exceeded"
+    },
+    "reasons": {
+      "email_code_required": "Email verification required",
+      "email_required": "Email required",
+      "invalid_email_code": "Invalid verification code",
+      "nda_required": "NDA required",
+      "password": "Password required or incorrect",
+      "delivery_email_mismatch": "Delivery email mismatch",
+      "archived": "Link archived"
     }
   },
   "keyPages": {

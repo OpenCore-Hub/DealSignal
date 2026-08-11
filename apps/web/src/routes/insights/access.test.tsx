@@ -12,8 +12,9 @@ import type { AccessAudit } from "@/lib/api";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-const { getAccessAuditMock } = vi.hoisted(() => ({
+const { getAccessAuditMock, getPendingLinkAccessRequestsMock } = vi.hoisted(() => ({
   getAccessAuditMock: vi.fn(),
+  getPendingLinkAccessRequestsMock: vi.fn(),
 }));
 
 vi.mock("@/lib/api", async () => {
@@ -23,6 +24,7 @@ vi.mock("@/lib/api", async () => {
     api: {
       ...actual.api,
       getAccessAudit: getAccessAuditMock,
+      getPendingLinkAccessRequests: getPendingLinkAccessRequestsMock,
     },
   };
 });
@@ -32,8 +34,8 @@ const mockAudit: AccessAudit = {
   generatedAt: "2026-08-08T04:00:00Z",
   totalEvents: 2,
   byType: [
+    { eventType: "security_gate_failed", count: 1 },
     { eventType: "invalid_password", count: 1 },
-    { eventType: "blocked_email", count: 1 },
   ],
   byDealRoom: [
     { dealRoomId: "room-1", dealRoomName: "Series A", count: 1 },
@@ -51,8 +53,21 @@ const mockAudit: AccessAudit = {
   events: [
     {
       id: "ev-1",
-      eventType: "invalid_password",
+      eventType: "security_gate_failed",
       createdAt: "2026-08-07T12:00:00Z",
+      documentTitle: "Pitch Deck",
+      dealRoomName: "Series A",
+      dealRoomId: "room-1",
+      email: "buyer@example.com",
+      reason: "email_code_required",
+      memberId: "member-1",
+      memberEmail: "owner@example.com",
+      folderPath: "Finance",
+    },
+    {
+      id: "ev-2",
+      eventType: "invalid_password",
+      createdAt: "2026-08-07T11:00:00Z",
       documentTitle: "Pitch Deck",
       dealRoomName: "Series A",
       dealRoomId: "room-1",
@@ -108,18 +123,49 @@ async function renderPage() {
 describe("InsightsAccessPage", () => {
   beforeEach(() => {
     getAccessAuditMock.mockReset();
+    getPendingLinkAccessRequestsMock.mockReset();
     getAccessAuditMock.mockResolvedValue(mockAudit);
+    getPendingLinkAccessRequestsMock.mockResolvedValue({ data: [] });
   });
 
-  it("renders type buckets and event rows", async () => {
+  it("renders type buckets and reason-first event rows", async () => {
     await renderPage();
     await waitFor(() => expect(getAccessAuditMock).toHaveBeenCalled());
     expect(screen.queryByText("By data room")).not.toBeInTheDocument();
-    expect(screen.queryByText("By folder")).not.toBeInTheDocument();
     expect(screen.getByText("Denied attempts")).toBeInTheDocument();
-    expect(screen.getByText("buyer@example.com")).toBeInTheDocument();
-    expect(screen.getByText("Pitch Deck")).toBeInTheDocument();
+    expect(screen.getByTestId("access-scope-hint")).toBeInTheDocument();
+    expect(screen.getByText("Email verification required")).toBeInTheDocument();
+    expect(screen.getAllByText("Security gate failed").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Invalid password").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("buyer@example.com").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Pitch Deck").length).toBeGreaterThan(0);
     expect(screen.getAllByText("owner@example.com").length).toBeGreaterThan(0);
+  });
+
+  it("bridges pending Share access requests without changing denial KPIs", async () => {
+    getPendingLinkAccessRequestsMock.mockResolvedValue({
+      data: [
+        {
+          id: "lar_1",
+          link_id: "link_1",
+          email: "visitor@example.com",
+          status: "pending",
+          created_at: "2026-08-07T12:00:00Z",
+          updated_at: "2026-08-07T12:00:00Z",
+        },
+      ],
+    });
+    await renderPage();
+    await waitFor(() =>
+      expect(screen.getByTestId("access-pending-requests-bridge")).toBeInTheDocument(),
+    );
+    expect(getPendingLinkAccessRequestsMock).toHaveBeenCalledWith({ scope: "document" });
+    const cta = screen.getByRole("link", { name: /Open Share/i });
+    expect(cta).toHaveAttribute("href", "/acme/documents?tab=shared");
+    // Denied KPI stays audit totalEvents (2), not pending request count (1).
+    expect(screen.getByText("Denied attempts").closest("[data-slot='card']")).toHaveTextContent(
+      /^[\s\S]*2[\s\S]*Gate failures only/,
+    );
   });
 
   it("filters by event type when a bucket is clicked", async () => {

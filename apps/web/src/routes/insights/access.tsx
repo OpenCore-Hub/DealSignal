@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { ShieldWarning } from "@phosphor-icons/react";
+import { Link, useParams } from "react-router";
+import { ArrowRight, ShieldWarning } from "@phosphor-icons/react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/common/EmptyState";
 import {
@@ -9,20 +10,17 @@ import {
   useInsightsRange,
 } from "@/components/insights/InsightsRangeControls";
 import { api, type AccessAuditEvent } from "@/lib/api";
+import {
+  accessEventPrimaryLabel,
+  accessEventSecondaryLabel,
+  accessEventTypeLabel,
+} from "@/lib/accessEventLabels";
+import { documentsSharePath } from "@/lib/documentsSharePath";
 import { useAsyncData } from "@/hooks/useAsyncData";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 
 const PAGE_SIZE = 25;
-
-function eventTypeLabel(
-  t: (key: string, opts?: Record<string, unknown>) => string,
-  eventType: string,
-): string {
-  const key = `access.eventTypes.${eventType}`;
-  const labeled = t(key);
-  return labeled === key ? eventType : labeled;
-}
 
 function downloadAccessCsv(events: AccessAuditEvent[], filename: string) {
   const header = [
@@ -78,6 +76,7 @@ export function InsightsAccessPage() {
   const { t: tc } = useTranslation("common");
   const { i18n } = useTranslation();
   const locale = i18n.language;
+  const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
   const rangeCtl = useInsightsRange(30);
   const [eventType, setEventType] = useState<string>("");
   const [memberId, setMemberId] = useState<string>("");
@@ -94,6 +93,12 @@ export function InsightsAccessPage() {
       }),
     [rangeCtl.apiParams, eventType, memberId, offset],
   );
+
+  // Ops bridge only — never merged into Denied attempts KPI.
+  const { data: pendingShareRequests } = useAsyncData(async () => {
+    const res = await api.getPendingLinkAccessRequests({ scope: "document" });
+    return res.data ?? [];
+  }, []);
 
   if (error) {
     return (
@@ -121,6 +126,8 @@ export function InsightsAccessPage() {
   const hasEvents = data.totalEvents > 0;
   const byMember = data.byMember ?? [];
   const hasActiveFilters = Boolean(eventType || memberId);
+  const pendingCount = pendingShareRequests?.length ?? 0;
+  const sharePath = workspaceSlug ? documentsSharePath(workspaceSlug) : null;
 
   return (
     <div className="space-y-6">
@@ -160,6 +167,32 @@ export function InsightsAccessPage() {
         </Button>
       </div>
 
+      <p className="text-sm text-muted-foreground" data-testid="access-scope-hint">
+        {t("access.scopeHint")}
+      </p>
+
+      {pendingCount > 0 && sharePath ? (
+        <div
+          className="flex flex-col gap-3 rounded-lg border border-border bg-muted/40 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+          data-testid="access-pending-requests-bridge"
+          role="status"
+        >
+          <p className="text-sm text-foreground">
+            {t("access.pendingRequestsBanner", { count: pendingCount })}
+          </p>
+          <Link
+            to={sharePath}
+            className={cn(
+              buttonVariants({ variant: "outline", size: "sm" }),
+              "shrink-0 gap-1 self-start sm:self-center",
+            )}
+          >
+            {t("access.pendingRequestsCta")}
+            <ArrowRight size={14} />
+          </Link>
+        </div>
+      ) : null}
+
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
         <Card>
           <CardHeader className="pb-2">
@@ -197,7 +230,7 @@ export function InsightsAccessPage() {
                     eventType === row.eventType && "bg-muted",
                   )}
                 >
-                  <span className="truncate">{eventTypeLabel(t, row.eventType)}</span>
+                  <span className="truncate">{accessEventTypeLabel(t, row.eventType)}</span>
                   <span className="tabular-nums text-muted-foreground">{row.count}</span>
                 </button>
               ))
@@ -258,7 +291,7 @@ export function InsightsAccessPage() {
                 setOffset(0);
               }}
             >
-              {eventTypeLabel(t, eventType)}
+              {accessEventTypeLabel(t, eventType)}
             </Button>
           ) : null}
           {memberId ? (
@@ -300,49 +333,58 @@ export function InsightsAccessPage() {
             <CardTitle className="text-h2">{t("access.eventsTitle")}</CardTitle>
           </CardHeader>
           <CardContent className="overflow-x-auto">
-            <table className="w-full min-w-[800px] text-left text-sm">
+            <table className="w-full min-w-[720px] text-left text-sm">
               <thead>
                 <tr className="border-b border-border text-muted-foreground">
                   <th className="px-2 py-2 font-medium">{t("access.colTime")}</th>
-                  <th className="px-2 py-2 font-medium">{t("access.colType")}</th>
+                  <th className="px-2 py-2 font-medium">{t("access.colEvent")}</th>
                   <th className="px-2 py-2 font-medium">{t("access.colActor")}</th>
                   <th className="px-2 py-2 font-medium">{t("access.colTarget")}</th>
                   <th className="px-2 py-2 font-medium">{t("access.colMember")}</th>
-                  <th className="px-2 py-2 font-medium">{t("access.colReason")}</th>
                 </tr>
               </thead>
               <tbody>
-                {data.events.map((e) => (
-                  <tr key={e.id} className="border-b border-border/60 last:border-0">
-                    <td className="whitespace-nowrap px-2 py-2 text-muted-foreground">
-                      {new Date(e.createdAt).toLocaleString(locale, {
-                        month: "short",
-                        day: "numeric",
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
-                    </td>
-                    <td className="px-2 py-2">{eventTypeLabel(t, e.eventType)}</td>
-                    <td className="px-2 py-2">
-                      {e.email || e.visitorId || t("access.anonymous")}
-                    </td>
-                    <td className="px-2 py-2">
-                      <div className="truncate font-medium">
-                        {e.documentTitle || e.dealRoomName || t("access.unknownDocument")}
-                      </div>
-                      <div className="truncate text-caption text-muted-foreground">
-                        {e.dealRoomName || t("access.libraryScope")}
-                        {e.folderPath ? ` · ${e.folderPath}` : ""}
-                      </div>
-                    </td>
-                    <td className="max-w-[160px] truncate px-2 py-2 text-muted-foreground">
-                      {e.memberEmail || t("access.unknownMember")}
-                    </td>
-                    <td className="max-w-[220px] truncate px-2 py-2 text-muted-foreground">
-                      {e.reason || "—"}
-                    </td>
-                  </tr>
-                ))}
+                {data.events.map((e) => {
+                  const primary = accessEventPrimaryLabel(t, e.eventType, e.reason);
+                  const secondary = accessEventSecondaryLabel(t, e.eventType, e.reason);
+                  return (
+                    <tr key={e.id} className="border-b border-border/60 last:border-0">
+                      <td className="whitespace-nowrap px-2 py-2 text-muted-foreground">
+                        {new Date(e.createdAt).toLocaleString(locale, {
+                          month: "short",
+                          day: "numeric",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </td>
+                      <td className="px-2 py-2">
+                        <div className="font-medium">{primary}</div>
+                        {secondary ? (
+                          <div className="text-caption text-muted-foreground">{secondary}</div>
+                        ) : e.reason && e.eventType !== "security_gate_failed" ? (
+                          <div className="truncate text-caption text-muted-foreground" title={e.reason}>
+                            {e.reason}
+                          </div>
+                        ) : null}
+                      </td>
+                      <td className="px-2 py-2">
+                        {e.email || e.visitorId || t("access.anonymous")}
+                      </td>
+                      <td className="px-2 py-2">
+                        <div className="truncate font-medium">
+                          {e.documentTitle || e.dealRoomName || t("access.unknownDocument")}
+                        </div>
+                        <div className="truncate text-caption text-muted-foreground">
+                          {e.dealRoomName || t("access.libraryScope")}
+                          {e.folderPath ? ` · ${e.folderPath}` : ""}
+                        </div>
+                      </td>
+                      <td className="max-w-[160px] truncate px-2 py-2 text-muted-foreground">
+                        {e.memberEmail || t("access.unknownMember")}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
             <div className="mt-4 flex items-center justify-between gap-2">
