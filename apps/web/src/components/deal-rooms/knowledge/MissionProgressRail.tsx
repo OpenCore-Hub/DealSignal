@@ -86,7 +86,8 @@ export function MissionProgressRail({
     ? progress.items.filter((it) => !it.covered).length
     : 0;
 
-  // Expand when there are uncovered checklist items; collapse when complete.
+  // Expand/collapse only when coverage totals change — not on every progress
+  // object identity refresh (refreshKey bumps each desk turn).
   useEffect(() => {
     if (!progress) return;
     setExpanded(uncoveredCount > 0);

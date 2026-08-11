@@ -120,7 +120,7 @@ export function VisitorAskTurnCard({
         </div>
       ) : null}
 
-      {showAIBlock ? (
+      {showAIBlock && aiTurn ? (
         <div className="flex justify-start">
           <div className="max-w-[95%] space-y-2">
             <span className="inline-flex items-center gap-1 rounded-full bg-sky-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sky-700 dark:text-sky-300">

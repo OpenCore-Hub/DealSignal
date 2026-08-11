@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
 import { useTranslation } from "react-i18next";
-import { Copy, PencilSimple, ToggleRight, FileText, ShareNetwork, ChatTeardropText } from "@phosphor-icons/react";
+import { Copy, PencilSimple, ToggleRight, FileText, ChatTeardropText } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/common/PageHeader";
@@ -14,7 +14,6 @@ import { PermissionBadge } from "@/components/common/PermissionBadge";
 import { SkeletonDetail } from "@/components/common/SkeletonLayout";
 import { OwnerAskInboxPanel } from "@/components/ask/OwnerAskInboxPanel";
 import { LinkAccessLog } from "./LinkAccessLog";
-import { LinkShareDialog } from "./share";
 import { copyToClipboard } from "@/lib/clipboard";
 import { api } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/apiErrors";
@@ -75,9 +74,15 @@ export function LinkDetail() {
         setLoading(true);
         setError(null);
         const l = await api.getLinkById(id!);
+        // Deal-room / multi-doc links may omit a primary documentId.
+        const primaryDocId =
+          l.documentId?.trim() ||
+          l.documentIds?.find((docId) => Boolean(docId?.trim())) ||
+          l.documents?.find((d) => Boolean(d.id))?.id ||
+          undefined;
         const [logData, docData] = await Promise.all([
           api.getAccessLogs(id!),
-          api.getDocumentById(l.documentId),
+          primaryDocId ? api.getDocumentById(primaryDocId) : Promise.resolve(null),
         ]);
         if (!cancelled) {
           setLink(l);
@@ -142,7 +147,10 @@ export function LinkDetail() {
 
       <PageHeader
         title={(link.shortUrl || link.id).split("/").pop() || link.id}
-        description={t("detail.headerDescription", { doc: link.documentTitle, date: formatDate(link.createdAt) })}
+        description={t("detail.headerDescription", {
+          doc: link.documentTitle,
+          date: formatDate(link.createdAt),
+        })}
       >
         <Button
           variant="outline"
@@ -162,12 +170,6 @@ export function LinkDetail() {
           <Copy size={16} />
           {tc("copy")}
         </Button>
-        <LinkShareDialog linkId={link.id}>
-          <Button variant="outline" className="gap-1.5">
-            <ShareNetwork size={16} />
-            {t("detail.share")}
-          </Button>
-        </LinkShareDialog>
         <Button
           className="gap-1.5"
           onClick={async () => {

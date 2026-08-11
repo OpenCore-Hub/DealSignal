@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, type PublicLinkCredentials } from "@/lib/api";
 
 const MAX_CONCURRENT_THUMBNAIL_FETCHES = 4;
@@ -46,7 +46,19 @@ export function usePublicPageThumbnailUrls(args: {
     const next = { ...(seedUrls ?? {}) };
     cacheRef.current = next;
     setUrls(next);
+    // seedUrls identity changes every render; resetting here would loop forever.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [documentId, publicToken]);
+
+  const pageNumbersKey = pageNumbers.join(",");
+  const stablePageNumbers = useMemo(() => {
+    // Empty join → "" → Number("") === 0; never invent page 0.
+    if (!pageNumbersKey) return [] as number[];
+    return pageNumbersKey
+      .split(",")
+      .map((value) => Number(value))
+      .filter((value) => Number.isFinite(value) && value > 0);
+  }, [pageNumbersKey]);
 
   const fetchOne = useCallback(
     async (pageNumber: number): Promise<void> => {
@@ -86,9 +98,9 @@ export function usePublicPageThumbnailUrls(args: {
   );
 
   useEffect(() => {
-    if (!documentId || !publicToken || pageNumbers.length === 0) return;
+    if (!documentId || !publicToken || stablePageNumbers.length === 0) return;
 
-    const missing = pageNumbers.filter((pageNumber) => !cacheRef.current[pageNumber]);
+    const missing = stablePageNumbers.filter((pageNumber) => !cacheRef.current[pageNumber]);
     if (missing.length === 0) return;
 
     const ordered = orderPagesByProximity(missing, currentPage);
@@ -107,7 +119,7 @@ export function usePublicPageThumbnailUrls(args: {
 
       if (cancelled) return;
 
-      const stillMissing = pageNumbers.filter((pageNumber) => !cacheRef.current[pageNumber]);
+      const stillMissing = stablePageNumbers.filter((pageNumber) => !cacheRef.current[pageNumber]);
       if (stillMissing.length === 0) return;
 
       const retryQueue = orderPagesByProximity(stillMissing, currentPage);
@@ -117,7 +129,7 @@ export function usePublicPageThumbnailUrls(args: {
     return () => {
       cancelled = true;
     };
-  }, [documentId, publicToken, currentPage, pageNumbers.join(","), fetchOne]);
+  }, [documentId, publicToken, currentPage, stablePageNumbers, fetchOne]);
 
   return urls;
 }
