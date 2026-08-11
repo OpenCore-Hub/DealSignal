@@ -341,6 +341,58 @@ func TestReasonLooksLikeAskAbuseBoundary(t *testing.T) {
 	}
 }
 
+func TestClassifyAnomalyPrefersStructuredEventType(t *testing.T) {
+	abuseMeta, _ := json.Marshal(map[string]string{
+		"eventType": "rate_limit_exceeded",
+		"ruleId":    "security_rate_limit_exceeded",
+	})
+	aiMeta, _ := json.Marshal(map[string]string{"eventType": "ask_ai_rate_limited"})
+	escMeta, _ := json.Marshal(map[string]string{"eventType": "ask_escalated"})
+	genericMeta, _ := json.Marshal(map[string]string{"eventType": "abnormal_access_pattern"})
+
+	cases := []struct {
+		name    string
+		sig     *db.Signal
+		wantP   Product
+		wantV   Verb
+	}{
+		{
+			name:  "rate_limit_exceeded metadata",
+			sig:   &db.Signal{Type: "risk_alert", Subtype: pgText(suggestions.SubtypeAnomaly), Metadata: abuseMeta, Description: "中文文案不会匹配英文 substring"},
+			wantP: ProductAbuseGuard, wantV: VerbReview,
+		},
+		{
+			name:  "ask_ai_rate_limited metadata",
+			sig:   &db.Signal{Type: "risk_alert", Subtype: pgText(suggestions.SubtypeAnomaly), Metadata: aiMeta},
+			wantP: ProductAbuseGuard, wantV: VerbReview,
+		},
+		{
+			name:  "ask_escalated metadata",
+			sig:   &db.Signal{Type: "risk_alert", Subtype: pgText(suggestions.SubtypeAnomaly), Metadata: escMeta, Description: "rate limit in copy must not win"},
+			wantP: ProductCommitmentAsk, wantV: VerbReply,
+		},
+		{
+			name:  "generic anomaly stays leak_watch",
+			sig:   &db.Signal{Type: "risk_alert", Subtype: pgText(suggestions.SubtypeAnomaly), Metadata: genericMeta, Description: "unusual session pattern"},
+			wantP: ProductLeakWatch, wantV: VerbReview,
+		},
+		{
+			name:  "legacy free-text abuse fallback",
+			sig:   &db.Signal{Type: "risk_alert", Subtype: pgText(suggestions.SubtypeAnomaly), Description: "visitor ask rate limit exceeded"},
+			wantP: ProductAbuseGuard, wantV: VerbReview,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			a := pendingAction(uuid.Nil, "review", "", "", time.Now().UTC())
+			gotP, gotV, ok := classify(a, tc.sig)
+			if !ok || gotP != tc.wantP || gotV != tc.wantV {
+				t.Fatalf("got (%s,%s,ok=%v) want (%s,%s,true)", gotP, gotV, ok, tc.wantP, tc.wantV)
+			}
+		})
+	}
+}
+
 func TestSignalContextJSONRoundTripForBuyingWindow(t *testing.T) {
 	now := time.Date(2026, 8, 8, 15, 0, 0, 0, time.UTC)
 	linkID := uuid.New()

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/signal"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -18,6 +19,7 @@ type EvidencePack struct {
 	ItemID         string            `json:"itemId"`
 	Product        Product           `json:"product"`
 	Headline       string            `json:"headline"`
+	HeadlineCode   string            `json:"headlineCode,omitempty"`
 	WhyNow         string            `json:"whyNow,omitempty"` // deprecated free-text; prefer WhyNowCode
 	WhyNowCode     string            `json:"whyNowCode,omitempty"`
 	WhyNowHours    int               `json:"whyNowHours,omitempty"`
@@ -33,6 +35,22 @@ type EvidencePack struct {
 	TopPages       []EvidencePage    `json:"topPages,omitempty"`
 	RecentVisitors []EvidenceVisitor `json:"recentVisitors,omitempty"`
 	SecurityEvents []EvidenceEvent   `json:"securityEvents,omitempty"`
+	// DegradedSections lists evidence facets that failed to load. Empty means
+	// complete enrichment (or no link to enrich). Never silently pretend a
+	// failed metrics query is "zero engagement".
+	DegradedSections []string `json:"degradedSections,omitempty"`
+}
+
+func (p *EvidencePack) noteDegraded(section string) {
+	if p == nil || section == "" {
+		return
+	}
+	for _, s := range p.DegradedSections {
+		if s == section {
+			return
+		}
+	}
+	p.DegradedSections = append(p.DegradedSections, section)
 }
 
 // EvidenceMetrics are rolling engagement counters for the linked share.
@@ -95,19 +113,37 @@ func (s *Service) GetEvidence(ctx context.Context, workspaceID, itemID, workspac
 			ID:          action.SignalID,
 			WorkspaceID: wsUUID,
 		})
-		if serr == nil {
+		if serr != nil {
+			if !errors.Is(serr, pgx.ErrNoRows) {
+				return EvidencePack{}, fmt.Errorf("get signal: %w", serr)
+			}
+		} else {
 			sig = &got
 		}
 	}
 
 	product, verb, ok := classify(action, sig)
 	if !ok {
-		// Still return a minimal pack for non-radar products (e.g. legacy bounce).
-		product = ProductBuyingWindow
-		verb = VerbOpen
+		// Non-radar actions (bounce, uploaded_file, unknown) must not appear as buying_window.
+		return EvidencePack{}, ErrItemNotFound
 	}
 
-	item := buildItem(CompileInput{WorkspaceSlug: workspaceSlug, Now: s.now()}, action, sig, product, verb, s.now())
+	// Match Service.Get: resolve link/room names so the rail shows the same deal identity.
+	raw := signal.Feed{Actions: []db.ActionItem{action}}
+	if sig != nil {
+		raw.Signals = []db.Signal{*sig}
+	}
+	links, rooms, metaErr := s.resolveDealMeta(ctx, workspaceID, raw)
+	if metaErr != nil {
+		return EvidencePack{}, metaErr
+	}
+
+	item := buildItem(CompileInput{
+		WorkspaceSlug: workspaceSlug,
+		Now:           s.now(),
+		Links:         links,
+		Rooms:         rooms,
+	}, action, sig, product, verb, s.now())
 
 	// Prefer structured whyNowCode (FE i18n); keep WhyNow empty of free-text fallbacks.
 	slaDue := parseRFC3339(item.SlaDueAt, s.now())
@@ -120,6 +156,7 @@ func (s *Service) GetEvidence(ctx context.Context, workspaceID, itemID, workspac
 		ItemID:       item.ID,
 		Product:      item.Product,
 		Headline:     item.Headline,
+		HeadlineCode: item.HeadlineCode,
 		WhyNowCode:   whyCode,
 		WhyNowHours:  whyHours,
 		Actor:        item.Actor,
@@ -142,10 +179,13 @@ func (s *Service) GetEvidence(ctx context.Context, workspaceID, itemID, workspac
 	}
 	linkUUID, err := pgUUID(item.LinkID)
 	if err != nil {
+		pack.noteDegraded("link_id")
 		return pack, nil
 	}
 
-	if metrics, err := s.queries.GetLinkAccessMetrics24h(ctx, linkUUID); err == nil {
+	if metrics, err := s.queries.GetLinkAccessMetrics24h(ctx, linkUUID); err != nil {
+		pack.noteDegraded("metrics")
+	} else {
 		pack.Metrics = &EvidenceMetrics{
 			Opens24h:          int(metrics.Opens),
 			UniqueVisitors24h: int(metrics.UniqueVisitors),
@@ -153,14 +193,18 @@ func (s *Service) GetEvidence(ctx context.Context, workspaceID, itemID, workspac
 			Downloads24h:      int(metrics.Downloads),
 		}
 	}
-	if captures, err := s.queries.CountCaptureAttemptsByLink24h(ctx, linkUUID); err == nil && captures > 0 {
+	if captures, err := s.queries.CountCaptureAttemptsByLink24h(ctx, linkUUID); err != nil {
+		pack.noteDegraded("metrics")
+	} else if captures > 0 {
 		if pack.Metrics == nil {
 			pack.Metrics = &EvidenceMetrics{}
 		}
 		pack.Metrics.CaptureAttempts24h = int(captures)
 	}
 
-	if pages, err := s.queries.ListTopPagesByLink(ctx, linkUUID); err == nil {
+	if pages, err := s.queries.ListTopPagesByLink(ctx, linkUUID); err != nil {
+		pack.noteDegraded("top_pages")
+	} else {
 		limit := 5
 		if len(pages) < limit {
 			limit = len(pages)
@@ -178,7 +222,9 @@ func (s *Service) GetEvidence(ctx context.Context, workspaceID, itemID, workspac
 		LinkID: linkUUID,
 		Limit:  int32(5),
 		Offset: int32(0),
-	}); err == nil {
+	}); err != nil {
+		pack.noteDegraded("recent_visitors")
+	} else {
 		for _, v := range visitors {
 			ev := EvidenceVisitor{
 				VisitorID:  textOrEmpty(v.VisitorID),
@@ -193,7 +239,9 @@ func (s *Service) GetEvidence(ctx context.Context, workspaceID, itemID, workspac
 	}
 
 	if product == ProductLeakWatch || product == ProductAbuseGuard || product == ProductAccessDecay {
-		if events, err := s.queries.ListRecentSecurityEventsByLink(ctx, linkUUID); err == nil {
+		if events, err := s.queries.ListRecentSecurityEventsByLink(ctx, linkUUID); err != nil {
+			pack.noteDegraded("security_events")
+		} else {
 			limit := 5
 			if len(events) < limit {
 				limit = len(events)

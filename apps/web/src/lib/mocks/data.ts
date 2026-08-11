@@ -967,6 +967,23 @@ export const mockSignals: Signal[] = [
     createdAt: "2026-06-19T10:00:00Z",
     priority: "medium",
   },
+  {
+    id: "sig_6",
+    type: "risk_alert",
+    subtype: "anomaly",
+    title: "Visitor Ask rate limit exceeded",
+    description: "Visitor Ask rate limit exceeded",
+    explanation: "A visitor hit Ask rate limits on this share link.",
+    suggestion: "Review Ask abuse on this link and tighten quotas if needed",
+    metadata: {
+      eventType: "rate_limit_exceeded",
+      ruleId: "security_rate_limit_exceeded",
+    },
+    linkId: "link_1",
+    documentId: "doc_1",
+    createdAt: "2026-06-20T12:00:00Z",
+    priority: "high",
+  },
 ];
 
 export const mockActionItems: ActionItem[] = [
@@ -1013,6 +1030,17 @@ export const mockActionItems: ActionItem[] = [
     actionType: "review",
     createdAt: "2026-06-20T18:00:00Z",
     updatedAt: "2026-06-20T18:00:00Z",
+  },
+  {
+    id: "act_6",
+    signalId: "sig_6",
+    title: "Review Ask abuse on Seed Round Deck",
+    impact: "high",
+    dueAt: "2026-06-21T14:00:00Z",
+    status: "pending",
+    actionType: "review",
+    createdAt: "2026-06-20T12:00:00Z",
+    updatedAt: "2026-06-20T12:00:00Z",
   },
   // Surface-isolated operational todos (dashboard deep-link contract).
   {
@@ -1239,6 +1267,18 @@ export function getMockRadarFeed(workspaceSlug = "acme-capital"): RadarFeed {
     lens: "founder",
     defaultLens: "founder",
     lensSource: "default",
+    // Mirror API honesty: closed-loop demotion banner when leak noise is present.
+    noiseHints:
+      (counts.leak_watch ?? 0) > 0
+        ? [
+            {
+              product: "leak_watch",
+              falsePositiveRate: 0.4,
+              sample: 5,
+              demoteBoost: 2,
+            },
+          ]
+        : undefined,
   };
 }
 
@@ -1253,11 +1293,25 @@ export function getMockRadarEvidence(
   const signal = item.signalId
     ? mockSignals.find((s) => s.id === item.signalId)
     : undefined;
+  const opens = signal?.context?.opens ?? (item.product === "buying_window" ? 6 : 3);
+  const forwards =
+    signal?.subtype === "forward"
+      ? Math.max(2, signal?.context?.opens ?? 2)
+      : (signal?.context as { forwardSignals?: number } | undefined)
+          ?.forwardSignals ?? (item.product === "leak_watch" ? 2 : 0);
+  const downloads =
+    signal?.subtype === "download"
+      ? Math.max(1, signal?.context?.opens ?? 1)
+      : item.product === "leak_watch"
+        ? 1
+        : 0;
   return {
     itemId: item.id,
     product: item.product,
     headline: item.headline,
-    whyNow: item.subtitle || signal?.description,
+    headlineCode: item.headlineCode,
+    whyNowCode: item.whyNowCode,
+    whyNowHours: item.whyNowHours,
     actor: item.actor,
     dealName: item.dealName,
     linkId: item.linkId,
@@ -1268,12 +1322,45 @@ export function getMockRadarEvidence(
       ? `/${workspaceSlug}/links/${item.linkId}`
       : `/${workspaceSlug}/insights/overview`,
     metrics: {
-      opens24h: signal?.context?.opens ?? 0,
-      uniqueVisitors24h: signal?.context?.uniqueVisitors ?? 0,
-      forwardSignals24h: 0,
-      downloads24h: 0,
+      opens24h: opens,
+      uniqueVisitors24h: signal?.context?.uniqueVisitors ?? Math.max(1, Math.floor(opens / 2)),
+      forwardSignals24h: forwards,
+      downloads24h: downloads,
+      captureAttempts24h:
+        signal?.subtype === "capture_attempt" || item.product === "abuse_guard"
+          ? 1
+          : undefined,
     },
-    keyPageTitles: signal?.context?.keyPageTitles,
+    keyPageTitles: signal?.context?.keyPageTitles ?? ["Executive summary", "Financials"],
+    topPages: [
+      { pageNumber: 1, views: Math.max(2, opens), avgDurationSeconds: 42 },
+      { pageNumber: 3, views: Math.max(1, Math.floor(opens / 2)), avgDurationSeconds: 28 },
+    ],
+    recentVisitors: [
+      {
+        visitorId: "vis-mock-1",
+        email: item.actor?.includes("@") ? item.actor : "lp@vc.com",
+        totalViews: Math.max(2, opens),
+        lastAccessAt: new Date().toISOString(),
+      },
+    ],
+    securityEvents:
+      item.product === "leak_watch" ||
+      item.product === "abuse_guard" ||
+      item.product === "access_decay"
+        ? [
+            {
+              eventType:
+                item.product === "abuse_guard"
+                  ? "rate_limit_exceeded"
+                  : item.product === "access_decay"
+                    ? "expired_link_accessed"
+                    : "forward_signal",
+              reason: item.product === "leak_watch" ? "other" : undefined,
+              createdAt: new Date().toISOString(),
+            },
+          ]
+        : undefined,
   };
 }
 
@@ -1314,6 +1401,34 @@ function mockClassify(
       signal.subtype === "access_revoked"
     ) {
       return { product: "access_decay", verb: "review" };
+    }
+    if (signal.subtype === "anomaly") {
+      const eventType =
+        signal.metadata?.eventType ||
+        (signal.metadata?.ruleId?.startsWith("security_")
+          ? signal.metadata.ruleId.slice("security_".length)
+          : "");
+      if (eventType === "ask_escalated") {
+        return { product: "commitment_ask", verb: "reply" };
+      }
+      if (
+        eventType === "rate_limit_exceeded" ||
+        eventType === "ask_ai_rate_limited"
+      ) {
+        return { product: "abuse_guard", verb: "review" };
+      }
+      const blob = `${signal.description || ""} ${signal.title || ""} ${signal.suggestion || ""}`.toLowerCase();
+      if (blob.includes("escalat")) {
+        return { product: "commitment_ask", verb: "reply" };
+      }
+      if (
+        blob.includes("rate limit") ||
+        blob.includes("ask_ai") ||
+        blob.includes("ask abuse") ||
+        blob.includes("visitor ask rate")
+      ) {
+        return { product: "abuse_guard", verb: "review" };
+      }
     }
     return { product: "leak_watch", verb: "review" };
   }

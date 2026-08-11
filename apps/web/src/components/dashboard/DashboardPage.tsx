@@ -19,6 +19,7 @@ import { apiErrorMessage } from "@/lib/apiErrors";
 import { useRadarStore } from "@/stores/radarStore";
 import type { ActionStatus } from "@/types";
 import {
+  decrementRadarCounts,
   parseRadarCircle,
   withMailtoHrefs,
   type RadarFeed,
@@ -132,7 +133,10 @@ export function DashboardPage() {
           returnLabel: tCommon("back"),
         },
       });
+      return;
     }
+    // Never silent-no-op: host must know the CTA has nowhere to go.
+    toast.message(t("radar.toast.primaryUnavailable"));
   };
 
   const handleStatusChange = (
@@ -142,22 +146,30 @@ export function DashboardPage() {
     outcome?: RadarOutcome,
   ) => {
     const previous = feed;
+    const removed = feed.items.find((i) => i.id === id);
+    const remaining = feed.items.filter((i) => i.id !== id);
     setFeedOverride({
       ...feed,
-      items: feed.items.filter((i) => i.id !== id),
+      items: remaining,
       strands: feed.strands
         .map((s) => ({
           ...s,
           items: s.items.filter((i) => i.id !== id),
         }))
         .filter((s) => s.items.length > 0),
-      nextUp: feed.nextUp?.id === id ? null : feed.nextUp,
+      nextUp:
+        feed.nextUp?.id === id
+          ? (remaining[0] ?? null)
+          : feed.nextUp && remaining.some((i) => i.id === feed.nextUp?.id)
+            ? feed.nextUp
+            : (remaining[0] ?? null),
       clearedToday:
         status === "done" ? feed.clearedToday + 1 : feed.clearedToday,
-      counts: {
-        ...feed.counts,
-        all: Math.max(0, (feed.counts.all ?? feed.items.length) - 1),
-      },
+      counts: decrementRadarCounts(
+        feed.counts,
+        feed.items.length,
+        removed?.product,
+      ),
     });
     void api
       .updateRadarItem(id, status, snoozeHours, outcome)
@@ -168,9 +180,9 @@ export function DashboardPage() {
             onClick: () => {
               void api
                 .updateRadarItem(id, "pending")
-                .then(() => {
+                .then(async () => {
                   setFeedOverride(null);
-                  void refetch();
+                  await refetch();
                 })
                 .catch((e) => {
                   toast.error(
@@ -180,10 +192,8 @@ export function DashboardPage() {
             },
           },
         });
-        if (status === "pending") {
-          setFeedOverride(null);
-          void refetch();
-        }
+        // Authoritative counts / nextUp from server (product buckets stay correct).
+        void refetch().then(() => setFeedOverride(null));
       })
       .catch((e) => {
         setFeedOverride(previous);

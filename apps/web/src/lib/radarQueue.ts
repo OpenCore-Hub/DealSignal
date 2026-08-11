@@ -112,7 +112,7 @@ export interface RadarWorkItem {
   evidence?: RadarEvidenceChip[];
   /** Scenario Pack narrative id; prefer i18n over raw headline. */
   headlineCode?: string;
-  state?: "open" | "snoozed" | "done" | "dismissed" | string;
+  state?: "open";
   scenario?: RadarScenario | string;
   /** Populated client-side for mailto CTAs. */
   mailtoHref?: string | null;
@@ -137,7 +137,7 @@ export interface RadarNoiseHint {
 export interface RadarScenarioPackMeta {
   scenario: string;
   defaultCircle: RadarCircle | string;
-  depth: "base" | "p0" | string;
+  depth: "base" | "p0" | "p1" | "lite" | string;
   keyPageCategories?: string[];
   insightsKpi?: string[];
 }
@@ -154,6 +154,13 @@ export interface RadarFeed {
   scenarios?: string[];
   scenarioPack?: RadarScenarioPackMeta | null;
   noiseHints?: RadarNoiseHint[];
+  /** Ranking-critical facets that failed to load — not “clean zero”. */
+  degradedSections?: Array<
+    | "internal_emails"
+    | "capture_metrics"
+    | "ip_metrics"
+    | string
+  >;
 }
 
 export function parseRadarCircle(
@@ -288,6 +295,115 @@ export function countRadarFilters(
   };
 }
 
+/** Decrement all + product bucket after optimistic clear/snooze/ignore. */
+export function decrementRadarCounts(
+  counts: Record<string, number> | undefined,
+  itemCount: number,
+  product: RadarProduct | undefined,
+): Record<string, number> {
+  const next: Record<string, number> = {
+    ...(counts ?? {}),
+    all: Math.max(0, (counts?.all ?? itemCount) - 1),
+  };
+  if (product) {
+    next[product] = Math.max(0, (counts?.[product] ?? 0) - 1);
+  }
+  return next;
+}
+
+/**
+ * Role-lens product urgency (lower = sooner). Mirrors apps/api/internal/radar
+ * productRankForCircle — used by MSW to re-rank when ?circle= changes.
+ */
+export function productRankForCircle(
+  circle: RadarCircle,
+  product: RadarProduct,
+): number {
+  switch (circle) {
+    case "investor_ir":
+      switch (product) {
+        case "leak_watch":
+        case "buying_window":
+          return 0;
+        case "diligence_gate":
+        case "commitment_ask":
+          return 1;
+        case "access_decay":
+          return 2;
+        case "abuse_guard":
+          return 3;
+        default:
+          return 9;
+      }
+    case "sales":
+      switch (product) {
+        case "buying_window":
+          return 0;
+        case "diligence_gate":
+        case "access_decay":
+          return 1;
+        case "commitment_ask":
+        case "leak_watch":
+          return 2;
+        case "abuse_guard":
+          return 3;
+        default:
+          return 9;
+      }
+    default:
+      switch (product) {
+        case "diligence_gate":
+        case "leak_watch":
+          return 0;
+        case "commitment_ask":
+          return 1;
+        case "buying_window":
+          return 2;
+        case "access_decay":
+        case "abuse_guard":
+          return 3;
+        default:
+          return 9;
+      }
+  }
+}
+
+/** Re-rank a compiled feed for a role lens (MSW / client preview). */
+export function applyRadarCircleLens(
+  feed: RadarFeed,
+  circle: RadarCircle,
+): RadarFeed {
+  const byRank = (a: RadarWorkItem, b: RadarWorkItem) => {
+    const ra = productRankForCircle(circle, a.product);
+    const rb = productRankForCircle(circle, b.product);
+    if (ra !== rb) return ra - rb;
+    return a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0;
+  };
+  const items = [...feed.items].sort(byRank);
+  const strands = feed.strands
+    .map((s) => ({
+      ...s,
+      items: [...s.items].sort(byRank),
+    }))
+    .sort((a, b) => {
+      const pa = a.items[0]
+        ? productRankForCircle(circle, a.items[0].product)
+        : 9;
+      const pb = b.items[0]
+        ? productRankForCircle(circle, b.items[0].product)
+        : 9;
+      return pa - pb;
+    });
+  return {
+    ...feed,
+    items,
+    strands,
+    nextUp: items[0] ?? null,
+    lens: circle,
+    lensSource: "query",
+  };
+}
+
 export function buildFollowUpMailto(
   email: string,
   subject: string,
@@ -355,6 +471,7 @@ export interface RadarEvidencePack {
   itemId: string;
   product: RadarProduct;
   headline: string;
+  headlineCode?: string;
   whyNow?: string;
   whyNowCode?: RadarWhyNowCode | string;
   whyNowHours?: number;
@@ -390,6 +507,15 @@ export interface RadarEvidencePack {
     email?: string;
     createdAt: string;
   }>;
+  /** Facets that failed to load — never treat as “zero engagement”. */
+  degradedSections?: Array<
+    | "metrics"
+    | "top_pages"
+    | "recent_visitors"
+    | "security_events"
+    | "link_id"
+    | string
+  >;
 }
 
 /**

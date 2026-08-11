@@ -83,6 +83,14 @@ function buildBoundaryFeed(extraItems: Record<string, unknown>[] = []) {
       defaultCircle: "founder",
       depth: "p0",
     },
+    noiseHints: [
+      {
+        product: "leak_watch",
+        falsePositiveRate: 0.4,
+        sample: 5,
+        demoteBoost: 2,
+      },
+    ],
   };
 }
 
@@ -181,6 +189,68 @@ test.describe("Radar six-product boundaries (MSW)", () => {
 
     await expect(page.getByText(/from\s+for/i)).toHaveCount(0);
     await expect(page.getByTestId("radar-row").filter({ hasText: /lp@vc\.com/i })).toHaveCount(1);
+  });
+
+  test("noise hint banner surfaces closed-loop demotion", async ({ page }) => {
+    attachDebug(page);
+    await openRadarWithFeed(page, buildBoundaryFeed());
+    await expect(page.getByTestId("radar-noise-hints")).toBeVisible();
+    await expect(page.getByTestId("radar-noise-hints")).toContainText(/leak/i);
+  });
+
+  test("sales lens re-ranks next-up to buying_window", async ({ page }) => {
+    attachDebug(page);
+    const feed = buildBoundaryFeed();
+    const productOf = (i: Record<string, unknown>) => String(i.product ?? "");
+    // Force gate-first order so sales lens must promote buying_window to next-up.
+    const gate = feed.items.find((i) => productOf(i) === "diligence_gate");
+    const buy = feed.items.find((i) => productOf(i) === "buying_window");
+    if (!gate || !buy) throw new Error("boundary feed missing gate/buy items");
+    const rest = feed.items.filter(
+      (i) => productOf(i) !== "diligence_gate" && productOf(i) !== "buying_window",
+    );
+    const gateFirst = {
+      ...feed,
+      items: [gate, buy, ...rest],
+      nextUp: gate,
+      strands: [
+        {
+          dealKey: "boundary",
+          dealName: "Boundary strand",
+          scenario: "startup-fundraising",
+          items: [gate, buy, ...rest],
+        },
+      ],
+    };
+    await openRadarWithFeed(page, gateFirst);
+
+    await page.getByTestId("radar-lens-sales").click();
+    await expect(page).toHaveURL(/circle=sales/, { timeout: 5000 });
+    await expect(page.getByTestId("radar-next-up")).toContainText(
+      /Boundary buying_window/i,
+      { timeout: 10000 },
+    );
+  });
+
+  test("default MSW feed emits abuse_guard from structured eventType", async ({
+    page,
+  }) => {
+    attachDebug(page);
+    await resetMockState(page);
+    await authenticate(page);
+    // No radar-feed override — use fixture-derived getMockRadarFeed (sig_6).
+    await page.goto(`/${WORKSPACE_SLUG}/dashboard`);
+    await waitForMsw(page);
+    await expect(page.getByTestId("radar-queue")).toBeVisible({ timeout: 15000 });
+
+    const abuseChip = page.getByTestId("radar-filter-abuse_guard");
+    await expect(abuseChip).toBeVisible();
+    const countText = await abuseChip.locator("span.tabular-nums").innerText();
+    expect(Number(countText)).toBeGreaterThan(0);
+
+    await abuseChip.click();
+    await expandStrands(page);
+    await expect(page.getByTestId("radar-row").first()).toBeVisible();
   });
 
   test("stress: 60 mixed rows keep filters and keyboard focus stable", async ({ page }) => {

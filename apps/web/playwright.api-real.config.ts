@@ -7,6 +7,7 @@ export default defineConfig({
     "**/document-category-tristate-real.spec.ts",
     "**/visitor-ask-real.spec.ts",
     "**/visitor-ask-ai-stream-real.spec.ts",
+    "**/deal-radar-real.spec.ts",
   ],
   fullyParallel: false,
   forbidOnly: !!process.env.CI,

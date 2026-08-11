@@ -233,7 +233,8 @@ describe("InsightsOverviewPage", () => {
     });
     const pack = screen.getByTestId("insights-scenario-pack");
     expect(pack).toHaveAttribute("data-pack-depth", "lite");
-    expect(pack).toHaveTextContent(/Lite pack/i);
+    expect(pack).toHaveTextContent(/Lite depth/i);
+    expect(pack).toHaveTextContent(/Same six Deal Radar products/i);
     expect(pack).toHaveTextContent(/Title & ownership/i);
     expect(pack).toHaveTextContent(/Leases & tenancies/i);
     const gateKpi = screen.getByTestId("insights-scenario-kpi-gate_pending");

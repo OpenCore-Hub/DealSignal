@@ -48,7 +48,7 @@ func (s *Service) Get(ctx context.Context, workspaceID, userID, workspaceSlug st
 		return Feed{}, err
 	}
 
-	metrics, err := s.loadLinkMetrics(ctx, workspaceID, links)
+	metrics, degradedMetrics, err := s.loadLinkMetrics(ctx, workspaceID, links)
 	if err != nil {
 		return Feed{}, err
 	}
@@ -58,9 +58,14 @@ func (s *Service) Get(ctx context.Context, workspaceID, userID, workspaceSlug st
 		return Feed{}, err
 	}
 
-	// Fail open: member-list errors must not 500 the whole radar feed; an empty
-	// set disables the filter (same as unknown attribution — keep external work).
-	internal, _ := s.loadInternalEmails(ctx, workspaceID)
+	degraded := append([]string(nil), degradedMetrics...)
+	// Member-list errors must not 500 the whole radar feed, but empty set disables
+	// the internal-actor filter — surface that honesty so ranking is not "clean".
+	internal, err := s.loadInternalEmails(ctx, workspaceID)
+	if err != nil {
+		degraded = append(degraded, "internal_emails")
+		internal = nil
+	}
 
 	if circle == "" {
 		circle = heat.CircleDefault
@@ -79,6 +84,7 @@ func (s *Service) Get(ctx context.Context, workspaceID, userID, workspaceSlug st
 		OutcomeDemote:           demote,
 		OutcomeDemoteByScenario: demoteByScenario,
 		NoiseHints:              noiseHints,
+		DegradedSections:        degraded,
 		InternalEmails:          internal,
 	}), nil
 }
@@ -123,13 +129,13 @@ func (s *Service) UpdateItem(ctx context.Context, workspaceID, itemID, status st
 	return s.signals.UpdateActionStatus(ctx, workspaceID, itemID, status, snoozeHours, outcome)
 }
 
-func (s *Service) loadLinkMetrics(ctx context.Context, workspaceID string, links map[string]LinkMeta) (map[string]LinkMetrics24h, error) {
+func (s *Service) loadLinkMetrics(ctx context.Context, workspaceID string, links map[string]LinkMeta) (map[string]LinkMetrics24h, []string, error) {
 	if len(links) == 0 {
-		return map[string]LinkMetrics24h{}, nil
+		return map[string]LinkMetrics24h{}, nil, nil
 	}
 	wsUUID, err := pgUUID(workspaceID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	ids := make([]pgtype.UUID, 0, len(links))
 	for id := range links {
@@ -140,7 +146,7 @@ func (s *Service) loadLinkMetrics(ctx context.Context, workspaceID string, links
 		ids = append(ids, u)
 	}
 	if len(ids) == 0 {
-		return map[string]LinkMetrics24h{}, nil
+		return map[string]LinkMetrics24h{}, nil, nil
 	}
 
 	rows, err := s.queries.GetLinkAccessMetrics24hBatch(ctx, db.GetLinkAccessMetrics24hBatchParams{
@@ -148,7 +154,7 @@ func (s *Service) loadLinkMetrics(ctx context.Context, workspaceID string, links
 		WorkspaceID: wsUUID,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("link metrics 24h batch: %w", err)
+		return nil, nil, fmt.Errorf("link metrics 24h batch: %w", err)
 	}
 
 	out := make(map[string]LinkMetrics24h, len(rows))
@@ -162,10 +168,13 @@ func (s *Service) loadLinkMetrics(ctx context.Context, workspaceID string, links
 		}
 	}
 
+	var degraded []string
 	if captures, err := s.queries.CountCaptureAttempts24hBatch(ctx, db.CountCaptureAttempts24hBatchParams{
 		LinkIds:     ids,
 		WorkspaceID: wsUUID,
-	}); err == nil {
+	}); err != nil {
+		degraded = append(degraded, "capture_metrics")
+	} else {
 		for _, row := range captures {
 			id := uuid.UUID(row.LinkID.Bytes).String()
 			m := out[id]
@@ -175,6 +184,7 @@ func (s *Service) loadLinkMetrics(ctx context.Context, workspaceID string, links
 	}
 
 	// IP cluster only for links that already show download pressure (cheap escalate check).
+	ipFailed := false
 	for id, m := range out {
 		if m.Downloads < 2 {
 			continue
@@ -185,13 +195,17 @@ func (s *Service) loadLinkMetrics(ctx context.Context, workspaceID string, links
 		}
 		ips, err := s.queries.CountRecentDistinctIPsByLink(ctx, linkUUID)
 		if err != nil {
+			ipFailed = true
 			continue
 		}
 		m.DistinctIPs1h = int(ips)
 		out[id] = m
 	}
+	if ipFailed {
+		degraded = append(degraded, "ip_metrics")
+	}
 
-	return out, nil
+	return out, degraded, nil
 }
 
 func (s *Service) resolveDealMeta(ctx context.Context, workspaceID string, raw signal.Feed) (map[string]LinkMeta, map[string]RoomMeta, error) {

@@ -66,6 +66,10 @@ func (h *Handler) UpdateAction(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": "outcome must be acted, false_positive, renewed, approved, replied, or other"})
 			return
 		}
+		if errors.Is(err, ErrActionNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": "action not found"})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}

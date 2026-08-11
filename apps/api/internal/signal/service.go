@@ -11,6 +11,7 @@ import (
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/locale"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/suggestions"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -114,7 +115,7 @@ func (s *Service) UpdateActionStatus(ctx context.Context, workspaceID, actionID,
 	}
 	actionUUID, err := pgUUID(actionID)
 	if err != nil {
-		return db.ActionItem{}, err
+		return db.ActionItem{}, ErrActionNotFound
 	}
 
 	var until pgtype.Timestamptz
@@ -149,6 +150,9 @@ func (s *Service) UpdateActionStatus(ctx context.Context, workspaceID, actionID,
 		Outcome:      outcomeParam,
 	})
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return db.ActionItem{}, ErrActionNotFound
+		}
 		return db.ActionItem{}, fmt.Errorf("update action status: %w", err)
 	}
 

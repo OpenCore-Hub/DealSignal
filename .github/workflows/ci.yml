@@ -50,6 +50,24 @@ jobs:
           name: frontend-coverage
           path: apps/web/coverage
 
+  api-contracts:
+    name: API contracts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Validate Deal Radar OpenAPI
+        run: |
+          python3 -m pip install --upgrade pip
+          pip install openapi-spec-validator pyyaml
+          openapi-spec-validator docs/api/deal-radar.openapi.yaml
+
   # Ceiling §9: MSW knowledge desk + Owner Viewer continuity (no docling required).
   frontend-knowledge-e2e:
     name: Frontend Knowledge E2E (MSW)

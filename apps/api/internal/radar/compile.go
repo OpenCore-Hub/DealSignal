@@ -46,6 +46,9 @@ type CompileInput struct {
 	// OutcomeDemoteByScenario soft-demotes by scenario×product (Phase C; preferred when set).
 	OutcomeDemoteByScenario map[Scenario]map[Product]int
 	NoiseHints              []NoiseHint
+	// DegradedSections lists ranking-critical facets that failed to load.
+	// Empty means complete enrichment for this compile (or nothing to enrich).
+	DegradedSections []string
 	// InternalEmails are workspace member emails (normalized). Matching actors
 	// never become radar work items — radar is for external deal parties only.
 	InternalEmails action.MemberEmailSet
@@ -121,7 +124,10 @@ type Feed struct {
 	LensSource   string         `json:"lensSource"` // query | inferred | default
 	Scenarios    []string       `json:"scenarios,omitempty"`
 	ScenarioPack *ScenarioPackMeta `json:"scenarioPack,omitempty"`
-	NoiseHints   []NoiseHint    `json:"noiseHints,omitempty"`
+	NoiseHints   []NoiseHint       `json:"noiseHints,omitempty"`
+	// DegradedSections lists ranking-critical facets that failed to load.
+	// Never treat missing capture/IP/member filters as "clean zero".
+	DegradedSections []string `json:"degradedSections,omitempty"`
 }
 
 type draft struct {
@@ -200,8 +206,12 @@ func Compile(in CompileInput) Feed {
 			scenario:  Scenario(item.Scenario),
 		}
 		applyLeakConfidence(&d, in.Metrics, now)
-		if boost := demoteBoostForItem(in.OutcomeDemote, in.OutcomeDemoteByScenario, d.scenario, product); boost > 0 {
-			d.rankBoost += boost
+		enrichEvidenceFromMetrics(&d.item, in.Metrics)
+		// rankBoost may be positive (demote) or negative (promote from acted outcomes).
+		// Scale to productRankForItem units so ±1..3 still moves adjacent scenario bands
+		// (scenarioRank*10); circle-only / custom packs keep scale 1.
+		if adj := demoteBoostForItem(in.OutcomeDemote, in.OutcomeDemoteByScenario, d.scenario, product); adj != 0 {
+			d.rankBoost += adj * outcomeRankScale(d.scenario)
 		}
 		drafts = append(drafts, d)
 	}
@@ -298,17 +308,18 @@ func Compile(in CompileInput) Feed {
 	}
 	scenarios := UniqueScenarios(packScenarios)
 	return Feed{
-		NextUp:       nextUp,
-		Strands:      strands,
-		Items:        items,
-		ClearedToday: clearedToday,
-		Counts:       counts,
-		Lens:         string(circle),
-		DefaultLens:  string(defaultLens),
-		LensSource:   lensSource,
-		Scenarios:    scenarios,
-		ScenarioPack: buildScenarioPackMeta(DominantScenario(packScenarios)),
-		NoiseHints:   in.NoiseHints,
+		NextUp:           nextUp,
+		Strands:          strands,
+		Items:            items,
+		ClearedToday:     clearedToday,
+		Counts:           counts,
+		Lens:             string(circle),
+		DefaultLens:      string(defaultLens),
+		LensSource:       lensSource,
+		Scenarios:        scenarios,
+		ScenarioPack:     buildScenarioPackMeta(DominantScenario(packScenarios)),
+		NoiseHints:       in.NoiseHints,
+		DegradedSections: append([]string(nil), in.DegradedSections...),
 	}
 }
 
@@ -389,14 +400,7 @@ func classify(a db.ActionItem, sig *db.Signal) (Product, Verb, bool) {
 			case suggestions.SubtypeExpired, suggestions.SubtypeAccessExhausted, suggestions.SubtypeAccessRevoked:
 				return ProductAccessDecay, VerbReview, true
 			case suggestions.SubtypeAnomaly:
-				// Ask rate-limit / escalate land as anomaly; escalate reasons prefer commitment.
-				if reasonLooksLikeAskEscalation(sig) {
-					return ProductCommitmentAsk, VerbReply, true
-				}
-				if reasonLooksLikeAskAbuse(sig) {
-					return ProductAbuseGuard, VerbReview, true
-				}
-				return ProductLeakWatch, VerbReview, true
+				return classifyAnomaly(sig)
 			default:
 				return ProductLeakWatch, VerbReview, true
 			}
@@ -793,6 +797,10 @@ func evidenceChips(product Product, sig *db.Signal, coalesceCount int) []Evidenc
 			chips = append(chips, EvidenceChip{Kind: "ask", Count: 1})
 		case suggestions.SubtypeHot, suggestions.SubtypeRevisit:
 			chips = append(chips, EvidenceChip{Kind: "engagement", Count: 1})
+		case suggestions.SubtypeAnomaly:
+			if et := signalEventType(sig); et == "rate_limit_exceeded" || et == "ask_ai_rate_limited" {
+				chips = append(chips, EvidenceChip{Kind: "abuse", Count: 1})
+			}
 		}
 	}
 	switch product {
@@ -807,6 +815,37 @@ func evidenceChips(product Product, sig *db.Signal, coalesceCount int) []Evidenc
 		chips = appendEvidence(chips, EvidenceChip{Kind: "coalesced", Count: coalesceCount + 1})
 	}
 	return chips
+}
+
+// enrichEvidenceFromMetrics replaces presence (1) chip counts with live 24h metrics when available.
+func enrichEvidenceFromMetrics(item *WorkItem, metrics map[string]LinkMetrics24h) {
+	if item == nil || item.LinkID == "" || len(item.Evidence) == 0 || len(metrics) == 0 {
+		return
+	}
+	m, ok := metrics[item.LinkID]
+	if !ok {
+		return
+	}
+	for i := range item.Evidence {
+		switch item.Evidence[i].Kind {
+		case "forward":
+			if m.ForwardSignals > 0 {
+				item.Evidence[i].Count = m.ForwardSignals
+			}
+		case "download":
+			if m.Downloads > 0 {
+				item.Evidence[i].Count = m.Downloads
+			}
+		case "capture":
+			if m.CaptureAttempts > 0 {
+				item.Evidence[i].Count = m.CaptureAttempts
+			}
+		case "engagement":
+			if m.Opens > 0 {
+				item.Evidence[i].Count = m.Opens
+			}
+		}
+	}
 }
 
 func appendEvidence(chips []EvidenceChip, chip EvidenceChip) []EvidenceChip {
@@ -865,6 +904,43 @@ func buildStrands(items []WorkItem) []Strand {
 		}
 	}
 	return strands
+}
+
+// classifyAnomaly maps risk_alert/anomaly into Abuse Guard, Commitment Ask, or Leak Watch.
+// Prefer structured metadata.eventType (stamped by suggestions security_event_rules);
+// free-text matching remains only as a legacy fallback for pre-metadata signals.
+func classifyAnomaly(sig *db.Signal) (Product, Verb, bool) {
+	switch signalEventType(sig) {
+	case "ask_escalated":
+		return ProductCommitmentAsk, VerbReply, true
+	case "rate_limit_exceeded", "ask_ai_rate_limited":
+		return ProductAbuseGuard, VerbReview, true
+	}
+	if reasonLooksLikeAskEscalation(sig) {
+		return ProductCommitmentAsk, VerbReply, true
+	}
+	if reasonLooksLikeAskAbuse(sig) {
+		return ProductAbuseGuard, VerbReview, true
+	}
+	return ProductLeakWatch, VerbReview, true
+}
+
+func signalEventType(sig *db.Signal) string {
+	if sig == nil {
+		return ""
+	}
+	md, ok := unmarshalStringMap(sig.Metadata)
+	if !ok {
+		return ""
+	}
+	if et := strings.TrimSpace(md["eventType"]); et != "" {
+		return et
+	}
+	// ruleId shape: security_<event_type>
+	if rid := strings.TrimSpace(md["ruleId"]); strings.HasPrefix(rid, "security_") {
+		return strings.TrimPrefix(rid, "security_")
+	}
+	return ""
 }
 
 func reasonLooksLikeAskAbuse(sig *db.Signal) bool {

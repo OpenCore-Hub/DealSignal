@@ -2587,9 +2587,12 @@ ON CONFLICT (workspace_id, source_type, source_id) DO UPDATE SET
     impact = EXCLUDED.impact,
     due_at = EXCLUDED.due_at,
     action_type = EXCLUDED.action_type,
-    -- Re-open resolved items when the event is still pending; respect snooze/ignore.
+    -- Keep host disposition. Radar "done" must stick across SyncWorkspace or
+    -- Complete appears to clear then silently returns on the next GET /radar.
+    -- Pending events still surface in the access-request inbox until resolved;
+    -- closeStale* marks done when the underlying request disappears.
     status = CASE
-        WHEN action_items.status IN ('snoozed', 'ignored') THEN action_items.status
+        WHEN action_items.status IN ('snoozed', 'ignored', 'done') THEN action_items.status
         ELSE 'pending'
     END,
     updated_at = now()
@@ -2668,9 +2671,13 @@ WHERE id = sqlc.arg(id) AND workspace_id = sqlc.arg(workspace_id)
 RETURNING *;
 
 -- name: CountRecentActionOutcomesByWorkspace :many
--- Closed-loop learning for Deal Radar: 30d done outcomes by signal subtype / action type.
+-- Closed-loop learning for Deal Radar: 30d done outcomes by eventType / subtype / action type.
 SELECT
-    COALESCE(NULLIF(s.subtype, ''), a.action_type) AS kind,
+    COALESCE(
+        NULLIF(s.metadata->>'eventType', ''),
+        NULLIF(s.subtype, ''),
+        a.action_type
+    ) AS kind,
     a.outcome,
     COUNT(*)::bigint AS count
 FROM action_items a
@@ -2693,7 +2700,12 @@ SELECT
         NULLIF(dr_ask.template_type, ''),
         ''
     )::text AS template_type,
-    COALESCE(NULLIF(s.subtype, ''), a.action_type) AS kind,
+    -- Prefer structured security eventType (Abuse Guard / Ask escalate) over subtype.
+    COALESCE(
+        NULLIF(s.metadata->>'eventType', ''),
+        NULLIF(s.subtype, ''),
+        a.action_type
+    ) AS kind,
     a.outcome,
     COUNT(*)::bigint AS count
 FROM action_items a

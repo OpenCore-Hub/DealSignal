@@ -266,6 +266,14 @@
       "empty": "Select a radar item to inspect why it matters.",
       "loading": "Loading evidence…",
       "error": "Could not load evidence.",
+      "degraded": "Some evidence facets failed to load — empty counters are not zero engagement.",
+      "degradedSections": {
+        "metrics": "24h metrics",
+        "top_pages": "Top pages",
+        "recent_visitors": "Recent visitors",
+        "security_events": "Security events",
+        "link_id": "Link identity"
+      },
       "keyPages": "Key pages",
       "topPages": "Top pages",
       "recentVisitors": "Recent visitors",
@@ -310,7 +318,8 @@
       "done": "Marked done",
       "snoozed": "Snoozed",
       "ignored": "Ignored",
-      "undoFailed": "Could not undo — refresh and try again"
+      "undoFailed": "Could not undo — refresh and try again",
+      "primaryUnavailable": "No open destination for this item — use Evidence or complete it here."
     },
     "lensLabel": "Role lens",
     "lens": {
@@ -337,6 +346,12 @@
       "description": "You cleared {{count}} item(s) today. Trends and content diagnosis stay in Insights — not in this action lane."
     },
     "noiseHint": "{{product}} was soft-demoted ({{rate}}% false positive over {{sample}} closed items).",
+    "feedDegraded": "Some ranking signals failed to load — empty filters/metrics are not clean zero.",
+    "feedDegradedSections": {
+      "internal_emails": "Member email filter",
+      "capture_metrics": "Capture metrics",
+      "ip_metrics": "IP cluster metrics"
+    },
     "shortcuts": {
       "hint": "J/K move · E done · S snooze 1d"
     }

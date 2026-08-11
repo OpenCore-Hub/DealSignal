@@ -52,7 +52,7 @@ import {
   getMockSignalFeed,
 } from "./data";
 import { computeMockLinkHeat } from "./mockHeat";
-import type { RadarFeed } from "@/lib/radarQueue";
+import { applyRadarCircleLens, type RadarFeed } from "@/lib/radarQueue";
 
 /** Playwright E2E override for GET /radar — Cache-backed so full page.goto keeps it. */
 let mockRadarFeedOverride: RadarFeed | null = null;
@@ -5060,15 +5060,14 @@ export const handlers = [
   http.get("*/api/workspaces/:workspaceSlug/radar", async ({ params, request }) => {
     await hydrateRadarFeedOverride();
     const slug = String(params.workspaceSlug || "acme-capital");
-    const circle = new URL(request.url).searchParams.get("circle") || "founder";
+    const circleRaw = new URL(request.url).searchParams.get("circle") || "founder";
+    const circle =
+      circleRaw === "investor_ir" || circleRaw === "sales" || circleRaw === "founder"
+        ? circleRaw
+        : "founder";
     const feed = mockRadarFeedOverride ?? getMockRadarFeed(slug);
-    return HttpResponse.json({
-      ...feed,
-      lens:
-        circle === "investor_ir" || circle === "sales"
-          ? circle
-          : feed.lens || "founder",
-    });
+    // Re-rank nextUp / strand order for the role lens (mirrors API Compile).
+    return HttpResponse.json(applyRadarCircleLens(feed, circle));
   }),
 
   http.get(
@@ -5076,7 +5075,12 @@ export const handlers = [
     ({ params }) => {
       const slug = String(params.workspaceSlug || "acme-capital");
       const pack = getMockRadarEvidence(String(params.id), slug);
-      if (!pack) return new HttpResponse(null, { status: 404 });
+      if (!pack) {
+        return HttpResponse.json(
+          { code: "not_found", message: "radar item not found" },
+          { status: 404 },
+        );
+      }
       return HttpResponse.json(pack);
     },
   ),
@@ -5090,7 +5094,12 @@ export const handlers = [
         outcome?: ActionItem["outcome"];
       };
       const action = mockActionItems.find((a) => a.id === params.id);
-      if (!action) return new HttpResponse(null, { status: 404 });
+      if (!action) {
+        return HttpResponse.json(
+          { code: "not_found", message: "radar item not found" },
+          { status: 404 },
+        );
+      }
       if (body?.status) action.status = body.status as ActionItem["status"];
       if (body?.status === "snoozed" && body.snooze_hours) {
         action.snoozedUntil = new Date(

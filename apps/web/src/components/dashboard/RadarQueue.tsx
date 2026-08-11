@@ -241,6 +241,22 @@ export function RadarQueue({
         </div>
       </div>
 
+      {feed.degradedSections && feed.degradedSections.length > 0 ? (
+        <p
+          className="mb-3 rounded-md border border-warning-500/30 bg-warning-500/10 px-2.5 py-2 text-caption text-warning-500"
+          data-testid="radar-feed-degraded"
+        >
+          {t("radar.feedDegraded")}{" "}
+          {feed.degradedSections
+            .map((section) =>
+              t(`radar.feedDegradedSections.${section}`, {
+                defaultValue: section,
+              }),
+            )
+            .join(" · ")}
+        </p>
+      ) : null}
+
       {feed.noiseHints && feed.noiseHints.length > 0 ? (
         <p
           className="mb-3 text-caption text-muted-foreground"

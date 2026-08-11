@@ -1051,6 +1051,129 @@ export async function fetchDashboardActionItems(
   return body.actionItems ?? [];
 }
 
+// ── Deal Radar (real backend) ─────────────────────────────────────
+
+export interface RadarFeedResponse {
+  nextUp: { id: string; product: string } | null;
+  items: Array<{
+    id: string;
+    product: string;
+    headline?: string;
+    actionId?: string;
+  }>;
+  clearedToday: number;
+  counts?: Record<string, number>;
+  degradedSections?: string[];
+  noiseHints?: unknown[];
+}
+
+export interface RadarEvidenceResponse {
+  itemId: string;
+  product: string;
+  headline?: string;
+  linkId?: string;
+  degradedSections?: string[];
+}
+
+export async function fetchRadar(
+  workspaceSlug: string,
+  circle?: string,
+): Promise<RadarFeedResponse> {
+  const qs = circle ? `?circle=${encodeURIComponent(circle)}` : "";
+  const res = await apiFetch(`/api/workspaces/${workspaceSlug}/radar${qs}`);
+  if (!res.ok) throw new Error(`GET radar failed: ${res.status} ${await res.text()}`);
+  return res.json() as Promise<RadarFeedResponse>;
+}
+
+export async function fetchRadarEvidence(
+  workspaceSlug: string,
+  itemId: string,
+): Promise<{ res: Response; body: RadarEvidenceResponse | Record<string, unknown> }> {
+  const res = await apiFetch(
+    `/api/workspaces/${workspaceSlug}/radar/items/${itemId}/evidence`,
+  );
+  let body: RadarEvidenceResponse | Record<string, unknown> = {};
+  try {
+    body = (await res.json()) as RadarEvidenceResponse;
+  } catch {
+    body = {};
+  }
+  return { res, body };
+}
+
+export async function patchRadarItem(
+  workspaceSlug: string,
+  itemId: string,
+  body: { status: string; snooze_hours?: number; outcome?: string },
+): Promise<{ res: Response; body: Record<string, unknown> }> {
+  const res = await apiFetch(`/api/workspaces/${workspaceSlug}/radar/items/${itemId}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+  let parsed: Record<string, unknown> = {};
+  try {
+    parsed = (await res.json()) as Record<string, unknown>;
+  } catch {
+    parsed = {};
+  }
+  return { res, body: parsed };
+}
+
+/**
+ * Seed a document share + outsider access request so SyncWorkspace emits a
+ * pending approve action that Compiles as diligence_gate on GET /radar.
+ */
+export async function seedRadarDiligenceGate(workspaceSlug: string): Promise<{
+  documentId: string;
+  linkId: string;
+  applicantEmail: string;
+}> {
+  const doc = await seedDocument(workspaceSlug);
+  const link = await seedLink(workspaceSlug, doc.id, {
+    name: `Radar Gate Link ${Date.now()}`,
+    permissionType: "email",
+    requireEmail: true,
+    allowedEmails: ["allowed-radar@example.com"],
+  });
+  const applicantEmail = `radar-applicant-${Date.now()}@example.com`;
+  const req = await apiFetch(`/api/v1/public/links/${link.publicToken}/access-requests`, {
+    method: "POST",
+    body: JSON.stringify({
+      email: applicantEmail,
+      reason: "deal radar real e2e diligence gate",
+      signer_name: "Radar E2E",
+    }),
+  });
+  if (![200, 201].includes(req.status)) {
+    throw new Error(
+      `access-request seed failed: ${req.status} ${await req.text()}`,
+    );
+  }
+  return { documentId: doc.id, linkId: link.id, applicantEmail };
+}
+
+/** Poll GET /radar until a product appears (lazy sync on feed read). */
+export async function waitForRadarProduct(
+  workspaceSlug: string,
+  product: string,
+  opts: { timeoutMs?: number; intervalMs?: number } = {},
+): Promise<RadarFeedResponse["items"][number]> {
+  const timeoutMs = opts.timeoutMs ?? 15_000;
+  const intervalMs = opts.intervalMs ?? 500;
+  const deadline = Date.now() + timeoutMs;
+  let lastCount = 0;
+  while (Date.now() < deadline) {
+    const feed = await fetchRadar(workspaceSlug);
+    lastCount = feed.items.length;
+    const hit = feed.items.find((i) => i.product === product);
+    if (hit) return hit;
+    await sleep(intervalMs);
+  }
+  throw new Error(
+    `radar did not emit product=${product} within ${timeoutMs}ms (last items=${lastCount})`,
+  );
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }

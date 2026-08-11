@@ -266,6 +266,14 @@
       "empty": "选择一条雷达工单，查看为何此刻重要。",
       "loading": "正在加载证据…",
       "error": "证据加载失败。",
+      "degraded": "部分证据未能加载——空计数不代表零互动。",
+      "degradedSections": {
+        "metrics": "24h 指标",
+        "top_pages": "高频页面",
+        "recent_visitors": "最近访客",
+        "security_events": "安全事件",
+        "link_id": "链接身份"
+      },
       "keyPages": "关键页",
       "topPages": "高频页面",
       "recentVisitors": "最近访客",
@@ -310,7 +318,8 @@
       "done": "已标记完成",
       "snoozed": "已延后",
       "ignored": "已忽略",
-      "undoFailed": "撤销失败 — 请刷新后重试"
+      "undoFailed": "撤销失败 — 请刷新后重试",
+      "primaryUnavailable": "此事项暂无可用跳转 — 请使用证据栏或在此完成。"
     },
     "lensLabel": "角色透镜",
     "lens": {
@@ -337,6 +346,12 @@
       "description": "今天已清完 {{count}} 项。趋势与内容诊断在洞察里继续看——不占这条行动通道。"
     },
     "noiseHint": "{{product}} 已按闭环结果软降权（近 {{sample}} 次完成中误报 {{rate}}%）。",
+    "feedDegraded": "部分排序信号未能加载——空过滤/指标不代表干净零值。",
+    "feedDegradedSections": {
+      "internal_emails": "成员邮箱过滤",
+      "capture_metrics": "截屏指标",
+      "ip_metrics": "IP 聚集指标"
+    },
     "shortcuts": {
       "hint": "J/K 切换 · E 完成 · S 延后 1 天"
     }

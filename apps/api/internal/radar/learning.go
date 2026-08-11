@@ -25,12 +25,14 @@ type OutcomeRow struct {
 }
 
 type outcomeAgg struct {
-	fp, total int
+	fp, success, total int
 }
 
-// LearnFromOutcomes turns 30d completion outcomes into demotion boosts.
-// Phase C: prefers scenario×product buckets; also returns workspace-global demotes
-// for items without a room scenario.
+// LearnFromOutcomes turns 30d completion outcomes into rank adjustments.
+// Positive values soft-demote noisy products; negative values mildly promote
+// high-success products (lower productRank = sooner). Demote always wins over promote.
+// Phase C: prefers scenario×product buckets; workspace-global applies only when
+// the item has no room scenario (see demoteBoostForItem).
 func LearnFromOutcomes(rows []OutcomeRow) (global map[Product]int, byScenario map[Scenario]map[Product]int, hints []NoiseHint) {
 	globalAgg := map[Product]*outcomeAgg{}
 	scenarioAgg := map[Scenario]map[Product]*outcomeAgg{}
@@ -48,6 +50,8 @@ func LearnFromOutcomes(rows []OutcomeRow) (global map[Product]int, byScenario ma
 		ga.total += r.Count
 		if r.Outcome == string(OutcomeFalsePositive) {
 			ga.fp += r.Count
+		} else if isSuccessOutcome(r.Outcome) {
+			ga.success += r.Count
 		}
 
 		sc := NormalizeScenario(r.Scenario)
@@ -67,45 +71,63 @@ func LearnFromOutcomes(rows []OutcomeRow) (global map[Product]int, byScenario ma
 		sa.total += r.Count
 		if r.Outcome == string(OutcomeFalsePositive) {
 			sa.fp += r.Count
+		} else if isSuccessOutcome(r.Outcome) {
+			sa.success += r.Count
 		}
 	}
 
 	global = map[Product]int{}
 	for p, a := range globalAgg {
-		boost, rate := demoteFromAgg(a)
-		if boost == 0 {
-			continue
-		}
-		global[p] = boost
-		hints = append(hints, NoiseHint{
-			Product:           p,
-			FalsePositiveRate: round2(rate),
-			Sample:            a.total,
-			DemoteBoost:       boost,
-		})
-	}
-
-	byScenario = map[Scenario]map[Product]int{}
-	for sc, byProd := range scenarioAgg {
-		for p, a := range byProd {
-			boost, rate := demoteFromAgg(a)
-			if boost == 0 {
-				continue
-			}
-			if byScenario[sc] == nil {
-				byScenario[sc] = map[Product]int{}
-			}
-			byScenario[sc][p] = boost
+		if boost, rate := demoteFromAgg(a); boost > 0 {
+			global[p] = boost
 			hints = append(hints, NoiseHint{
-				Scenario:          string(sc),
 				Product:           p,
 				FalsePositiveRate: round2(rate),
 				Sample:            a.total,
 				DemoteBoost:       boost,
 			})
+			continue
+		}
+		if boost, _ := promoteFromAgg(a); boost < 0 {
+			global[p] = boost
+		}
+	}
+
+	byScenario = map[Scenario]map[Product]int{}
+	for sc, byProd := range scenarioAgg {
+		for p, a := range byProd {
+			if boost, rate := demoteFromAgg(a); boost > 0 {
+				if byScenario[sc] == nil {
+					byScenario[sc] = map[Product]int{}
+				}
+				byScenario[sc][p] = boost
+				hints = append(hints, NoiseHint{
+					Scenario:          string(sc),
+					Product:           p,
+					FalsePositiveRate: round2(rate),
+					Sample:            a.total,
+					DemoteBoost:       boost,
+				})
+				continue
+			}
+			if boost, _ := promoteFromAgg(a); boost < 0 {
+				if byScenario[sc] == nil {
+					byScenario[sc] = map[Product]int{}
+				}
+				byScenario[sc][p] = boost
+			}
 		}
 	}
 	return global, byScenario, hints
+}
+
+func isSuccessOutcome(outcome string) bool {
+	switch Outcome(outcome) {
+	case OutcomeActed, OutcomeApproved, OutcomeReplied, OutcomeRenewed:
+		return true
+	default:
+		return false
+	}
 }
 
 func demoteFromAgg(a *outcomeAgg) (boost int, rate float64) {
@@ -120,6 +142,27 @@ func demoteFromAgg(a *outcomeAgg) (boost int, rate float64) {
 		return 2, rate
 	default:
 		return 0, rate
+	}
+}
+
+// promoteFromAgg returns a negative rank adjustment for high-success, low-noise products.
+// Stricter sample than demote so one lucky streak cannot invert product bands.
+func promoteFromAgg(a *outcomeAgg) (boost int, successRate float64) {
+	if a == nil || a.total < 5 {
+		return 0, 0
+	}
+	fpRate := float64(a.fp) / float64(a.total)
+	if fpRate >= 0.35 {
+		return 0, 0
+	}
+	successRate = float64(a.success) / float64(a.total)
+	switch {
+	case a.total >= 8 && successRate >= 0.8:
+		return -2, successRate
+	case successRate >= 0.7:
+		return -1, successRate
+	default:
+		return 0, successRate
 	}
 }
 
@@ -145,8 +188,15 @@ func demoteBoostForItem(global map[Product]int, byScenario map[Scenario]map[Prod
 func productFromOutcomeKind(kind string) Product {
 	k := strings.ToLower(strings.TrimSpace(kind))
 	switch k {
+	case "rate_limit_exceeded", "ask_ai_rate_limited":
+		return ProductAbuseGuard
+	case "ask_escalated":
+		return ProductCommitmentAsk
+	case "abnormal_access_pattern":
+		return ProductLeakWatch
 	case suggestions.SubtypeForward, suggestions.SubtypeDownload,
 		suggestions.SubtypeBlockedAttempt, suggestions.SubtypeCaptureAttempt,
+		// Legacy anomaly rows without metadata.eventType still learn as Leak Watch.
 		suggestions.SubtypeAnomaly, "review":
 		return ProductLeakWatch
 	case "approve", "sign", "verify":
@@ -159,8 +209,6 @@ func productFromOutcomeKind(kind string) Product {
 	case suggestions.SubtypeExpired, suggestions.SubtypeAccessExhausted,
 		suggestions.SubtypeAccessRevoked, "renew":
 		return ProductAccessDecay
-	case "rate_limit_exceeded", "ask_ai_rate_limited":
-		return ProductAbuseGuard
 	default:
 		return ""
 	}

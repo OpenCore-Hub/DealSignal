@@ -19,7 +19,7 @@ vi.mock("@/lib/api", () => ({
 }));
 
 vi.mock("sonner", () => ({
-  toast: Object.assign(vi.fn(), { error: vi.fn() }),
+  toast: Object.assign(vi.fn(), { error: vi.fn(), message: vi.fn() }),
 }));
 
 vi.mock("react-router", async () => {
@@ -125,6 +125,7 @@ async function renderPage(waitForLoad = true, entry = "/acme/dashboard") {
       "radar.toast.done": "Marked done",
       "radar.toast.snoozed": "Snoozed",
       "radar.toast.ignored": "Ignored",
+      "radar.toast.primaryUnavailable": "No open destination for this item",
       "radar.snoozeHours.24": "Snooze 1 day",
       "radar.snoozeHours.72": "Snooze 3 days",
       "radar.snoozeHours.168": "Snooze 7 days",
@@ -145,6 +146,10 @@ async function renderPage(waitForLoad = true, entry = "/acme/dashboard") {
       "radar.inboxZero.title": "Lane clear for today",
       "radar.inboxZero.description": "Cleared {{count}}",
       "radar.noiseHint": "{{product}} demoted {{rate}}% / {{sample}}",
+      "radar.feedDegraded": "Some ranking signals failed to load.",
+      "radar.feedDegradedSections.internal_emails": "Member email filter",
+      "radar.feedDegradedSections.capture_metrics": "Capture metrics",
+      "radar.feedDegradedSections.ip_metrics": "IP cluster metrics",
       "radar.shortcuts.hint": "J/K move · E done · S snooze 1d",
       "radar.dealFallback": "Workspace",
       "radar.toast.undoFailed": "Could not undo",
@@ -242,6 +247,25 @@ describe("DashboardPage inbox", () => {
     expect(screen.queryByText("Welcome back")).not.toBeInTheDocument();
   });
 
+  it("renders closed-loop noise hint from feed", async () => {
+    mockFns.getRadar.mockResolvedValue({
+      ...makeFeed([makeItem({ product: "leak_watch", id: "act-leak", actionId: "act-leak" })]),
+      noiseHints: [
+        {
+          product: "leak_watch",
+          falsePositiveRate: 0.4,
+          sample: 5,
+          demoteBoost: 2,
+        },
+      ],
+    });
+    await renderPage();
+    await waitFor(() => {
+      expect(screen.getByTestId("radar-noise-hints")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("radar-noise-hints")).toHaveTextContent(/Leak/i);
+  });
+
   it("shows next-up card when items exist", async () => {
     mockFns.getRadar.mockResolvedValue(makeFeed([makeItem()]));
     await renderPage();
@@ -285,5 +309,106 @@ describe("DashboardPage inbox", () => {
     const firstPath = mockFns.navigate.mock.calls[0][0] as string;
     expect(firstPath).toContain("tab=shared");
     expect(firstPath).toContain("linkId=link-doc");
+  });
+
+  it("toasts when primary CTA has no destination", async () => {
+    const { toast } = await import("sonner");
+    mockFns.getRadar.mockResolvedValue(
+      makeFeed([
+        makeItem({
+          navigatePath: undefined,
+          evidencePath: undefined,
+          mailtoHref: null,
+        }),
+      ]),
+    );
+    await renderPage();
+    const nextUp = await screen.findByTestId("radar-next-up");
+    fireEvent.click(within(nextUp).getByRole("button", { name: /^Approve$/i }));
+    expect(mockFns.navigate).not.toHaveBeenCalled();
+    expect(toast.message).toHaveBeenCalledWith(
+      "No open destination for this item",
+    );
+  });
+
+  it("refetches after direct complete on buying_window", async () => {
+    const item = makeItem({
+      id: "act-buy",
+      actionId: "act-buy",
+      product: "buying_window",
+      verb: "email",
+      headline: "Follow up with buyer",
+      navigatePath: "/acme/links/l1",
+      evidencePath: "/acme/links/l1",
+    });
+    mockFns.getRadar
+      .mockResolvedValueOnce(makeFeed([item]))
+      .mockResolvedValueOnce(makeFeed([]));
+
+    await renderPage();
+    await screen.findByTestId("radar-next-up");
+
+    fireEvent.click(screen.getAllByRole("button", { name: /Complete/i })[0]);
+
+    await waitFor(() => {
+      expect(mockFns.updateRadarItem).toHaveBeenCalledWith(
+        "act-buy",
+        "done",
+        undefined,
+        "acted",
+      );
+    });
+    await waitFor(() => {
+      expect(mockFns.getRadar.mock.calls.length).toBeGreaterThanOrEqual(2);
+    });
+  });
+
+  it("renders feed degradedSections honesty banner", async () => {
+    mockFns.getRadar.mockResolvedValue({
+      ...makeFeed([makeItem()]),
+      degradedSections: ["internal_emails", "capture_metrics"],
+    });
+    await renderPage();
+    await waitFor(() => {
+      expect(screen.getByTestId("radar-feed-degraded")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("radar-feed-degraded")).toHaveTextContent(
+      /Member email filter/i,
+    );
+  });
+
+  it("rolls back optimistic clear when PATCH returns not_found", async () => {
+    const { toast } = await import("sonner");
+    const { ApiError } = await import("@/lib/apiClient");
+    const item = makeItem({
+      id: "act-gone",
+      actionId: "act-gone",
+      product: "buying_window",
+      verb: "email",
+      headline: "Follow up gone buyer",
+      navigatePath: "/acme/links/l1",
+      evidencePath: "/acme/links/l1",
+    });
+    mockFns.getRadar.mockResolvedValue(makeFeed([item]));
+    mockFns.updateRadarItem.mockRejectedValue(
+      new ApiError({
+        status: 404,
+        code: "not_found",
+        message: "radar item not found",
+        requestId: "test",
+      }),
+    );
+
+    await renderPage();
+    await screen.findByTestId("radar-next-up");
+    fireEvent.click(screen.getAllByRole("button", { name: /Complete/i })[0]);
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalled();
+    });
+    // Item restored after rollback (still in next-up / queue).
+    expect(screen.getByTestId("radar-next-up")).toHaveTextContent(
+      "Follow up gone buyer",
+    );
   });
 });

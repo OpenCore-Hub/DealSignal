@@ -1,0 +1,417 @@
+openapi: 3.0.3
+info:
+  title: DealSignal Deal Radar API
+  version: 1.0.0
+  description: |
+    Workspace-scoped Deal Radar contract. Source of truth for runtime shapes remains
+    Go structs in apps/api/internal/radar; this document freezes the HTTP surface for
+    FE / MSW / clients. Scenario packs are rank/copy/SLA overlays on the same six
+    products — not separate product engines.
+servers:
+  - url: /api/v1
+paths:
+  /workspaces/{workspaceSlug}/radar:
+    get:
+      operationId: getRadar
+      summary: Compiled Deal Radar feed
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceSlug"
+        - name: circle
+          in: query
+          required: false
+          description: Role lens override (founder | investor_ir | sales). Empty → inferred/default.
+          schema:
+            type: string
+            enum: [founder, investor_ir, sales]
+      responses:
+        "200":
+          description: Ranked feed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RadarFeed"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /workspaces/{workspaceSlug}/radar/items/{id}/evidence:
+    get:
+      operationId: getRadarEvidence
+      summary: Evidence pack for a radar work item (action UUID)
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceSlug"
+        - $ref: "#/components/parameters/RadarItemID"
+      responses:
+        "200":
+          description: Evidence pack (may include degradedSections)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RadarEvidencePack"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /workspaces/{workspaceSlug}/radar/items/{id}:
+    patch:
+      operationId: updateRadarItem
+      summary: Update radar work item status / outcome
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceSlug"
+        - $ref: "#/components/parameters/RadarItemID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateRadarItemRequest"
+      responses:
+        "200":
+          description: Updated action item
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ActionItem"
+        "400":
+          $ref: "#/components/responses/InvalidInput"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+components:
+  parameters:
+    WorkspaceSlug:
+      name: workspaceSlug
+      in: path
+      required: true
+      schema:
+        type: string
+    RadarItemID:
+      name: id
+      in: path
+      required: true
+      description: Action item UUID (Compile work-item id)
+      schema:
+        type: string
+        format: uuid
+  responses:
+    NotFound:
+      description: Missing or non-radar item
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorBody"
+    InvalidInput:
+      description: Invalid status, snooze_hours, or outcome
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorBody"
+    InternalError:
+      description: Unexpected server error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorBody"
+  schemas:
+    ErrorBody:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+    RadarProduct:
+      type: string
+      enum:
+        - buying_window
+        - diligence_gate
+        - commitment_ask
+        - leak_watch
+        - access_decay
+        - abuse_guard
+    RadarOutcome:
+      type: string
+      enum: [acted, false_positive, renewed, approved, replied, other]
+    RadarFeed:
+      type: object
+      required: [nextUp, strands, items, clearedToday, counts, lens, defaultLens, lensSource]
+      properties:
+        nextUp:
+          oneOf:
+            - $ref: "#/components/schemas/RadarWorkItem"
+            - type: "null"
+        strands:
+          type: array
+          items:
+            $ref: "#/components/schemas/RadarStrand"
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/RadarWorkItem"
+        clearedToday:
+          type: integer
+        counts:
+          type: object
+          additionalProperties:
+            type: integer
+        lens:
+          type: string
+        defaultLens:
+          type: string
+        lensSource:
+          type: string
+          enum: [query, inferred, default]
+        scenarios:
+          type: array
+          items:
+            type: string
+        scenarioPack:
+          $ref: "#/components/schemas/ScenarioPackMeta"
+        noiseHints:
+          type: array
+          items:
+            $ref: "#/components/schemas/NoiseHint"
+        degradedSections:
+          type: array
+          description: Ranking-critical facets that failed to load (not clean zero).
+          items:
+            type: string
+            enum: [internal_emails, capture_metrics, ip_metrics]
+    RadarStrand:
+      type: object
+      required: [dealKey, dealName, items]
+      properties:
+        dealKey:
+          type: string
+        dealName:
+          type: string
+        dealRoomId:
+          type: string
+        scenario:
+          type: string
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/RadarWorkItem"
+    RadarWorkItem:
+      type: object
+      required: [id, product, headline, verb, priority, slaDueAt, createdAt, dealKey, dealName, actionId]
+      properties:
+        id:
+          type: string
+        product:
+          $ref: "#/components/schemas/RadarProduct"
+        headline:
+          type: string
+        headlineCode:
+          type: string
+        subtitle:
+          type: string
+        actor:
+          type: string
+        verb:
+          type: string
+        priority:
+          type: string
+          enum: [high, medium, low]
+        confidence:
+          type: string
+          enum: [low, medium, high]
+        slaDueAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        dealKey:
+          type: string
+        dealName:
+          type: string
+        dealRoomId:
+          type: string
+        linkId:
+          type: string
+        documentId:
+          type: string
+        contactId:
+          type: string
+        actionId:
+          type: string
+        signalId:
+          type: string
+        navigatePath:
+          type: string
+        evidencePath:
+          type: string
+        contactEmail:
+          type: string
+        documentTitle:
+          type: string
+        coalescedFrom:
+          type: array
+          items:
+            type: string
+        whyNowCode:
+          type: string
+        whyNowHours:
+          type: integer
+        evidence:
+          type: array
+          items:
+            type: object
+            properties:
+              kind:
+                type: string
+              count:
+                type: integer
+        state:
+          type: string
+          enum: [open]
+          description: Open-feed items are always open; done/snoozed/ignored leave the feed via PATCH.
+        scenario:
+          type: string
+    ScenarioPackMeta:
+      type: object
+      required: [scenario, defaultCircle, depth]
+      properties:
+        scenario:
+          type: string
+        defaultCircle:
+          type: string
+        depth:
+          type: string
+          enum: [base, p0, p1, lite]
+          description: Productization phase of the scenario overlay (not a separate SKU).
+        keyPageCategories:
+          type: array
+          items:
+            type: string
+        insightsKpi:
+          type: array
+          items:
+            type: string
+    NoiseHint:
+      type: object
+      required: [product, falsePositiveRate, sample, demoteBoost]
+      properties:
+        scenario:
+          type: string
+        product:
+          $ref: "#/components/schemas/RadarProduct"
+        falsePositiveRate:
+          type: number
+        sample:
+          type: integer
+        demoteBoost:
+          type: integer
+    RadarEvidencePack:
+      type: object
+      required: [itemId, product, headline]
+      properties:
+        itemId:
+          type: string
+        product:
+          $ref: "#/components/schemas/RadarProduct"
+        headline:
+          type: string
+        headlineCode:
+          type: string
+        whyNow:
+          type: string
+          deprecated: true
+        whyNowCode:
+          type: string
+        whyNowHours:
+          type: integer
+        actor:
+          type: string
+        dealName:
+          type: string
+        linkId:
+          type: string
+        documentId:
+          type: string
+        navigatePath:
+          type: string
+        evidencePath:
+          type: string
+        insightsPath:
+          type: string
+        metrics:
+          type: object
+          properties:
+            opens24h:
+              type: integer
+            uniqueVisitors24h:
+              type: integer
+            forwardSignals24h:
+              type: integer
+            downloads24h:
+              type: integer
+            captureAttempts24h:
+              type: integer
+        keyPageTitles:
+          type: array
+          items:
+            type: string
+        topPages:
+          type: array
+          items:
+            type: object
+            properties:
+              pageNumber:
+                type: integer
+              views:
+                type: integer
+              avgDurationSeconds:
+                type: number
+        recentVisitors:
+          type: array
+          items:
+            type: object
+            properties:
+              visitorId:
+                type: string
+              email:
+                type: string
+              totalViews:
+                type: integer
+              lastAccessAt:
+                type: string
+                format: date-time
+        securityEvents:
+          type: array
+          items:
+            type: object
+            properties:
+              eventType:
+                type: string
+              reason:
+                type: string
+              email:
+                type: string
+              createdAt:
+                type: string
+                format: date-time
+        degradedSections:
+          type: array
+          description: Facets that failed to load — empty counters are not zero engagement.
+          items:
+            type: string
+            enum: [metrics, top_pages, recent_visitors, security_events, link_id]
+    UpdateRadarItemRequest:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [pending, done, snoozed, ignored]
+        snooze_hours:
+          type: integer
+          enum: [24, 72, 168]
+        outcome:
+          $ref: "#/components/schemas/RadarOutcome"
+    ActionItem:
+      type: object
+      description: Existing signal.ActionItem JSON shape returned by PATCH.
+      additionalProperties: true

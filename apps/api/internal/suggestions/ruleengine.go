@@ -273,6 +273,13 @@ func (e *RuleEngine) Evaluate(input RuleInput) (matches []RuleMatch, bucketSkipp
 		if metaErr != nil {
 			return nil, bucketSkipped, shadowMatched, fmt.Errorf("security event %s metadata: %w", ev.EventType, metaErr)
 		}
+		// Stamp structured classifiers for Deal Radar (Abuse Guard / Ask escalate).
+		// Free-text reason alone is not a stable product boundary across locales.
+		if md == nil {
+			md = map[string]string{}
+		}
+		md["eventType"] = ev.EventType
+		md["ruleId"] = "security_" + ev.EventType
 
 		matches = append(matches, RuleMatch{
 			ID:       "security_" + ev.EventType,

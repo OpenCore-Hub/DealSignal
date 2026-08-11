@@ -1,7 +1,9 @@
 /** @vitest-environment jsdom */
 import { describe, expect, it } from "vitest";
 import {
+  applyRadarCircleLens,
   countRadarFilters,
+  decrementRadarCounts,
   defaultOutcomeForProduct,
   filterRadarItems,
   filterServerStrands,
@@ -11,10 +13,12 @@ import {
   outcomesForProduct,
   parseRadarCircle,
   parseRadarFilter,
+  productRankForCircle,
   radarHeadlineKey,
   radarWhyNowFallbackKey,
   radarWhyNowKey,
   withMailtoHrefs,
+  type RadarFeed,
   type RadarStrand,
   type RadarWorkItem,
 } from "./radarQueue";
@@ -54,6 +58,64 @@ describe("radarQueue", () => {
     expect(filterRadarItems(items, "diligence_gate")).toHaveLength(1);
     expect(countRadarFilters(items).all).toBe(2);
     expect(countRadarFilters(items).buying_window).toBe(1);
+  });
+
+  it("decrements product counts on optimistic clear", () => {
+    const counts = decrementRadarCounts(
+      { all: 3, buying_window: 2, diligence_gate: 1 },
+      3,
+      "buying_window",
+    );
+    expect(counts.all).toBe(2);
+    expect(counts.buying_window).toBe(1);
+    expect(counts.diligence_gate).toBe(1);
+  });
+
+  it("sales lens ranks buying_window ahead of diligence_gate", () => {
+    expect(productRankForCircle("sales", "buying_window")).toBeLessThan(
+      productRankForCircle("sales", "diligence_gate"),
+    );
+    const feed: RadarFeed = {
+      nextUp: null,
+      strands: [
+        {
+          dealKey: "d",
+          dealName: "D",
+          items: [
+            baseItem({
+              id: "gate",
+              product: "diligence_gate",
+              verb: "approve",
+              createdAt: "2026-06-20T10:00:00Z",
+            }),
+            baseItem({
+              id: "buy",
+              product: "buying_window",
+              createdAt: "2026-06-20T11:00:00Z",
+            }),
+          ],
+        },
+      ],
+      items: [
+        baseItem({
+          id: "gate",
+          product: "diligence_gate",
+          verb: "approve",
+          createdAt: "2026-06-20T10:00:00Z",
+        }),
+        baseItem({
+          id: "buy",
+          product: "buying_window",
+          createdAt: "2026-06-20T11:00:00Z",
+        }),
+      ],
+      clearedToday: 0,
+      counts: { all: 2 },
+      lens: "founder",
+    };
+    const sales = applyRadarCircleLens(feed, "sales");
+    expect(sales.nextUp?.id).toBe("buy");
+    expect(sales.lens).toBe("sales");
   });
 
   it("builds mailto hrefs for email verbs", () => {

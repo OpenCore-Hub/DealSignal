@@ -8,55 +8,91 @@ import {
 
 let workspaceSlug: string;
 
-test.describe("Dashboard (real backend)", () => {
+test.describe("Deal Radar (real backend)", () => {
   test.beforeAll(async () => {
     const seed = await seedRealBackend();
     workspaceSlug = seed.workspaceSlug;
-    // Upload a document so dashboard has data
-    await seedDocument(workspaceSlug);
+  // Document seed exercises deal-room surfaces; deep radar contract is
+  // apps/web/e2e/deal-radar-real.spec.ts (access-request → evidence → PATCH).
+  await seedDocument(workspaceSlug);
   });
 
-  test("renders dashboard heading and summary cards", async ({ page }) => {
-    attachDebug(page);
-    await authenticatePage(page);
-    await page.goto(`/${workspaceSlug}/dashboard`);
-    await expect(page.getByRole("heading", { name: "Deal Radar" })).toBeVisible({ timeout: 10000 });
-    await expect(page.getByText("Hot signals", { exact: true })).toBeVisible({ timeout: 5000 });
-    await expect(page.getByText("Pending actions", { exact: true })).toBeVisible({ timeout: 5000 });
-  });
-
-  test("renders signal and recent document sections", async ({ page }) => {
+  test("renders Deal Radar shell and role lens", async ({ page }) => {
     attachDebug(page);
     await authenticatePage(page);
     await page.goto(`/${workspaceSlug}/dashboard`);
 
-    await expect(page.getByText("Signals", { exact: true }).first()).toBeVisible({ timeout: 10000 });
-    await expect(page.getByText("Recent documents", { exact: true })).toBeVisible({ timeout: 5000 });
-    await expect(page.getByText("Actions", { exact: true }).first()).toBeVisible({ timeout: 5000 });
-    await expect(page.getByText("Heat map", { exact: true })).toBeVisible({ timeout: 5000 });
+    await expect(
+      page.getByRole("heading", { name: "Deal Radar" }),
+    ).toBeVisible({ timeout: 10000 });
+
+    await expect(page.getByTestId("radar-queue")).toBeVisible({
+      timeout: 10000,
+    });
+    await expect(page.getByTestId("radar-lens-founder")).toBeVisible();
+    await expect(page.getByTestId("radar-lens-investor_ir")).toBeVisible();
+    await expect(page.getByTestId("radar-lens-sales")).toBeVisible();
+
+    await expect(page.getByTestId("radar-cleared-today")).toBeVisible();
+    await expect(page.getByTestId("radar-evidence-rail")).toBeVisible();
+    await expect(page.getByTestId("radar-insights-link")).toBeVisible();
   });
 
-  test("navigates from recent documents to document detail", async ({ page }) => {
+  test("empty or loaded focus surface is real (not collage UI)", async ({
+    page,
+  }) => {
     attachDebug(page);
     await authenticatePage(page);
     await page.goto(`/${workspaceSlug}/dashboard`);
 
-    // Find the recently uploaded document in the list
-    const docLink = page.getByText("sample.pdf").first();
-    await expect(docLink).toBeVisible({ timeout: 10000 });
-    await docLink.click();
+    await expect(
+      page.getByRole("heading", { name: "Deal Radar" }),
+    ).toBeVisible({ timeout: 10000 });
 
-    // Should navigate to document detail
-    await expect(page).toHaveURL(/\/documents\//, { timeout: 10000 });
-    await expect(page.getByText("sample.pdf").first()).toBeVisible({ timeout: 5000 });
+    // Removed collage dashboard must stay gone.
+    await expect(page.getByText("Hot signals", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("Heat map", { exact: true })).toHaveCount(0);
+    await expect(
+      page.getByText("Recent documents", { exact: true }),
+    ).toHaveCount(0);
+
+    const emptyClear = page.getByText(/You're clear for now|Create data room/i);
+    const focusHeading = page.getByText(/Today'?s focus/i);
+    await expect(emptyClear.or(focusHeading).first()).toBeVisible({
+      timeout: 10000,
+    });
   });
 
-  test("dashboard loads actions section", async ({ page }) => {
+  test("role lens updates circle query param", async ({ page }) => {
     attachDebug(page);
     await authenticatePage(page);
     await page.goto(`/${workspaceSlug}/dashboard`);
 
-    // The actions panel should be visible
-    await expect(page.getByText("Actions", { exact: true }).first()).toBeVisible({ timeout: 10000 });
+    await expect(
+      page.getByRole("heading", { name: "Deal Radar" }),
+    ).toBeVisible({ timeout: 10000 });
+
+    await page.getByTestId("radar-lens-sales").click();
+    await expect(page).toHaveURL(/circle=sales/, { timeout: 5000 });
+
+    await page.getByTestId("radar-lens-investor_ir").click();
+    await expect(page).toHaveURL(/circle=investor_ir/, { timeout: 5000 });
+  });
+
+  test("Analyze in Insights navigates to insights overview", async ({
+    page,
+  }) => {
+    attachDebug(page);
+    await authenticatePage(page);
+    await page.goto(`/${workspaceSlug}/dashboard`);
+
+    await expect(page.getByTestId("radar-insights-link")).toBeVisible({
+      timeout: 10000,
+    });
+    await page.getByTestId("radar-insights-link").click();
+    await expect(page).toHaveURL(
+      new RegExp(`/${workspaceSlug}/insights/overview`),
+      { timeout: 10000 },
+    );
   });
 });

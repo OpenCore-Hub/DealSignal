@@ -1,9 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useMatch, useNavigate, useParams } from "react-router";
-import { List, Bell, SignOut, Gear, CaretRight } from "@phosphor-icons/react";
+import { List, SignOut, Gear, CaretRight } from "@phosphor-icons/react";
 import { useTranslation } from "react-i18next";
 import { ThemeToggle } from "@/components/common/ThemeToggle";
-import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -118,19 +117,9 @@ export function TopNav() {
         </>
       )}
 
-      {/* Right actions */}
+      {/* Right actions — notifications control omitted until a real inbox ships */}
       <div className="ml-auto flex items-center gap-2">
         <ThemeToggle />
-
-        <Button
-          size="icon"
-          variant="ghost"
-          aria-label={t("topNav.notifications.title")}
-          disabled
-          title={t("topNav.notifications.comingSoon")}
-        >
-          <Bell size={20} />
-        </Button>
 
         <DropdownMenu>
           <DropdownMenuTrigger

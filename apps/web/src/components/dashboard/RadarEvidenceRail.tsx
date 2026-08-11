@@ -5,6 +5,7 @@ import { ArrowRight, SpinnerGap } from "@phosphor-icons/react";
 import { useAsyncData } from "@/hooks/useAsyncData";
 import { api } from "@/lib/api";
 import {
+  radarHeadlineKey,
   radarWhyNowFallbackKey,
   radarWhyNowKey,
   type RadarEvidencePack,
@@ -54,7 +55,14 @@ export function RadarEvidenceRail({
         {t(`radar.products.${item.product}`)}
         {item.dealName ? ` · ${item.dealName}` : ""}
       </p>
-      <p className="mt-2 text-sm font-medium text-foreground">{item.headline}</p>
+      <p className="mt-2 text-sm font-medium text-foreground">
+        {item.headlineCode
+          ? t(radarHeadlineKey(item), {
+              defaultValue:
+                item.headline || t(`radar.products.${item.product}`),
+            })
+          : item.headline || t(`radar.products.${item.product}`)}
+      </p>
       {item.actor ? (
         <p className="text-caption mt-0.5 text-muted-foreground">{item.actor}</p>
       ) : null}
@@ -74,6 +82,22 @@ export function RadarEvidenceRail({
 
       {data ? (
         <div className="mt-4 space-y-4">
+          {data.degradedSections && data.degradedSections.length > 0 ? (
+            <p
+              className="rounded-md border border-warning-500/30 bg-warning-500/10 px-2.5 py-2 text-caption text-warning-500"
+              data-testid="radar-evidence-degraded"
+            >
+              {t("radar.evidenceRail.degraded")}{" "}
+              {data.degradedSections
+                .map((section) =>
+                  t(`radar.evidenceRail.degradedSections.${section}`, {
+                    defaultValue: section,
+                  }),
+                )
+                .join(" · ")}
+            </p>
+          ) : null}
+
           {data.whyNowCode || item.whyNowCode ? (
             <p className="text-sm text-muted-foreground" data-testid="radar-evidence-why-now">
               {(() => {

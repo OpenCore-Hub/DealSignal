@@ -243,6 +243,12 @@ func TestRuleEngineAskAbuseSecurityEvents(t *testing.T) {
 		for _, match := range matches {
 			if match.Type == "risk_alert" && match.Subtype == SubtypeAnomaly {
 				found = true
+				if match.Metadata["eventType"] != eventType {
+					t.Fatalf("%s: metadata.eventType=%q want %q", eventType, match.Metadata["eventType"], eventType)
+				}
+				if match.Metadata["ruleId"] != "security_"+eventType {
+					t.Fatalf("%s: metadata.ruleId=%q", eventType, match.Metadata["ruleId"])
+				}
 			}
 		}
 		if !found {

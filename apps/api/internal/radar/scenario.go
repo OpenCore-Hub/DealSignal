@@ -231,6 +231,16 @@ func productRankForItem(circle heat.Circle, scenario Scenario, p Product) int {
 	return scenarioRank*10 + circleRank
 }
 
+// outcomeRankScale converts LearnFromOutcomes ±boost into productRankForItem units.
+// Scenario packs space adjacent products by 10; without this, demote/promote of ±1..3
+// cannot cross product bands and learning is cosmetic under Scenario Pack rooms.
+func outcomeRankScale(sc Scenario) int {
+	if len(PackFor(sc).ProductRank) == 0 {
+		return 1
+	}
+	return 10
+}
+
 // InferDefaultLens picks the majority DefaultCircle among open-item scenarios.
 // Ties break founder → sales → investor_ir for stable UX.
 func InferDefaultLens(scenarios []Scenario) heat.Circle {

@@ -331,6 +331,9 @@ export function InsightsOverviewPage() {
                 {" · "}
                 {scenarioPackDepthLabel(overview.scenarioPack.depth, t)}
               </p>
+              <p className="text-caption mt-1 text-muted-foreground">
+                {t("overview.scenarioPack.depthHint")}
+              </p>
             </div>
             {overview.scenarioPack.keyPageCategories &&
             overview.scenarioPack.keyPageCategories.length > 0 ? (
