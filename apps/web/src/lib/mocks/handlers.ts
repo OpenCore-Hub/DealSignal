@@ -16,7 +16,6 @@ import type {
   PublicAskTurn,
   WorkspaceMember,
 } from "@/types";
-import { qaEnabledForLinkId } from "@/lib/qaScope";
 import { keyPageRulesForCircle, keywordLangFromI18n } from "@/lib/heat/heatScore";
 
 /** In-memory workspace key-page settings for MSW (additive extras + default circle). */
@@ -37,7 +36,6 @@ import {
   mockDealRooms,
   mockDealRoomTemplates,
   mockDocuments,
-  mockHeatAlerts,
   mockLinks,
   mockLinkAccessRequests,
   mockNdaTemplates,
@@ -54,6 +52,69 @@ import {
   getMockSignalFeed,
 } from "./data";
 import { computeMockLinkHeat } from "./mockHeat";
+import type { RadarFeed } from "@/lib/radarQueue";
+
+/** Playwright E2E override for GET /radar — Cache-backed so full page.goto keeps it. */
+let mockRadarFeedOverride: RadarFeed | null = null;
+const RADAR_FEED_CACHE = "msw-e2e-radar-feed";
+const RADAR_FEED_URL = "https://msw.local/radar-feed-override";
+let radarFeedHydrated = false;
+let radarFeedHydratePromise: Promise<void> | null = null;
+
+async function hydrateRadarFeedOverride() {
+  if (radarFeedHydrated) return;
+  if (typeof caches === "undefined") {
+    radarFeedHydrated = true;
+    return;
+  }
+  if (!radarFeedHydratePromise) {
+    radarFeedHydratePromise = (async () => {
+      try {
+        const cache = await caches.open(RADAR_FEED_CACHE);
+        const res = await cache.match(RADAR_FEED_URL);
+        if (res) {
+          mockRadarFeedOverride = (await res.json()) as RadarFeed;
+        }
+      } catch {
+        /* ignore */
+      } finally {
+        radarFeedHydrated = true;
+      }
+    })();
+  }
+  await radarFeedHydratePromise;
+}
+
+async function persistRadarFeedOverride() {
+  if (typeof caches === "undefined") return;
+  try {
+    const cache = await caches.open(RADAR_FEED_CACHE);
+    if (!mockRadarFeedOverride) {
+      await cache.delete(RADAR_FEED_URL);
+      return;
+    }
+    await cache.put(
+      RADAR_FEED_URL,
+      new Response(JSON.stringify(mockRadarFeedOverride), {
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+  } catch {
+    /* ignore */
+  }
+}
+
+async function clearRadarFeedOverride() {
+  mockRadarFeedOverride = null;
+  radarFeedHydrated = true;
+  radarFeedHydratePromise = null;
+  if (typeof caches === "undefined") return;
+  try {
+    await caches.delete(RADAR_FEED_CACHE);
+  } catch {
+    /* ignore */
+  }
+}
 
 let workspaceSettings = { ...defaultWorkspaceSettings };
 
@@ -679,6 +740,7 @@ async function resetMockState() {
   mockUsers.clear();
   mockAuthUserId = null;
   mockLinkAskPolicyOverrides.clear();
+  await clearRadarFeedOverride();
   contactsByWorkspaceSlug.clear();
   await resetVisitorAskState();
   void resetKnowledgeQAState();
@@ -1018,19 +1080,19 @@ function seedOwnerAskHostQuestions() {
   mockOwnerAskFormalOverrides.clear();
   mockPublicFormalAsk.clear();
   mockPublicAskFAQByToken.clear();
-  mockPublicAskTurns.set("RoomShare1", [
-    {
-      id: "owner_q_pending_1",
-      session_id: "sess_host_1",
-      link_id: "link_room_1",
-      question: "Can you share the updated financial model?",
-      lane: "host",
-      status: "host_pending",
-      visitor_email: "lp@example.com",
-      created_at: now,
-      updated_at: now,
-    },
-  ]);
+  const hostTurn: OwnerAskTurn = {
+    id: "owner_q_pending_1",
+    session_id: "sess_host_1",
+    link_id: "link_room_1",
+    visitor_id: "visitor_host_1",
+    question: "Can you share the updated financial model?",
+    lane: "host",
+    status: "host_pending",
+    visitor_email: "lp@example.com",
+    created_at: now,
+    updated_at: now,
+  };
+  mockPublicAskTurns.set("RoomShare1", [hostTurn]);
   mockOwnerAskAITurns.clear();
   mockOwnerAskAITurns.set("link_room_1", [
     {
@@ -1491,6 +1553,19 @@ export const handlers = [
         ...(typeof body.askAiEnabled === "boolean" ? { askAiEnabled: body.askAiEnabled } : {}),
       });
       await persistVisitorAskState();
+      return new HttpResponse(null, { status: 204 });
+    }
+    if (body?.action === "radar-feed") {
+      type RadarResetBody = E2EResetBody & { feed?: RadarFeed | null; clear?: boolean };
+      const radarBody = body as RadarResetBody;
+      radarFeedHydrated = true;
+      radarFeedHydratePromise = null;
+      if (radarBody.clear || radarBody.feed == null) {
+        await clearRadarFeedOverride();
+      } else {
+        mockRadarFeedOverride = radarBody.feed;
+        await persistRadarFeedOverride();
+      }
       return new HttpResponse(null, { status: 204 });
     }
     await resetMockState();
@@ -3016,18 +3091,18 @@ export const handlers = [
           });
         }
         return HttpResponse.json({
-          source: "llm",
+          source: "template",
           items: [
             {
-              id: "llm-1",
+              id: "liability-in-source",
               text: `What liability terms appear in “${source}”?`,
             },
             {
-              id: "llm-2",
+              id: "definitions-in-source",
               text: `How does “${source}” define the key obligations?`,
             },
             {
-              id: "llm-3",
+              id: "exceptions-in-source",
               text: `What exceptions does “${source}” list?`,
             },
           ],
@@ -4973,14 +5048,17 @@ export const handlers = [
   }),
 
   // Deal Radar — compiled feed (fixture-derived, same sources as /signals)
-  http.get("*/api/workspaces/:workspaceSlug/radar", ({ params, request }) => {
+  http.get("*/api/workspaces/:workspaceSlug/radar", async ({ params, request }) => {
+    await hydrateRadarFeedOverride();
     const slug = String(params.workspaceSlug || "acme-capital");
     const circle = new URL(request.url).searchParams.get("circle") || "founder";
-    const feed = getMockRadarFeed(slug);
+    const feed = mockRadarFeedOverride ?? getMockRadarFeed(slug);
     return HttpResponse.json({
       ...feed,
       lens:
-        circle === "investor_ir" || circle === "sales" ? circle : "founder",
+        circle === "investor_ir" || circle === "sales"
+          ? circle
+          : feed.lens || "founder",
     });
   }),
 
@@ -5304,9 +5382,6 @@ export const handlers = [
         { code: "ask_turn_not_escalatable", message: "ask turn cannot be escalated" },
         { status: 409 },
       );
-    }
-    if (turn.status === "host_escalated") {
-      return HttpResponse.json({ data: turn });
     }
     const updated: PublicAskTurn = {
       ...turn,

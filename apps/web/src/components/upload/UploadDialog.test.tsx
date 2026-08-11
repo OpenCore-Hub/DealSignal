@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, within } from "@testing-library/react";
 import { UploadDialog } from "./UploadDialog";
 
 const uploadDocumentMock = vi.hoisted(() => vi.fn());
@@ -86,8 +86,14 @@ describe("UploadDialog nested conflict prompt", () => {
     fireEvent.click(screen.getByRole("button", { name: "upload.uploadNow" }));
     await screen.findByText("upload.replaceTitle");
 
-    // First dialog root is the UploadDialog host (ConfirmDialog portals after it).
-    fireEvent.click(screen.getAllByTestId("attempt-close-dialog")[0]!);
+    const nestedDialog = screen
+      .getAllByTestId("dialog-root")
+      .find((root) => within(root).queryByTestId("file-upload") === null);
+    const hostClose = screen
+      .getAllByTestId("attempt-close-dialog")
+      .find((button) => !nestedDialog?.contains(button));
+    expect(hostClose).toBeDefined();
+    fireEvent.click(hostClose!);
     expect(setUploadDialogOpen).not.toHaveBeenCalledWith(false);
 
     fireEvent.click(screen.getByRole("button", { name: "upload.replaceCancel" }));

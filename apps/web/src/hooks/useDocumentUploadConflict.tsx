@@ -72,13 +72,14 @@ export function useDocumentUploadConflict(opts?: {
             },
           };
           promptRef.current = next;
+          onAwaitingConflictChange?.(true);
           setPrompt(next);
         });
 
       // Recover if a prior link rejected so the queue cannot stall permanently.
       promptChainRef.current = promptChainRef.current.then(enqueue, enqueue);
     });
-  }, []);
+  }, [onAwaitingConflictChange]);
 
   const settle = useCallback((decision: ReplaceDecision) => {
     if (settlingRef.current) return;
@@ -86,9 +87,10 @@ export function useDocumentUploadConflict(opts?: {
     if (!current) return;
     settlingRef.current = true;
     promptRef.current = null;
+    onAwaitingConflictChange?.(false);
     setPrompt(null);
     current.resolve(decision);
-  }, []);
+  }, [onAwaitingConflictChange]);
 
   const uploadDocument = useCallback(
     async (file: File, category?: string): Promise<Document> => {
