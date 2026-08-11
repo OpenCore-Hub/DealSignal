@@ -535,21 +535,38 @@ func (q *Queries) CountActiveSuggestionsByMetadata(ctx context.Context, arg Coun
 }
 
 const countCaptureAttempts24hBatch = `-- name: CountCaptureAttempts24hBatch :many
-SELECT link_id, COUNT(*)::bigint AS count
-FROM security_events
-WHERE link_id = ANY($1::uuid[])
-  AND event_type = 'capture_attempt'
-  AND created_at > now() - interval '24 hours'
-GROUP BY link_id
+SELECT se.link_id, COUNT(*)::bigint AS count
+FROM security_events se
+WHERE se.link_id = ANY($1::uuid[])
+  AND se.event_type = 'capture_attempt'
+  AND se.created_at > now() - interval '24 hours'
+  AND (
+      se.email IS NULL
+      OR BTRIM(se.email) = ''
+      OR NOT EXISTS (
+          SELECT 1
+          FROM workspace_members wm
+          JOIN users u ON u.id = wm.user_id
+          WHERE wm.workspace_id = $2
+            AND LOWER(u.email) = LOWER(se.email)
+      )
+  )
+GROUP BY se.link_id
 `
+
+type CountCaptureAttempts24hBatchParams struct {
+	LinkIds     []pgtype.UUID
+	WorkspaceID pgtype.UUID
+}
 
 type CountCaptureAttempts24hBatchRow struct {
 	LinkID pgtype.UUID
 	Count  int64
 }
 
-func (q *Queries) CountCaptureAttempts24hBatch(ctx context.Context, dollar_1 []pgtype.UUID) ([]CountCaptureAttempts24hBatchRow, error) {
-	rows, err := q.db.Query(ctx, countCaptureAttempts24hBatch, dollar_1)
+// Radar Leak Watch: exclude workspace-member capture attempts.
+func (q *Queries) CountCaptureAttempts24hBatch(ctx context.Context, arg CountCaptureAttempts24hBatchParams) ([]CountCaptureAttempts24hBatchRow, error) {
+	rows, err := q.db.Query(ctx, countCaptureAttempts24hBatch, arg.LinkIds, arg.WorkspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -570,12 +587,25 @@ func (q *Queries) CountCaptureAttempts24hBatch(ctx context.Context, dollar_1 []p
 
 const countCaptureAttemptsByLink24h = `-- name: CountCaptureAttemptsByLink24h :one
 SELECT COUNT(*)::bigint AS count
-FROM security_events
-WHERE link_id = $1
-  AND event_type = 'capture_attempt'
-  AND created_at > now() - interval '24 hours'
+FROM security_events se
+JOIN links l ON l.id = se.link_id
+WHERE se.link_id = $1
+  AND se.event_type = 'capture_attempt'
+  AND se.created_at > now() - interval '24 hours'
+  AND (
+      se.email IS NULL
+      OR BTRIM(se.email) = ''
+      OR NOT EXISTS (
+          SELECT 1
+          FROM workspace_members wm
+          JOIN users u ON u.id = wm.user_id
+          WHERE wm.workspace_id = l.workspace_id
+            AND LOWER(u.email) = LOWER(se.email)
+      )
+  )
 `
 
+// Same internal-actor policy as CountCaptureAttempts24hBatch (via link.workspace_id).
 func (q *Queries) CountCaptureAttemptsByLink24h(ctx context.Context, linkID pgtype.UUID) (int64, error) {
 	row := q.db.QueryRow(ctx, countCaptureAttemptsByLink24h, linkID)
 	var count int64
@@ -1178,6 +1208,7 @@ SELECT
         NULLIF(dr_link.template_type, ''),
         NULLIF(dr_src.template_type, ''),
         NULLIF(dr_tgt.template_type, ''),
+        NULLIF(dr_ask.template_type, ''),
         ''
     )::text AS template_type,
     COALESCE(NULLIF(s.subtype, ''), a.action_type) AS kind,
@@ -1205,21 +1236,33 @@ LEFT JOIN links l
             AND a.target_id ~ '^[0-9a-fA-F-]{36}$'
             AND l.id = a.target_id::uuid
         )
+        OR (
+            -- deal-room Ask target is room or room/link (see dealRoomAskTargetID).
+            a.source_type = 'deal_room_link_question'
+            AND a.target_id ~ '^[0-9a-fA-F-]{36}/[0-9a-fA-F-]{36}$'
+            AND l.id = split_part(a.target_id, '/', 2)::uuid
+        )
         OR (s.link_id IS NOT NULL AND l.id = s.link_id)
    )
 LEFT JOIN deal_rooms dr_link
     ON dr_link.id = l.deal_room_id
    AND dr_link.workspace_id = a.workspace_id
 LEFT JOIN deal_rooms dr_src
-    ON a.source_type IN ('room_access_request', 'room_nda', 'expiring_room')
+    -- room_nda source_id is room_members.id; room lives on target_id (see syncer).
+    ON a.source_type IN ('room_access_request', 'expiring_room')
    AND a.source_id ~ '^[0-9a-fA-F-]{36}$'
    AND dr_src.id = a.source_id::uuid
    AND dr_src.workspace_id = a.workspace_id
 LEFT JOIN deal_rooms dr_tgt
-    ON a.source_type = 'deal_room_link_access_request'
+    ON a.source_type IN ('deal_room_link_access_request', 'room_nda')
    AND a.target_id ~ '^[0-9a-fA-F-]{36}$'
    AND dr_tgt.id = a.target_id::uuid
    AND dr_tgt.workspace_id = a.workspace_id
+LEFT JOIN deal_rooms dr_ask
+    ON a.source_type = 'deal_room_link_question'
+   AND a.target_id ~ '^[0-9a-fA-F-]{36}'
+   AND dr_ask.id = split_part(a.target_id, '/', 1)::uuid
+   AND dr_ask.workspace_id = a.workspace_id
 WHERE a.workspace_id = $1
   AND a.status = 'done'
   AND a.outcome IS NOT NULL
@@ -1261,13 +1304,27 @@ func (q *Queries) CountRecentActionOutcomesByWorkspaceScenario(ctx context.Conte
 }
 
 const countRecentDistinctIPsByLink = `-- name: CountRecentDistinctIPsByLink :one
-SELECT COUNT(DISTINCT ip)::bigint AS distinct_ips
-FROM access_logs
-WHERE link_id = $1
-  AND event_type = 'link_opened'
-  AND created_at > now() - interval '1 hour'
+SELECT COUNT(DISTINCT al.ip)::bigint AS distinct_ips
+FROM access_logs al
+JOIN links l ON l.id = al.link_id
+WHERE al.link_id = $1
+  AND al.event_type = 'link_opened'
+  AND al.created_at > now() - interval '1 hour'
+  AND (
+      al.visitor_email IS NULL
+      OR BTRIM(al.visitor_email) = ''
+      OR NOT EXISTS (
+          SELECT 1
+          FROM workspace_members wm
+          JOIN users u ON u.id = wm.user_id
+          WHERE wm.workspace_id = l.workspace_id
+            AND LOWER(u.email) = LOWER(al.visitor_email)
+      )
+  )
 `
 
+// Distinct IPs for Leak Watch escalate; exclude workspace-member opens
+// (workspace via links — callers need only link_id).
 func (q *Queries) CountRecentDistinctIPsByLink(ctx context.Context, linkID pgtype.UUID) (int64, error) {
 	row := q.db.QueryRow(ctx, countRecentDistinctIPsByLink, linkID)
 	var distinct_ips int64
@@ -1293,6 +1350,17 @@ JOIN links l ON l.id = al.link_id
 WHERE al.link_id = $1
   AND al.event_type = 'download_attempted'
   AND al.created_at > now() - interval '24 hours'
+  AND (
+      al.visitor_email IS NULL
+      OR BTRIM(al.visitor_email) = ''
+      OR NOT EXISTS (
+          SELECT 1
+          FROM workspace_members wm
+          JOIN users u ON u.id = wm.user_id
+          WHERE wm.workspace_id = l.workspace_id
+            AND LOWER(u.email) = LOWER(al.visitor_email)
+      )
+  )
 `
 
 type CountRecentDownloadAttemptsByLinkRow struct {
@@ -1301,6 +1369,7 @@ type CountRecentDownloadAttemptsByLinkRow struct {
 	DistinctUnknownEmails int64
 }
 
+// Exclude workspace-member downloads (align with CountRecentDistinctIPsByLink).
 func (q *Queries) CountRecentDownloadAttemptsByLink(ctx context.Context, linkID pgtype.UUID) (CountRecentDownloadAttemptsByLinkRow, error) {
 	row := q.db.QueryRow(ctx, countRecentDownloadAttemptsByLink, linkID)
 	var i CountRecentDownloadAttemptsByLinkRow
@@ -7001,12 +7070,24 @@ func (q *Queries) GetLatestKnowledgeSyncJobForRoom(ctx context.Context, roomID p
 
 const getLinkAccessMetrics = `-- name: GetLinkAccessMetrics :one
 SELECT
-    COUNT(*) FILTER (WHERE event_type = 'link_opened') AS opens,
-    COUNT(DISTINCT visitor_id) FILTER (WHERE event_type = 'link_opened') AS unique_visitors,
-    COUNT(*) FILTER (WHERE event_type = 'forward_signal') AS forward_signals,
-    COUNT(*) FILTER (WHERE event_type = 'download_attempted') AS downloads
-FROM access_logs
-WHERE link_id = $1
+    COUNT(*) FILTER (WHERE al.event_type = 'link_opened') AS opens,
+    COUNT(DISTINCT al.visitor_id) FILTER (WHERE al.event_type = 'link_opened') AS unique_visitors,
+    COUNT(*) FILTER (WHERE al.event_type = 'forward_signal') AS forward_signals,
+    COUNT(*) FILTER (WHERE al.event_type = 'download_attempted') AS downloads
+FROM access_logs al
+JOIN links l ON l.id = al.link_id
+WHERE al.link_id = $1
+  AND (
+      al.visitor_email IS NULL
+      OR BTRIM(al.visitor_email) = ''
+      OR NOT EXISTS (
+          SELECT 1
+          FROM workspace_members wm
+          JOIN users u ON u.id = wm.user_id
+          WHERE wm.workspace_id = l.workspace_id
+            AND LOWER(u.email) = LOWER(al.visitor_email)
+      )
+  )
 `
 
 type GetLinkAccessMetricsRow struct {
@@ -7016,6 +7097,7 @@ type GetLinkAccessMetricsRow struct {
 	Downloads      int64
 }
 
+// Lifetime access metrics; exclude workspace-member traffic (align 24h policy).
 func (q *Queries) GetLinkAccessMetrics(ctx context.Context, linkID pgtype.UUID) (GetLinkAccessMetricsRow, error) {
 	row := q.db.QueryRow(ctx, getLinkAccessMetrics, linkID)
 	var i GetLinkAccessMetricsRow
@@ -7030,13 +7112,25 @@ func (q *Queries) GetLinkAccessMetrics(ctx context.Context, linkID pgtype.UUID) 
 
 const getLinkAccessMetrics24h = `-- name: GetLinkAccessMetrics24h :one
 SELECT
-    COUNT(*) FILTER (WHERE event_type = 'link_opened') AS opens,
-    COUNT(DISTINCT visitor_id) FILTER (WHERE event_type = 'link_opened') AS unique_visitors,
-    COUNT(*) FILTER (WHERE event_type = 'forward_signal') AS forward_signals,
-    COUNT(*) FILTER (WHERE event_type = 'download_attempted') AS downloads
-FROM access_logs
-WHERE link_id = $1
-  AND created_at > now() - interval '24 hours'
+    COUNT(*) FILTER (WHERE al.event_type = 'link_opened') AS opens,
+    COUNT(DISTINCT al.visitor_id) FILTER (WHERE al.event_type = 'link_opened') AS unique_visitors,
+    COUNT(*) FILTER (WHERE al.event_type = 'forward_signal') AS forward_signals,
+    COUNT(*) FILTER (WHERE al.event_type = 'download_attempted') AS downloads
+FROM access_logs al
+JOIN links l ON l.id = al.link_id
+WHERE al.link_id = $1
+  AND al.created_at > now() - interval '24 hours'
+  AND (
+      al.visitor_email IS NULL
+      OR BTRIM(al.visitor_email) = ''
+      OR NOT EXISTS (
+          SELECT 1
+          FROM workspace_members wm
+          JOIN users u ON u.id = wm.user_id
+          WHERE wm.workspace_id = l.workspace_id
+            AND LOWER(u.email) = LOWER(al.visitor_email)
+      )
+  )
 `
 
 type GetLinkAccessMetrics24hRow struct {
@@ -7047,6 +7141,7 @@ type GetLinkAccessMetrics24hRow struct {
 }
 
 // Rolling 24-hour access metrics used by signal rules.
+// Same internal-actor policy as GetLinkAccessMetrics24hBatch (via link.workspace_id).
 func (q *Queries) GetLinkAccessMetrics24h(ctx context.Context, linkID pgtype.UUID) (GetLinkAccessMetrics24hRow, error) {
 	row := q.db.QueryRow(ctx, getLinkAccessMetrics24h, linkID)
 	var i GetLinkAccessMetrics24hRow
@@ -7061,16 +7156,32 @@ func (q *Queries) GetLinkAccessMetrics24h(ctx context.Context, linkID pgtype.UUI
 
 const getLinkAccessMetrics24hBatch = `-- name: GetLinkAccessMetrics24hBatch :many
 SELECT
-    link_id,
-    COUNT(*) FILTER (WHERE event_type = 'link_opened')::bigint AS opens,
-    COUNT(DISTINCT visitor_id) FILTER (WHERE event_type = 'link_opened')::bigint AS unique_visitors,
-    COUNT(*) FILTER (WHERE event_type = 'forward_signal')::bigint AS forward_signals,
-    COUNT(*) FILTER (WHERE event_type = 'download_attempted')::bigint AS downloads
-FROM access_logs
-WHERE link_id = ANY($1::uuid[])
-  AND created_at > now() - interval '24 hours'
-GROUP BY link_id
+    al.link_id,
+    COUNT(*) FILTER (WHERE al.event_type = 'link_opened')::bigint AS opens,
+    COUNT(DISTINCT al.visitor_id) FILTER (WHERE al.event_type = 'link_opened')::bigint AS unique_visitors,
+    COUNT(*) FILTER (WHERE al.event_type = 'forward_signal')::bigint AS forward_signals,
+    COUNT(*) FILTER (WHERE al.event_type = 'download_attempted')::bigint AS downloads
+FROM access_logs al
+WHERE al.link_id = ANY($1::uuid[])
+  AND al.created_at > now() - interval '24 hours'
+  AND (
+      al.visitor_email IS NULL
+      OR BTRIM(al.visitor_email) = ''
+      OR NOT EXISTS (
+          SELECT 1
+          FROM workspace_members wm
+          JOIN users u ON u.id = wm.user_id
+          WHERE wm.workspace_id = $2
+            AND LOWER(u.email) = LOWER(al.visitor_email)
+      )
+  )
+GROUP BY al.link_id
 `
+
+type GetLinkAccessMetrics24hBatchParams struct {
+	LinkIds     []pgtype.UUID
+	WorkspaceID pgtype.UUID
+}
 
 type GetLinkAccessMetrics24hBatchRow struct {
 	LinkID         pgtype.UUID
@@ -7081,8 +7192,12 @@ type GetLinkAccessMetrics24hBatchRow struct {
 }
 
 // Rolling 24-hour access metrics for Deal Radar Leak Watch confidence.
-func (q *Queries) GetLinkAccessMetrics24hBatch(ctx context.Context, dollar_1 []pgtype.UUID) ([]GetLinkAccessMetrics24hBatchRow, error) {
-	rows, err := q.db.Query(ctx, getLinkAccessMetrics24hBatch, dollar_1)
+// Internal-actor policy (keep in sync with CountRecentDistinctIPsByLink /
+// CountCaptureAttempts24hBatch and action.SkipVisitorAttributedActor):
+// exclude only rows whose email positively matches a workspace member.
+// NULL / blank emails stay — anonymous external traffic still counts.
+func (q *Queries) GetLinkAccessMetrics24hBatch(ctx context.Context, arg GetLinkAccessMetrics24hBatchParams) ([]GetLinkAccessMetrics24hBatchRow, error) {
+	rows, err := q.db.Query(ctx, getLinkAccessMetrics24hBatch, arg.LinkIds, arg.WorkspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -7109,14 +7224,26 @@ func (q *Queries) GetLinkAccessMetrics24hBatch(ctx context.Context, dollar_1 []p
 
 const getLinkAccessMetricsBatch = `-- name: GetLinkAccessMetricsBatch :many
 SELECT
-    link_id,
-    COUNT(*) FILTER (WHERE event_type = 'link_opened')::bigint AS opens,
-    COUNT(DISTINCT visitor_id) FILTER (WHERE event_type = 'link_opened')::bigint AS unique_visitors,
-    COUNT(*) FILTER (WHERE event_type = 'forward_signal')::bigint AS forward_signals,
-    COUNT(*) FILTER (WHERE event_type = 'download_attempted')::bigint AS downloads
-FROM access_logs
-WHERE link_id = ANY($1::uuid[])
-GROUP BY link_id
+    al.link_id,
+    COUNT(*) FILTER (WHERE al.event_type = 'link_opened')::bigint AS opens,
+    COUNT(DISTINCT al.visitor_id) FILTER (WHERE al.event_type = 'link_opened')::bigint AS unique_visitors,
+    COUNT(*) FILTER (WHERE al.event_type = 'forward_signal')::bigint AS forward_signals,
+    COUNT(*) FILTER (WHERE al.event_type = 'download_attempted')::bigint AS downloads
+FROM access_logs al
+JOIN links l ON l.id = al.link_id
+WHERE al.link_id = ANY($1::uuid[])
+  AND (
+      al.visitor_email IS NULL
+      OR BTRIM(al.visitor_email) = ''
+      OR NOT EXISTS (
+          SELECT 1
+          FROM workspace_members wm
+          JOIN users u ON u.id = wm.user_id
+          WHERE wm.workspace_id = l.workspace_id
+            AND LOWER(u.email) = LOWER(al.visitor_email)
+      )
+  )
+GROUP BY al.link_id
 `
 
 type GetLinkAccessMetricsBatchRow struct {
@@ -7127,6 +7254,7 @@ type GetLinkAccessMetricsBatchRow struct {
 	Downloads      int64
 }
 
+// Exclude workspace-member traffic (align GetLinkAccessMetrics).
 func (q *Queries) GetLinkAccessMetricsBatch(ctx context.Context, dollar_1 []pgtype.UUID) ([]GetLinkAccessMetricsBatchRow, error) {
 	rows, err := q.db.Query(ctx, getLinkAccessMetricsBatch, dollar_1)
 	if err != nil {
@@ -7478,15 +7606,28 @@ func (q *Queries) GetLinkAskTurnSummary(ctx context.Context, linkID pgtype.UUID)
 const getLinkBounceCount = `-- name: GetLinkBounceCount :one
 SELECT COUNT(*) AS bounce_count
 FROM access_logs a
+JOIN links l ON l.id = a.link_id
 WHERE a.link_id = $1
   AND a.event_type = 'link_opened'
   AND a.visitor_id IS NOT NULL
+  AND (
+      a.visitor_email IS NULL
+      OR BTRIM(a.visitor_email) = ''
+      OR NOT EXISTS (
+          SELECT 1
+          FROM workspace_members wm
+          JOIN users u ON u.id = wm.user_id
+          WHERE wm.workspace_id = l.workspace_id
+            AND LOWER(u.email) = LOWER(a.visitor_email)
+      )
+  )
   AND NOT EXISTS (
       SELECT 1 FROM page_views p
       WHERE p.link_id = $1 AND p.visitor_id = a.visitor_id
   )
 `
 
+// Lifetime bounces; exclude workspace-member opens (align 24h policy).
 func (q *Queries) GetLinkBounceCount(ctx context.Context, linkID pgtype.UUID) (int64, error) {
 	row := q.db.QueryRow(ctx, getLinkBounceCount, linkID)
 	var bounce_count int64
@@ -7497,10 +7638,22 @@ func (q *Queries) GetLinkBounceCount(ctx context.Context, linkID pgtype.UUID) (i
 const getLinkBounceCount24h = `-- name: GetLinkBounceCount24h :one
 SELECT COUNT(*) AS bounce_count
 FROM access_logs a
+JOIN links l ON l.id = a.link_id
 WHERE a.link_id = $1
   AND a.event_type = 'link_opened'
   AND a.visitor_id IS NOT NULL
   AND a.created_at > now() - interval '24 hours'
+  AND (
+      a.visitor_email IS NULL
+      OR BTRIM(a.visitor_email) = ''
+      OR NOT EXISTS (
+          SELECT 1
+          FROM workspace_members wm
+          JOIN users u ON u.id = wm.user_id
+          WHERE wm.workspace_id = l.workspace_id
+            AND LOWER(u.email) = LOWER(a.visitor_email)
+      )
+  )
   AND NOT EXISTS (
       SELECT 1 FROM page_views p
       WHERE p.link_id = $1
@@ -7511,6 +7664,7 @@ WHERE a.link_id = $1
 
 // Rolling 24-hour bounce count used by signal rules.
 // A bounce is a link_opened event with no matching page_view in the same window.
+// Exclude workspace-member opens (same internal-actor policy as access metrics).
 func (q *Queries) GetLinkBounceCount24h(ctx context.Context, linkID pgtype.UUID) (int64, error) {
 	row := q.db.QueryRow(ctx, getLinkBounceCount24h, linkID)
 	var bounce_count int64
@@ -7522,10 +7676,22 @@ const getLinkBounceCountsBatch = `-- name: GetLinkBounceCountsBatch :many
 WITH opens AS (
     SELECT a.link_id, a.visitor_id
     FROM access_logs a
+    JOIN links l ON l.id = a.link_id
     WHERE a.link_id = ANY($1::uuid[])
       AND a.event_type = 'link_opened'
       AND a.visitor_id IS NOT NULL
       AND a.visitor_id <> ''
+      AND (
+          a.visitor_email IS NULL
+          OR BTRIM(a.visitor_email) = ''
+          OR NOT EXISTS (
+              SELECT 1
+              FROM workspace_members wm
+              JOIN users u ON u.id = wm.user_id
+              WHERE wm.workspace_id = l.workspace_id
+                AND LOWER(u.email) = LOWER(a.visitor_email)
+          )
+      )
 ),
 viewed AS (
     SELECT DISTINCT p.link_id, p.visitor_id
@@ -7548,6 +7714,7 @@ type GetLinkBounceCountsBatchRow struct {
 
 // Anti-join via visitor sets; count open rows (same metric as the old
 // correlated NOT EXISTS) for visitors who never recorded a page view.
+// Exclude workspace-member opens (align GetLinkBounceCount).
 func (q *Queries) GetLinkBounceCountsBatch(ctx context.Context, dollar_1 []pgtype.UUID) ([]GetLinkBounceCountsBatchRow, error) {
 	rows, err := q.db.Query(ctx, getLinkBounceCountsBatch, dollar_1)
 	if err != nil {
@@ -8098,6 +8265,21 @@ JOIN pages p ON p.document_id = COALESCE(pv.document_id, l.document_id) AND p.pa
 WHERE pv.link_id = $1
   AND p.title IS NOT NULL AND p.title <> ''
   AND lower(p.title) LIKE ANY ($2::text[])
+  AND (
+      pv.visitor_id IS NULL
+      OR BTRIM(pv.visitor_id) = ''
+      OR NOT EXISTS (
+          SELECT 1
+          FROM access_logs al
+          JOIN workspace_members wm ON wm.workspace_id = l.workspace_id
+          JOIN users u ON u.id = wm.user_id
+          WHERE al.link_id = pv.link_id
+            AND al.visitor_id = pv.visitor_id
+            AND al.visitor_email IS NOT NULL
+            AND BTRIM(al.visitor_email) <> ''
+            AND LOWER(u.email) = LOWER(al.visitor_email)
+      )
+  )
 GROUP BY pv.page_number, p.title
 ORDER BY views DESC, avg_duration_seconds DESC
 LIMIT 3
@@ -8116,6 +8298,7 @@ type GetLinkKeyPageViewDetailsRow struct {
 }
 
 // Returns the most-viewed key pages for a link, including their titles.
+// Exclude workspace-member visitors (align GetLinkKeyPageViewMetrics).
 func (q *Queries) GetLinkKeyPageViewDetails(ctx context.Context, arg GetLinkKeyPageViewDetailsParams) ([]GetLinkKeyPageViewDetailsRow, error) {
 	rows, err := q.db.Query(ctx, getLinkKeyPageViewDetails, arg.LinkID, arg.Patterns)
 	if err != nil {
@@ -8151,6 +8334,21 @@ JOIN pages p ON p.document_id = COALESCE(pv.document_id, l.document_id) AND p.pa
 WHERE pv.link_id = $1
   AND p.title IS NOT NULL AND p.title <> ''
   AND lower(p.title) LIKE ANY ($2::text[])
+  AND (
+      pv.visitor_id IS NULL
+      OR BTRIM(pv.visitor_id) = ''
+      OR NOT EXISTS (
+          SELECT 1
+          FROM access_logs al
+          JOIN workspace_members wm ON wm.workspace_id = l.workspace_id
+          JOIN users u ON u.id = wm.user_id
+          WHERE al.link_id = pv.link_id
+            AND al.visitor_id = pv.visitor_id
+            AND al.visitor_email IS NOT NULL
+            AND BTRIM(al.visitor_email) <> ''
+            AND LOWER(u.email) = LOWER(al.visitor_email)
+      )
+  )
 `
 
 type GetLinkKeyPageViewMetricsParams struct {
@@ -8165,6 +8363,7 @@ type GetLinkKeyPageViewMetricsRow struct {
 
 // Counts page views whose page title matches any of the provided keyword patterns.
 // Patterns should be lowercase SQL LIKE patterns, e.g. '%financial%'.
+// Exclude workspace-member visitors (align 24h policy).
 func (q *Queries) GetLinkKeyPageViewMetrics(ctx context.Context, arg GetLinkKeyPageViewMetricsParams) (GetLinkKeyPageViewMetricsRow, error) {
 	row := q.db.QueryRow(ctx, getLinkKeyPageViewMetrics, arg.LinkID, arg.Patterns)
 	var i GetLinkKeyPageViewMetricsRow
@@ -8183,6 +8382,21 @@ WHERE pv.link_id = $1
   AND p.title IS NOT NULL AND p.title <> ''
   AND pv.created_at > now() - interval '24 hours'
   AND lower(p.title) LIKE ANY ($2::text[])
+  AND (
+      pv.visitor_id IS NULL
+      OR BTRIM(pv.visitor_id) = ''
+      OR NOT EXISTS (
+          SELECT 1
+          FROM access_logs al
+          JOIN workspace_members wm ON wm.workspace_id = l.workspace_id
+          JOIN users u ON u.id = wm.user_id
+          WHERE al.link_id = pv.link_id
+            AND al.visitor_id = pv.visitor_id
+            AND al.visitor_email IS NOT NULL
+            AND BTRIM(al.visitor_email) <> ''
+            AND LOWER(u.email) = LOWER(al.visitor_email)
+      )
+  )
 `
 
 type GetLinkKeyPageViewMetrics24hParams struct {
@@ -8196,6 +8410,7 @@ type GetLinkKeyPageViewMetrics24hRow struct {
 }
 
 // Rolling 24-hour key-page metrics used by signal rules.
+// Exclude workspace-member visitors (via access_logs email → members).
 func (q *Queries) GetLinkKeyPageViewMetrics24h(ctx context.Context, arg GetLinkKeyPageViewMetrics24hParams) (GetLinkKeyPageViewMetrics24hRow, error) {
 	row := q.db.QueryRow(ctx, getLinkKeyPageViewMetrics24h, arg.LinkID, arg.Patterns)
 	var i GetLinkKeyPageViewMetrics24hRow
@@ -8214,6 +8429,21 @@ JOIN pages p ON p.document_id = COALESCE(pv.document_id, l.document_id) AND p.pa
 WHERE pv.link_id = ANY($1::uuid[])
   AND p.title IS NOT NULL AND p.title <> ''
   AND lower(p.title) LIKE ANY ($2::text[])
+  AND (
+      pv.visitor_id IS NULL
+      OR BTRIM(pv.visitor_id) = ''
+      OR NOT EXISTS (
+          SELECT 1
+          FROM access_logs al
+          JOIN workspace_members wm ON wm.workspace_id = l.workspace_id
+          JOIN users u ON u.id = wm.user_id
+          WHERE al.link_id = pv.link_id
+            AND al.visitor_id = pv.visitor_id
+            AND al.visitor_email IS NOT NULL
+            AND BTRIM(al.visitor_email) <> ''
+            AND LOWER(u.email) = LOWER(al.visitor_email)
+      )
+  )
 GROUP BY pv.link_id
 `
 
@@ -8229,6 +8459,7 @@ type GetLinkKeyPageViewMetricsBatchRow struct {
 }
 
 // Batch version of GetLinkKeyPageViewMetrics for O(1) dashboard heat scoring.
+// Exclude workspace-member visitors (align singular query).
 func (q *Queries) GetLinkKeyPageViewMetricsBatch(ctx context.Context, arg GetLinkKeyPageViewMetricsBatchParams) ([]GetLinkKeyPageViewMetricsBatchRow, error) {
 	rows, err := q.db.Query(ctx, getLinkKeyPageViewMetricsBatch, arg.LinkIds, arg.Patterns)
 	if err != nil {
@@ -8371,14 +8602,29 @@ func (q *Queries) GetLinkNDAAgreementByLinkVisitorTemplate(ctx context.Context, 
 
 const getLinkPageViewMetrics = `-- name: GetLinkPageViewMetrics :one
 SELECT
-    COALESCE(AVG(duration_seconds), 0)::float8 AS avg_duration_seconds,
-    COUNT(*) FILTER (WHERE duration_seconds >= 3) AS engaged_page_views,
+    COALESCE(AVG(pv.duration_seconds), 0)::float8 AS avg_duration_seconds,
+    COUNT(*) FILTER (WHERE pv.duration_seconds >= 3) AS engaged_page_views,
     COUNT(*) AS total_page_views,
     COALESCE(MAX(documents.title), '')::text AS document_title
-FROM page_views
-JOIN links ON links.id = page_views.link_id
+FROM page_views pv
+JOIN links ON links.id = pv.link_id
 LEFT JOIN documents ON documents.id = links.document_id
-WHERE page_views.link_id = $1
+WHERE pv.link_id = $1
+  AND (
+      pv.visitor_id IS NULL
+      OR BTRIM(pv.visitor_id) = ''
+      OR NOT EXISTS (
+          SELECT 1
+          FROM access_logs al
+          JOIN workspace_members wm ON wm.workspace_id = links.workspace_id
+          JOIN users u ON u.id = wm.user_id
+          WHERE al.link_id = pv.link_id
+            AND al.visitor_id = pv.visitor_id
+            AND al.visitor_email IS NOT NULL
+            AND BTRIM(al.visitor_email) <> ''
+            AND LOWER(u.email) = LOWER(al.visitor_email)
+      )
+  )
 `
 
 type GetLinkPageViewMetricsRow struct {
@@ -8388,6 +8634,7 @@ type GetLinkPageViewMetricsRow struct {
 	DocumentTitle      string
 }
 
+// Lifetime page views; exclude workspace-member visitors (align 24h policy).
 func (q *Queries) GetLinkPageViewMetrics(ctx context.Context, linkID pgtype.UUID) (GetLinkPageViewMetricsRow, error) {
 	row := q.db.QueryRow(ctx, getLinkPageViewMetrics, linkID)
 	var i GetLinkPageViewMetricsRow
@@ -8402,11 +8649,27 @@ func (q *Queries) GetLinkPageViewMetrics(ctx context.Context, linkID pgtype.UUID
 
 const getLinkPageViewMetrics24h = `-- name: GetLinkPageViewMetrics24h :one
 SELECT
-    COALESCE(AVG(duration_seconds) FILTER (WHERE created_at > now() - interval '24 hours'), 0)::float8 AS avg_duration_seconds,
-    COUNT(*) FILTER (WHERE duration_seconds >= 3 AND created_at > now() - interval '24 hours') AS engaged_page_views,
-    COUNT(*) FILTER (WHERE created_at > now() - interval '24 hours') AS total_page_views
-FROM page_views
-WHERE link_id = $1
+    COALESCE(AVG(pv.duration_seconds) FILTER (WHERE pv.created_at > now() - interval '24 hours'), 0)::float8 AS avg_duration_seconds,
+    COUNT(*) FILTER (WHERE pv.duration_seconds >= 3 AND pv.created_at > now() - interval '24 hours') AS engaged_page_views,
+    COUNT(*) FILTER (WHERE pv.created_at > now() - interval '24 hours') AS total_page_views
+FROM page_views pv
+JOIN links l ON l.id = pv.link_id
+WHERE pv.link_id = $1
+  AND (
+      pv.visitor_id IS NULL
+      OR BTRIM(pv.visitor_id) = ''
+      OR NOT EXISTS (
+          SELECT 1
+          FROM access_logs al
+          JOIN workspace_members wm ON wm.workspace_id = l.workspace_id
+          JOIN users u ON u.id = wm.user_id
+          WHERE al.link_id = pv.link_id
+            AND al.visitor_id = pv.visitor_id
+            AND al.visitor_email IS NOT NULL
+            AND BTRIM(al.visitor_email) <> ''
+            AND LOWER(u.email) = LOWER(al.visitor_email)
+      )
+  )
 `
 
 type GetLinkPageViewMetrics24hRow struct {
@@ -8416,6 +8679,7 @@ type GetLinkPageViewMetrics24hRow struct {
 }
 
 // Rolling 24-hour page-view metrics used by signal rules.
+// Exclude workspace-member visitors (via access_logs email → members).
 func (q *Queries) GetLinkPageViewMetrics24h(ctx context.Context, linkID pgtype.UUID) (GetLinkPageViewMetrics24hRow, error) {
 	row := q.db.QueryRow(ctx, getLinkPageViewMetrics24h, linkID)
 	var i GetLinkPageViewMetrics24hRow
@@ -8425,13 +8689,29 @@ func (q *Queries) GetLinkPageViewMetrics24h(ctx context.Context, linkID pgtype.U
 
 const getLinkPageViewMetricsBatch = `-- name: GetLinkPageViewMetricsBatch :many
 SELECT
-    link_id,
-    COALESCE(AVG(duration_seconds), 0)::float8 AS avg_duration_seconds,
-    COUNT(*) FILTER (WHERE duration_seconds >= 3)::bigint AS key_page_views,
+    pv.link_id,
+    COALESCE(AVG(pv.duration_seconds), 0)::float8 AS avg_duration_seconds,
+    COUNT(*) FILTER (WHERE pv.duration_seconds >= 3)::bigint AS key_page_views,
     COUNT(*)::bigint AS total_page_views
-FROM page_views
-WHERE link_id = ANY($1::uuid[])
-GROUP BY link_id
+FROM page_views pv
+JOIN links l ON l.id = pv.link_id
+WHERE pv.link_id = ANY($1::uuid[])
+  AND (
+      pv.visitor_id IS NULL
+      OR BTRIM(pv.visitor_id) = ''
+      OR NOT EXISTS (
+          SELECT 1
+          FROM access_logs al
+          JOIN workspace_members wm ON wm.workspace_id = l.workspace_id
+          JOIN users u ON u.id = wm.user_id
+          WHERE al.link_id = pv.link_id
+            AND al.visitor_id = pv.visitor_id
+            AND al.visitor_email IS NOT NULL
+            AND BTRIM(al.visitor_email) <> ''
+            AND LOWER(u.email) = LOWER(al.visitor_email)
+      )
+  )
+GROUP BY pv.link_id
 `
 
 type GetLinkPageViewMetricsBatchRow struct {
@@ -8441,6 +8721,7 @@ type GetLinkPageViewMetricsBatchRow struct {
 	TotalPageViews     int64
 }
 
+// Exclude workspace-member visitors (align GetLinkPageViewMetrics).
 func (q *Queries) GetLinkPageViewMetricsBatch(ctx context.Context, dollar_1 []pgtype.UUID) ([]GetLinkPageViewMetricsBatchRow, error) {
 	rows, err := q.db.Query(ctx, getLinkPageViewMetricsBatch, dollar_1)
 	if err != nil {
@@ -14450,6 +14731,17 @@ WHERE t.workspace_id = $1
   AND t.lane IN ('host', 'hybrid')
   AND t.status IN ('host_pending', 'host_escalated')
   AND (t.formal_status IS NULL OR t.formal_status NOT IN ('pending_review', 'scheduled'))
+  AND (
+      s.visitor_email IS NULL
+      OR BTRIM(s.visitor_email) = ''
+      OR NOT EXISTS (
+          SELECT 1
+          FROM workspace_members wm
+          JOIN users u ON u.id = wm.user_id
+          WHERE wm.workspace_id = t.workspace_id
+            AND LOWER(u.email) = LOWER(s.visitor_email)
+      )
+  )
 ORDER BY t.created_at DESC
 `
 
@@ -14462,6 +14754,8 @@ type ListPendingAskTurnsByWorkspaceRow struct {
 	DealRoomID   pgtype.UUID
 }
 
+// Exclude workspace-member visitors (same internal-actor policy as access/NDA).
+// NULL/blank visitor_email stays — anonymous Ask still needs a host reply.
 func (q *Queries) ListPendingAskTurnsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]ListPendingAskTurnsByWorkspaceRow, error) {
 	rows, err := q.db.Query(ctx, listPendingAskTurnsByWorkspace, workspaceID)
 	if err != nil {
@@ -14497,6 +14791,13 @@ JOIN deal_rooms dr ON dr.id = l.deal_room_id
 WHERE r.workspace_id = $1
   AND r.status = 'pending'
   AND l.deal_room_id IS NOT NULL
+  AND NOT EXISTS (
+      SELECT 1
+      FROM workspace_members wm
+      JOIN users u ON u.id = wm.user_id
+      WHERE wm.workspace_id = r.workspace_id
+        AND LOWER(u.email) = LOWER(r.email)
+  )
 ORDER BY r.created_at DESC
 `
 
@@ -14510,6 +14811,7 @@ type ListPendingDealRoomLinkAccessRequestsByWorkspaceRow struct {
 }
 
 // Dashboard sync: deal-room share applications only (never document library).
+// Exclude workspace members (align Insights gate KPI + radar internal-actor).
 func (q *Queries) ListPendingDealRoomLinkAccessRequestsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]ListPendingDealRoomLinkAccessRequestsByWorkspaceRow, error) {
 	rows, err := q.db.Query(ctx, listPendingDealRoomLinkAccessRequestsByWorkspace, workspaceID)
 	if err != nil {
@@ -14642,6 +14944,13 @@ WHERE r.workspace_id = $1
   AND r.status = 'pending'
   AND l.deal_room_id IS NULL
   AND l.document_id IS NOT NULL
+  AND NOT EXISTS (
+      SELECT 1
+      FROM workspace_members wm
+      JOIN users u ON u.id = wm.user_id
+      WHERE wm.workspace_id = r.workspace_id
+        AND LOWER(u.email) = LOWER(r.email)
+  )
 ORDER BY r.created_at DESC
 `
 
@@ -14653,6 +14962,7 @@ type ListPendingDocumentLinkAccessRequestsByWorkspaceRow struct {
 }
 
 // Dashboard sync: document-library share applications only.
+// Exclude workspace members (align Insights gate KPI + radar internal-actor).
 func (q *Queries) ListPendingDocumentLinkAccessRequestsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]ListPendingDocumentLinkAccessRequestsByWorkspaceRow, error) {
 	rows, err := q.db.Query(ctx, listPendingDocumentLinkAccessRequestsByWorkspace, workspaceID)
 	if err != nil {
@@ -14784,6 +15094,17 @@ WHERE t.workspace_id = $1
   AND t.lane IN ('host', 'hybrid')
   AND t.status IN ('host_pending', 'host_escalated')
   AND t.formal_status IN ('pending_review', 'scheduled')
+  AND (
+      s.visitor_email IS NULL
+      OR BTRIM(s.visitor_email) = ''
+      OR NOT EXISTS (
+          SELECT 1
+          FROM workspace_members wm
+          JOIN users u ON u.id = wm.user_id
+          WHERE wm.workspace_id = t.workspace_id
+            AND LOWER(u.email) = LOWER(s.visitor_email)
+      )
+  )
 ORDER BY t.created_at DESC
 `
 
@@ -14796,6 +15117,7 @@ type ListPendingFormalAskTurnsByWorkspaceRow struct {
 	DealRoomID   pgtype.UUID
 }
 
+// Exclude workspace-member visitors (same internal-actor policy as access/NDA).
 func (q *Queries) ListPendingFormalAskTurnsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]ListPendingFormalAskTurnsByWorkspaceRow, error) {
 	rows, err := q.db.Query(ctx, listPendingFormalAskTurnsByWorkspace, workspaceID)
 	if err != nil {
@@ -14953,6 +15275,13 @@ SELECT r.id, r.email, r.room_id, dr.name AS room_name
 FROM room_access_requests r
 JOIN deal_rooms dr ON dr.id = r.room_id
 WHERE r.workspace_id = $1 AND r.status = 'pending'
+  AND NOT EXISTS (
+      SELECT 1
+      FROM workspace_members wm
+      JOIN users u ON u.id = wm.user_id
+      WHERE wm.workspace_id = r.workspace_id
+        AND LOWER(u.email) = LOWER(r.email)
+  )
 ORDER BY r.created_at DESC
 `
 
@@ -14963,6 +15292,7 @@ type ListPendingRoomAccessRequestsByWorkspaceRow struct {
 	RoomName string
 }
 
+// Exclude workspace members (align Insights gate KPI + radar internal-actor).
 func (q *Queries) ListPendingRoomAccessRequestsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]ListPendingRoomAccessRequestsByWorkspaceRow, error) {
 	rows, err := q.db.Query(ctx, listPendingRoomAccessRequestsByWorkspace, workspaceID)
 	if err != nil {
@@ -14999,6 +15329,13 @@ WHERE m.workspace_id = $1
   AND m.role NOT IN ('owner', 'admin')
   AND m.email IS NOT NULL
   AND BTRIM(m.email) <> ''
+  AND NOT EXISTS (
+      SELECT 1
+      FROM workspace_members wm
+      JOIN users u ON u.id = wm.user_id
+      WHERE wm.workspace_id = m.workspace_id
+        AND LOWER(u.email) = LOWER(m.email)
+  )
 ORDER BY m.created_at DESC
 `
 
@@ -15009,8 +15346,9 @@ type ListPendingRoomNDAsByWorkspaceRow struct {
 	RoomName string
 }
 
-// External parties waiting on NDA only. Room operators (owner/admin) and
-// empty-email rows must never become Diligence-gate radar items.
+// External parties waiting on NDA only. Room operators (owner/admin),
+// empty-email rows, and workspace members must never become Diligence-gate
+// radar items (radar = external deal actors only).
 func (q *Queries) ListPendingRoomNDAsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]ListPendingRoomNDAsByWorkspaceRow, error) {
 	rows, err := q.db.Query(ctx, listPendingRoomNDAsByWorkspace, workspaceID)
 	if err != nil {
@@ -15548,6 +15886,17 @@ WHERE al.link_id IN (
     )
   AND al.visitor_id IS NOT NULL
   AND al.visitor_id <> ''
+  AND (
+      al.visitor_email IS NULL
+      OR BTRIM(al.visitor_email) = ''
+      OR NOT EXISTS (
+          SELECT 1
+          FROM workspace_members wm
+          JOIN users u ON u.id = wm.user_id
+          WHERE wm.workspace_id = $1
+            AND LOWER(u.email) = LOWER(al.visitor_email)
+      )
+  )
 GROUP BY al.visitor_id
 ORDER BY last_access_at DESC, al.visitor_id ASC
 LIMIT $3
@@ -15567,6 +15916,7 @@ type ListRecentVisitorsByDealRoomRow struct {
 	TotalViews    int64
 }
 
+// Exclude workspace-member opens (align ListRecentVisitorsByLink).
 func (q *Queries) ListRecentVisitorsByDealRoom(ctx context.Context, arg ListRecentVisitorsByDealRoomParams) ([]ListRecentVisitorsByDealRoomRow, error) {
 	rows, err := q.db.Query(ctx, listRecentVisitorsByDealRoom, arg.WorkspaceID, arg.DealRoomID, arg.PageLimit)
 	if err != nil {
@@ -15595,15 +15945,27 @@ func (q *Queries) ListRecentVisitorsByDealRoom(ctx context.Context, arg ListRece
 
 const listRecentVisitorsByLink = `-- name: ListRecentVisitorsByLink :many
 SELECT
-    visitor_id,
-    COALESCE(MAX(visitor_email), '')::text AS visitor_email,
-    MIN(created_at)::timestamptz AS first_access_at,
-    MAX(created_at)::timestamptz AS last_access_at,
-    COUNT(*) FILTER (WHERE event_type = 'link_opened')::bigint AS total_views
-FROM access_logs
-WHERE link_id = $1 AND visitor_id IS NOT NULL AND visitor_id <> ''
-GROUP BY visitor_id
-ORDER BY last_access_at DESC, visitor_id ASC
+    al.visitor_id,
+    COALESCE(MAX(al.visitor_email), '')::text AS visitor_email,
+    MIN(al.created_at)::timestamptz AS first_access_at,
+    MAX(al.created_at)::timestamptz AS last_access_at,
+    COUNT(*) FILTER (WHERE al.event_type = 'link_opened')::bigint AS total_views
+FROM access_logs al
+JOIN links l ON l.id = al.link_id
+WHERE al.link_id = $1 AND al.visitor_id IS NOT NULL AND al.visitor_id <> ''
+  AND (
+      al.visitor_email IS NULL
+      OR BTRIM(al.visitor_email) = ''
+      OR NOT EXISTS (
+          SELECT 1
+          FROM workspace_members wm
+          JOIN users u ON u.id = wm.user_id
+          WHERE wm.workspace_id = l.workspace_id
+            AND LOWER(u.email) = LOWER(al.visitor_email)
+      )
+  )
+GROUP BY al.visitor_id
+ORDER BY last_access_at DESC, al.visitor_id ASC
 LIMIT $2 OFFSET $3
 `
 
@@ -15621,6 +15983,7 @@ type ListRecentVisitorsByLinkRow struct {
 	TotalViews    int64
 }
 
+// Exclude workspace-member opens (radar evidence / visitor lists).
 func (q *Queries) ListRecentVisitorsByLink(ctx context.Context, arg ListRecentVisitorsByLinkParams) ([]ListRecentVisitorsByLinkRow, error) {
 	rows, err := q.db.Query(ctx, listRecentVisitorsByLink, arg.LinkID, arg.Limit, arg.Offset)
 	if err != nil {

@@ -110,11 +110,13 @@ async function initI18n() {
   const dashboardJson = JSON.parse(
     readFileSync(resolve(__dirname, "../../i18n/locales/en/dashboard.json"), "utf-8"),
   );
+  // Match apps/web/src/i18n/config.ts — defaultNS is common, not insights.
+  // Scenario KPI labels regress if exists()/lookups omit ns: "insights".
   await instance.use(initReactI18next).init({
     lng: "en",
     fallbackLng: "en",
-    ns: ["insights", "common", "dashboard"],
-    defaultNS: "insights",
+    ns: ["common", "insights", "dashboard"],
+    defaultNS: "common",
     resources: {
       en: { insights: insightsJson, common: commonJson, dashboard: dashboardJson },
     },
@@ -158,7 +160,19 @@ describe("InsightsOverviewPage", () => {
       "data-scenario",
       "startup-fundraising",
     );
-    expect(screen.getByTestId("insights-scenario-kpi-gate_pending")).toHaveTextContent("1");
+    const gateKpi = screen.getByTestId("insights-scenario-kpi-gate_pending");
+    expect(gateKpi).toHaveTextContent("1");
+    expect(gateKpi).toHaveTextContent(/Pending gates/i);
+    expect(screen.getByTestId("insights-scenario-kpi-active_rooms")).toHaveTextContent(
+      /Active rooms/i,
+    );
+    expect(screen.getByTestId("insights-scenario-kpi-key_page_views")).toHaveTextContent(
+      /Key-page views/i,
+    );
+    expect(screen.getByTestId("insights-scenario-kpi-open_signals")).toHaveTextContent(
+      /Open signals/i,
+    );
+    expect(within(screen.getByTestId("insights-scenario-pack")).queryByText(/^Metric$/)).toBeNull();
     expect(screen.getByText(/Startup fundraising/i)).toBeInTheDocument();
 
     expect(getInsightsOverviewMock).toHaveBeenCalledTimes(1);
@@ -222,9 +236,9 @@ describe("InsightsOverviewPage", () => {
     expect(pack).toHaveTextContent(/Lite pack/i);
     expect(pack).toHaveTextContent(/Title & ownership/i);
     expect(pack).toHaveTextContent(/Leases & tenancies/i);
-    expect(screen.getByTestId("insights-scenario-kpi-gate_pending")).toHaveTextContent(
-      "2",
-    );
+    const gateKpi = screen.getByTestId("insights-scenario-kpi-gate_pending");
+    expect(gateKpi).toHaveTextContent("2");
+    expect(gateKpi).toHaveTextContent(/Pending gates/i);
     expect(screen.getByTestId("insights-scenario-key-page-rules")).toHaveTextContent(
       /Why these pages count as key pages/i,
     );

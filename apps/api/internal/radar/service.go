@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/action"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/heat"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/signal"
@@ -47,7 +48,7 @@ func (s *Service) Get(ctx context.Context, workspaceID, userID, workspaceSlug st
 		return Feed{}, err
 	}
 
-	metrics, err := s.loadLinkMetrics(ctx, links)
+	metrics, err := s.loadLinkMetrics(ctx, workspaceID, links)
 	if err != nil {
 		return Feed{}, err
 	}
@@ -56,6 +57,10 @@ func (s *Service) Get(ctx context.Context, workspaceID, userID, workspaceSlug st
 	if err != nil {
 		return Feed{}, err
 	}
+
+	// Fail open: member-list errors must not 500 the whole radar feed; an empty
+	// set disables the filter (same as unknown attribution — keep external work).
+	internal, _ := s.loadInternalEmails(ctx, workspaceID)
 
 	if circle == "" {
 		circle = heat.CircleDefault
@@ -74,7 +79,16 @@ func (s *Service) Get(ctx context.Context, workspaceID, userID, workspaceSlug st
 		OutcomeDemote:           demote,
 		OutcomeDemoteByScenario: demoteByScenario,
 		NoiseHints:              noiseHints,
+		InternalEmails:          internal,
 	}), nil
+}
+
+func (s *Service) loadInternalEmails(ctx context.Context, workspaceID string) (action.MemberEmailSet, error) {
+	wsUUID, err := pgUUID(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	return action.LoadMemberEmailSet(ctx, s.queries, wsUUID)
 }
 
 func (s *Service) loadOutcomeLearning(ctx context.Context, workspaceID string) (map[Product]int, map[Scenario]map[Product]int, []NoiseHint, error) {
@@ -109,9 +123,13 @@ func (s *Service) UpdateItem(ctx context.Context, workspaceID, itemID, status st
 	return s.signals.UpdateActionStatus(ctx, workspaceID, itemID, status, snoozeHours, outcome)
 }
 
-func (s *Service) loadLinkMetrics(ctx context.Context, links map[string]LinkMeta) (map[string]LinkMetrics24h, error) {
+func (s *Service) loadLinkMetrics(ctx context.Context, workspaceID string, links map[string]LinkMeta) (map[string]LinkMetrics24h, error) {
 	if len(links) == 0 {
 		return map[string]LinkMetrics24h{}, nil
+	}
+	wsUUID, err := pgUUID(workspaceID)
+	if err != nil {
+		return nil, err
 	}
 	ids := make([]pgtype.UUID, 0, len(links))
 	for id := range links {
@@ -125,7 +143,10 @@ func (s *Service) loadLinkMetrics(ctx context.Context, links map[string]LinkMeta
 		return map[string]LinkMetrics24h{}, nil
 	}
 
-	rows, err := s.queries.GetLinkAccessMetrics24hBatch(ctx, ids)
+	rows, err := s.queries.GetLinkAccessMetrics24hBatch(ctx, db.GetLinkAccessMetrics24hBatchParams{
+		LinkIds:     ids,
+		WorkspaceID: wsUUID,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("link metrics 24h batch: %w", err)
 	}
@@ -141,7 +162,10 @@ func (s *Service) loadLinkMetrics(ctx context.Context, links map[string]LinkMeta
 		}
 	}
 
-	if captures, err := s.queries.CountCaptureAttempts24hBatch(ctx, ids); err == nil {
+	if captures, err := s.queries.CountCaptureAttempts24hBatch(ctx, db.CountCaptureAttempts24hBatchParams{
+		LinkIds:     ids,
+		WorkspaceID: wsUUID,
+	}); err == nil {
 		for _, row := range captures {
 			id := uuid.UUID(row.LinkID.Bytes).String()
 			m := out[id]
@@ -200,8 +224,15 @@ func (s *Service) resolveDealMeta(ctx context.Context, workspaceID string, raw s
 			if src == "deal_room_link_access_request" && targetID != "" {
 				roomIDs[targetID] = struct{}{}
 			}
-		case "room_access_request", "room_nda", "expiring_room":
+		case "room_access_request", "expiring_room":
 			if sourceID != "" {
+				roomIDs[sourceID] = struct{}{}
+			}
+		case "room_nda":
+			// Member-keyed: target_id = room. Legacy: source_id = room.
+			if targetID != "" {
+				roomIDs[targetID] = struct{}{}
+			} else if sourceID != "" {
 				roomIDs[sourceID] = struct{}{}
 			}
 		case "link_question":

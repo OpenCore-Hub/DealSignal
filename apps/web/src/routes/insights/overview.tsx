@@ -15,12 +15,20 @@ import {
 } from "@/components/insights/InsightsRangeControls";
 import { api, type InsightsOverview } from "@/lib/api";
 import { exportInsightsDailyVisitsCsv } from "@/lib/exportInsightsDailyVisits";
-import { useTranslation } from "react-i18next";
+import { useTranslation, type TFunction } from "react-i18next";
+import type { i18n as I18nInstance } from "i18next";
 import { useAsyncData } from "@/hooks/useAsyncData";
+
+const INSIGHTS_NS = "insights" as const;
+
+/** App defaultNS is common — exists/t lookups for Insights must pin the ns. */
+function insightsKeyExists(i18n: I18nInstance, key: string): boolean {
+  return i18n.exists(key, { ns: INSIGHTS_NS });
+}
 
 function scenarioPackDepthLabel(
   depth: string,
-  t: (key: string) => string,
+  t: TFunction<typeof INSIGHTS_NS>,
 ): string {
   switch (depth) {
     case "p0":
@@ -32,6 +40,28 @@ function scenarioPackDepthLabel(
     default:
       return t("overview.scenarioPack.depthBase");
   }
+}
+
+function scenarioPackKpiLabel(
+  id: string,
+  t: TFunction<typeof INSIGHTS_NS>,
+  i18n: I18nInstance,
+): string {
+  const key = `overview.scenarioPack.kpi.${id}`;
+  return insightsKeyExists(i18n, key)
+    ? t(key)
+    : t("overview.scenarioPack.unknownKpi");
+}
+
+function scenarioPackCategoryLabel(
+  category: string,
+  t: TFunction<typeof INSIGHTS_NS>,
+  i18n: I18nInstance,
+): string {
+  const key = `keyPages.categories.${category}`;
+  return insightsKeyExists(i18n, key)
+    ? t(key)
+    : t("overview.scenarioPack.unknownCategory");
 }
 
 function isLocalViewerUrl(raw: string): boolean {
@@ -307,8 +337,10 @@ export function InsightsOverviewPage() {
               <p className="text-caption text-muted-foreground">
                 {t("overview.scenarioPack.keyPages")}:{" "}
                 {overview.scenarioPack.keyPageCategories
-                  .filter((cat) => i18n.exists(`keyPages.categories.${cat}`))
-                  .map((cat) => t(`keyPages.categories.${cat}`))
+                  .filter((cat) =>
+                    insightsKeyExists(i18n, `keyPages.categories.${cat}`),
+                  )
+                  .map((cat) => scenarioPackCategoryLabel(cat, t, i18n))
                   .join(" · ")}
               </p>
             ) : null}
@@ -321,9 +353,7 @@ export function InsightsOverviewPage() {
                 data-testid={`insights-scenario-kpi-${kpi.id}`}
               >
                 <p className="text-caption text-muted-foreground">
-                  {i18n.exists(`overview.scenarioPack.kpi.${kpi.id}`)
-                    ? t(`overview.scenarioPack.kpi.${kpi.id}`)
-                    : t("overview.scenarioPack.unknownKpi")}
+                  {scenarioPackKpiLabel(kpi.id, t, i18n)}
                 </p>
                 <p className="text-stat mt-1 tabular-nums">
                   {Number.isInteger(kpi.value)
@@ -352,9 +382,7 @@ export function InsightsOverviewPage() {
                     className="text-caption text-muted-foreground"
                   >
                     <span className="font-medium text-foreground">
-                      {i18n.exists(`keyPages.categories.${rule.category}`)
-                        ? t(`keyPages.categories.${rule.category}`)
-                        : t("overview.scenarioPack.unknownCategory")}
+                      {scenarioPackCategoryLabel(rule.category, t, i18n)}
                     </span>
                     {": "}
                     {t("overview.scenarioPack.rulesKeywords", {

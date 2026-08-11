@@ -46,6 +46,9 @@ type CompileInput struct {
 	// OutcomeDemoteByScenario soft-demotes by scenario×product (Phase C; preferred when set).
 	OutcomeDemoteByScenario map[Scenario]map[Product]int
 	NoiseHints              []NoiseHint
+	// InternalEmails are workspace member emails (normalized). Matching actors
+	// never become radar work items — radar is for external deal parties only.
+	InternalEmails action.MemberEmailSet
 }
 
 // EvidenceChip is a structured evidence marker for FE i18n (no free-text labels).
@@ -168,6 +171,9 @@ func Compile(in CompileInput) Feed {
 
 		product, verb, ok := classify(a, sig)
 		if !ok {
+			continue
+		}
+		if actorEmailIsInternal(in.InternalEmails, a, sig) {
 			continue
 		}
 
@@ -446,6 +452,57 @@ func isFormalAsk(a db.ActionItem) bool {
 	src := textOrEmpty(a.SourceType)
 	return (src == action.SourceTypeLinkQuestion || src == action.SourceTypeDealRoomLinkQuestion) &&
 		a.ActionType == "review"
+}
+
+// actorEmailIsInternal drops visitor-attributed cards for workspace members.
+//
+// Only access / NDA / Ask source types are eligible: signal.Context.contactEmail
+// is the first link_contacts row (suggestions stamp), not the event actor — using
+// it would false-drop Leak Watch / Buying Window when a member is on the link.
+// Host lifecycle (expiring_*, uploaded_file) and signal-backed heat cards are
+// never filtered here; Leak Watch host noise is handled in metrics SQL instead.
+func actorEmailIsInternal(internal action.MemberEmailSet, a db.ActionItem, _ *db.Signal) bool {
+	if len(internal) == 0 {
+		return false
+	}
+	switch textOrEmpty(a.SourceType) {
+	case action.SourceTypeLinkAccessRequest,
+		action.SourceTypeDealRoomLinkAccessRequest,
+		action.SourceTypeRoomAccessRequest,
+		action.SourceTypeRoomNDA,
+		action.SourceTypeLinkQuestion,
+		action.SourceTypeDealRoomLinkQuestion:
+		email := emailFromActionTitle(a.Title)
+		return action.SkipVisitorAttributedActor(internal, email != "", email)
+	default:
+		return false
+	}
+}
+
+func emailFromActionTitle(title string) string {
+	// Titles use "… from <actor> for|on <target>". Only the first token after
+	// "from" is the actor — scanning further can pick an email-shaped room/link
+	// name and false-drop a real external card.
+	const marker = " from "
+	lower := strings.ToLower(title)
+	idx := strings.Index(lower, marker)
+	if idx < 0 {
+		return ""
+	}
+	rest := strings.TrimSpace(title[idx+len(marker):])
+	fields := strings.Fields(rest)
+	if len(fields) == 0 {
+		return ""
+	}
+	candidate := strings.Trim(fields[0], ".,;:\"'")
+	if strings.Count(candidate, "@") != 1 {
+		return ""
+	}
+	at := strings.IndexByte(candidate, '@')
+	if at <= 0 || at >= len(candidate)-1 {
+		return ""
+	}
+	return candidate
 }
 
 func buildItem(in CompileInput, a db.ActionItem, sig *db.Signal, product Product, verb Verb, now time.Time) WorkItem {
