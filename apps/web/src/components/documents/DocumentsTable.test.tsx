@@ -116,7 +116,7 @@ const resources = {
         title: "Share document",
         description: "Create a share link for “{{name}}”.",
         defaultsHint: "Uses create-link defaults.",
-        createAndCopy: "Create & copy link",
+        createAndCopy: "Create",
         creating: "Creating…",
         advanced: "Advanced settings",
         copied: "Share link copied",
@@ -144,6 +144,17 @@ const resources = {
     links: {
       page: {
         createLink: "Create Link",
+      },
+      table: {
+        searchPlaceholder: "Search links…",
+        createdWithinLabel: "Create time",
+        createdWithin: {
+          all: "All",
+          "24h": "Last 24 hours",
+          "7d": "Last 7 days",
+          "30d": "Last 30 days",
+          "90d": "Last 90 days",
+        },
       },
     },
     agreementDocuments: {
@@ -279,6 +290,81 @@ describe("DocumentsTable", () => {
     });
   });
 
+  it("does not open Share dialog from processing upload handoff", async () => {
+    getDocumentsMock.mockResolvedValue({
+      data: [{ ...mockDocs[0], status: "processing" }],
+    });
+    const instance = await initI18n();
+    render(
+      <I18nextProvider i18n={instance}>
+        <MemoryRouter
+          initialEntries={[
+            "/acme/documents?shareDocumentId=doc_1&shareDocumentTitle=Pitch%20Deck&shareDocumentStatus=processing",
+          ]}
+        >
+          <Routes>
+            <Route path="/:workspaceSlug/documents" element={<DocumentsTable />} />
+          </Routes>
+        </MemoryRouter>
+      </I18nextProvider>,
+    );
+
+    expect(await screen.findByText("Pitch Deck")).toBeInTheDocument();
+    expect(screen.queryByTestId("document-share-dialog")).not.toBeInTheDocument();
+  });
+
+  it("opens Share dialog from ready upload handoff only", async () => {
+    getDocumentsMock.mockResolvedValue({ data: mockDocs });
+    const instance = await initI18n();
+    render(
+      <I18nextProvider i18n={instance}>
+        <MemoryRouter
+          initialEntries={[
+            "/acme/documents?shareDocumentId=doc_1&shareDocumentTitle=Pitch%20Deck&shareDocumentStatus=ready",
+          ]}
+        >
+          <Routes>
+            <Route path="/:workspaceSlug/documents" element={<DocumentsTable />} />
+          </Routes>
+        </MemoryRouter>
+      </I18nextProvider>,
+    );
+
+    expect(await screen.findByTestId("document-share-dialog")).toBeInTheDocument();
+  });
+
+  it("opens deferred Share dialog when processing handoff becomes ready", async () => {
+    getDocumentsMock
+      .mockResolvedValueOnce({
+        data: [{ ...mockDocs[0], status: "processing" }],
+      })
+      .mockResolvedValue({ data: mockDocs });
+    const instance = await initI18n();
+    render(
+      <I18nextProvider i18n={instance}>
+        <MemoryRouter
+          initialEntries={[
+            "/acme/documents?shareDocumentId=doc_1&shareDocumentTitle=Pitch%20Deck&shareDocumentStatus=processing",
+          ]}
+        >
+          <Routes>
+            <Route path="/:workspaceSlug/documents" element={<DocumentsTable />} />
+          </Routes>
+        </MemoryRouter>
+      </I18nextProvider>,
+    );
+
+    expect(await screen.findByText("Pitch Deck")).toBeInTheDocument();
+    expect(screen.queryByTestId("document-share-dialog")).not.toBeInTheDocument();
+
+    await waitFor(
+      () => {
+        expect(screen.getByTestId("document-share-dialog")).toBeInTheDocument();
+      },
+      { timeout: 5000 },
+    );
+  });
+
   it("confirms archive with visitor revoke copy and link count", async () => {
     getDocumentsMock.mockResolvedValue({ data: mockDocs });
     getLinksMock.mockResolvedValue({
@@ -388,6 +474,8 @@ describe("DocumentsTable", () => {
     expect(await screen.findByTestId("links-table")).toBeInTheDocument();
     expect(screen.queryByPlaceholderText("Search documents...")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Upload Document" })).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Search links…")).toBeInTheDocument();
+    expect(screen.getByTestId("share-created-within")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Create Link" })).toBeInTheDocument();
   });
 

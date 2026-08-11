@@ -13,13 +13,23 @@
     "document": "文档",
     "accessCount": "访问次数",
     "accessCountValue": "{{count}} 次访问",
-    "avgDuration": "平均时长",
+    "avgDuration": "平均",
     "lastViewed": "最近访问",
+    "createTime": "创建时间",
     "heat": "热度",
     "status": "状态",
     "totalLinks": "{{count}} 个链接",
     "clearFilter": "清除筛选",
-    "copyLink": "复制链接"
+    "copyLink": "复制链接",
+    "searchPlaceholder": "搜索链接…",
+    "createdWithinLabel": "创建时间",
+    "createdWithin": {
+      "all": "全部",
+      "24h": "近 24 小时",
+      "7d": "近 7 天",
+      "30d": "近 30 天",
+      "90d": "近 90 天"
+    }
   },
   "accessRequests": {
     "inboxTitle": "待审批访问申请",
@@ -55,7 +65,10 @@
     "description": "为文档配置权限并创建链接，即可追踪投资人/客户的访问行为。",
     "createLink": "创建链接",
     "filteredTitle": "「{{title}}」暂无链接",
-    "filteredDescription": "为该文档创建分享链接以开始追踪访问行为。"
+    "filteredDescription": "为该文档创建分享链接以开始追踪访问行为。",
+    "noMatchesTitle": "没有匹配的链接",
+    "noMatchesDescription": "试试其他搜索词或创建时间范围，或清除筛选查看全部链接。",
+    "clearFilters": "清除筛选"
   },
   "delete": {
     "title": "删除链接",
@@ -75,7 +88,7 @@
     "permissionConfig": "权限配置",
     "expiresAt": "过期于 {{time}}",
     "trendTitle": "访问量趋势",
-    "pageDurationTitle": "每页停留时间",
+    "pageDurationTitle": "页面停留时长",
     "pageLabel": "第 {{page}} 页",
     "pageAxisTitle": "页码",
     "durationAxisTitle": "停留时长（秒）",
