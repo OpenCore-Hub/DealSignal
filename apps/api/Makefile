@@ -1,4 +1,4 @@
-.PHONY: build test lint security trivy-fs trivy-image run clean compose-up compose-down loadtest loadtest-public-link loadtest-signed-url loadtest-search loadtest-assistant
+.PHONY: build test lint security trivy-fs trivy-image run clean compose-up compose-down loadtest loadtest-public-link loadtest-signed-url loadtest-search loadtest-assistant seed-radar-stress seed-radar-stress-clean seed-radar-stress-status
 
 build:
 	go build -o bin/server ./cmd/server
@@ -66,4 +66,18 @@ loadtest-search:
 loadtest-assistant:
 	@which k6 > /dev/null 2>&1 || (echo "k6 not installed"; exit 1)
 	k6 run scripts/loadtest/assistant-chat.js -e TARGET=$(TARGET) -e WORKSPACE_SLUG=$(WORKSPACE_SLUG) -e API_TOKEN=$(API_TOKEN)
+
+# Local Deal Radar six-product stress seed (Postgres behind :8090, default slug=kendiyang).
+#   make seed-radar-stress WORKSPACE_SLUG=kendiyang PER_PRODUCT=8
+WORKSPACE_SLUG ?= kendiyang
+PER_PRODUCT ?= 8
+
+seed-radar-stress:
+	./scripts/seed-radar-stress.sh seed --workspace $(WORKSPACE_SLUG) --per-product $(PER_PRODUCT)
+
+seed-radar-stress-clean:
+	./scripts/seed-radar-stress.sh clean --workspace $(WORKSPACE_SLUG)
+
+seed-radar-stress-status:
+	./scripts/seed-radar-stress.sh status --workspace $(WORKSPACE_SLUG)
 
