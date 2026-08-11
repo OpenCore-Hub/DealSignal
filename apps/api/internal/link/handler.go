@@ -1056,11 +1056,31 @@ func (h *Handler) ApproveAccessRequest(c *gin.Context) {
 	userID := middleware.UserIDFrom(c)
 	workspaceID := middleware.WorkspaceIDFrom(c)
 	ar, err := h.service.ApproveAccessRequest(c.Request.Context(), workspaceID, c.Param("id"), c.Param("requestId"), userID)
-	if err != nil {
-		writeAccessRequestReviewError(c, err)
+	writeApproveAccessRequestResponse(c, ar, err)
+}
+
+// writeApproveAccessRequestResponse writes the approve response.
+//
+// Contract: approval commits before verification-code email delivery. On mail
+// failure return 200 + data + warning (code=access_code_send_failed) — never
+// 502 — so the owner UI can treat the request as approved and offer resend.
+// Resend / public send paths still use writeAccessCodeSendFailed (502).
+func writeApproveAccessRequestResponse(c *gin.Context, ar LinkAccessRequest, err error) {
+	if err == nil {
+		c.JSON(http.StatusOK, gin.H{"data": ar})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": ar})
+	if errors.Is(err, ErrAccessCodeSendFailed) {
+		c.JSON(http.StatusOK, gin.H{
+			"data": ar,
+			"warning": gin.H{
+				"code":    "access_code_send_failed",
+				"message": httpx.SafeMessage("access_code_send_failed", err),
+			},
+		})
+		return
+	}
+	writeAccessRequestReviewError(c, err)
 }
 
 // RejectAccessRequest rejects a pending access request.
@@ -1133,8 +1153,6 @@ func writeAccessRequestReviewError(c *gin.Context, err error) {
 		c.JSON(http.StatusConflict, gin.H{"code": "access_request_not_pending", "message": httpx.SafeMessage("access_request_not_pending", err)})
 	case errors.Is(err, ErrAccessRequestBlocked):
 		c.JSON(http.StatusForbidden, gin.H{"code": "access_request_blocked", "message": httpx.SafeMessage("access_request_blocked", err)})
-	case errors.Is(err, ErrAccessCodeSendFailed):
-		writeAccessCodeSendFailed(c, err)
 	default:
 		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_request", "message": httpx.SafeMessage("invalid_request", err)})
 	}

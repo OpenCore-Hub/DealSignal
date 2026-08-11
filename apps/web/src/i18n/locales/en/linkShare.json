@@ -322,7 +322,10 @@
     "notFound": "Access request not found",
     "notPending": "This access request is no longer pending",
     "blocked": "This email is blocked from requesting access",
-    "codeSendFailed": "Access was approved, but the verification code could not be sent. Resend it from the share settings.",
+    "codeSendFailed": "Access approved, but the verification code could not be sent. Tap Resend to try again.",
+    "resendCode": "Resend",
+    "resendCodeSuccess": "Verification code resent",
+    "resendCodeFailed": "Could not resend the verification code",
     "linkNotFound": "Share link not found in this workspace"
   },
   "activity": {

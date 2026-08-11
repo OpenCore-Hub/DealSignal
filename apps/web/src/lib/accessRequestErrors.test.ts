@@ -1,8 +1,32 @@
 import { describe, expect, it } from "vitest";
 import { ApiError } from "@/lib/apiClient";
-import { accessRequestReviewErrorMessage } from "./accessRequestErrors";
+import {
+  accessRequestReviewErrorMessage,
+  isAccessCodeSendFailedAfterApprove,
+  isAccessCodeSendFailedWarning,
+} from "./accessRequestErrors";
 
 const t = (key: string) => `i18n:${key}`;
+
+describe("access code send failed helpers", () => {
+  it("detects soft warning and legacy ApiError", () => {
+    expect(
+      isAccessCodeSendFailedWarning({ code: "access_code_send_failed" }),
+    ).toBe(true);
+    expect(isAccessCodeSendFailedWarning({ code: "other" })).toBe(false);
+    expect(
+      isAccessCodeSendFailedAfterApprove(
+        new ApiError({
+          status: 502,
+          code: "access_code_send_failed",
+          message: "raw",
+          requestId: "r1",
+        }),
+      ),
+    ).toBe(true);
+    expect(isAccessCodeSendFailedAfterApprove(new Error("nope"))).toBe(false);
+  });
+});
 
 describe("accessRequestReviewErrorMessage", () => {
   it("maps known ApiError codes to i18n keys", () => {

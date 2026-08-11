@@ -55,7 +55,6 @@ import type {
   WorkspaceInvitation,
   WorkspaceMember,
   WorkspaceSettings,
-  VisitorQuestion,
   PublicAskTurn,
   PublicAskFAQ,
   PublicFormalAsk,
@@ -1238,7 +1237,11 @@ export const api = {
   getLinkAccessRequests: (linkId: string) =>
     request<{ data: LinkAccessRequest[] }>(getWorkspaceSlug(), `/links/${linkId}/access-requests`),
   approveLinkAccessRequest: (linkId: string, requestId: string) =>
-    request<{ data: LinkAccessRequest }>(
+    request<{
+      data: LinkAccessRequest;
+      /** Soft warning when approval committed but verification email failed. */
+      warning?: { code: string; message: string };
+    }>(
       getWorkspaceSlug(),
       `/links/${linkId}/access-requests/${requestId}/approve`,
       { method: "POST" }
@@ -2127,4 +2130,3 @@ export const api = {
       { method: "DELETE" }
     ).then((res) => res.data),
 };
-
