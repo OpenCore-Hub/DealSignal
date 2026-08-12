@@ -489,7 +489,7 @@ describe("AccessTab", () => {
     );
 
     expect(
-      screen.getByText(/Locked entries come from deal room access policy/i),
+      screen.getByText(/Locked entries come from data room access policy/i),
     ).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: /remove room-block@example.com/i }),

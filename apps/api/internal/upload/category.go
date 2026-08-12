@@ -16,9 +16,9 @@ var (
 	// ErrCategoryImmutable is returned when a deal_room or frozen category cannot be PATCH'd.
 	ErrCategoryImmutable = errors.New("document category cannot be changed")
 	// ErrCategoryDealRoomViaAPI rejects writing deal_room through UpdateCategory.
-	ErrCategoryDealRoomViaAPI = errors.New("deal_room category is managed by deal-room membership")
+	ErrCategoryDealRoomViaAPI = errors.New("data room category is managed by data room membership")
 	// ErrCategoryWhileInRoom rejects library category changes while still attached to a room.
-	ErrCategoryWhileInRoom = errors.New("document is in a deal room; remove it before changing category")
+	ErrCategoryWhileInRoom = errors.New("document is in a data room; remove it before changing category")
 )
 
 // ValidateCreateCategory rejects deal_room on POST upload — membership promotes it.

@@ -481,13 +481,13 @@
       "filteredDescription": "Try All, or clear another filter after new activity arrives."
     },
     "rooms": {
-      "title": "No active deal rooms",
-      "description": "Create your first deal room to start sharing documents securely with investors, LPs, or customers.",
-      "action": "Create deal room",
+      "title": "No active data rooms",
+      "description": "Create your first data room to start sharing documents securely with investors, LPs, or customers.",
+      "action": "Create data room",
       "noDescription": "No description"
     },
     "visitors": {
-      "description": "Visitor activity will appear here once your deal rooms are being accessed."
+      "description": "Visitor activity will appear here once your data rooms are being accessed."
     },
     "risks": {
       "title": "No risk alerts",

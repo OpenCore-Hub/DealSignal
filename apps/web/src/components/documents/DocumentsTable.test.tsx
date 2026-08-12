@@ -190,7 +190,7 @@ const resources = {
       createLink: "Create Link",
       download: "Download",
       moreActions: "More actions",
-      addToDealRoom: "Add to Deal Room",
+      addToDealRoom: "Add to Data Room",
     },
   },
 };

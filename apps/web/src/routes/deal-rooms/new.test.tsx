@@ -71,9 +71,9 @@ const createdRoom: DealRoom = {
 const resources = {
   en: {
     dealRooms: {
-      detail: { back: "Back to deal rooms", noTemplate: "No matching template structure." },
+      detail: { back: "Back to data rooms", noTemplate: "No matching template structure." },
       new: {
-        title: "New Deal Room",
+        title: "New Data Room",
         subtitle: "Choose a scenario template",
         basicInfo: "Basic info",
         name: "Name",
@@ -86,10 +86,10 @@ const resources = {
         recommendedFiles: "Recommended files",
         defaultPermission: "Default permission",
         cancel: "Cancel",
-        create: "Create deal room",
+        create: "Create data room",
         creating: "Creating...",
-        created: "Deal room created",
-        createFailed: "Failed to create deal room",
+        created: "Data room created",
+        createFailed: "Failed to create data room",
         folderCount: "{{count}} folders",
         folderCount_one: "{{count}} folder",
       },
@@ -204,10 +204,10 @@ describe("NewDealRoomPage", () => {
     await renderPage();
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /create deal room/i })).toBeEnabled();
+      expect(screen.getByRole("button", { name: /create data room/i })).toBeEnabled();
     });
 
-    fireEvent.click(screen.getByRole("button", { name: /create deal room/i }));
+    fireEvent.click(screen.getByRole("button", { name: /create data room/i }));
 
     await waitFor(() => {
       expect(createDealRoomMock).toHaveBeenCalledWith(
@@ -221,7 +221,7 @@ describe("NewDealRoomPage", () => {
       );
     });
 
-    expect(toast.success).toHaveBeenCalledWith("Deal room created");
+    expect(toast.success).toHaveBeenCalledWith("Data room created");
     await waitFor(() => {
       expect(screen.getByTestId("location")).toHaveTextContent("/acme/deal-rooms/room-1");
     });

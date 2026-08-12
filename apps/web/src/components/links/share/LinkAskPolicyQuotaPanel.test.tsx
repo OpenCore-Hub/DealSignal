@@ -108,7 +108,7 @@ describe("LinkAskPolicyQuotaPanel", () => {
 
     await waitFor(() => {
       expect(
-        screen.getByText(/requires a synced deal-room knowledge corpus/i),
+        screen.getByText(/requires a synced data room knowledge corpus/i),
       ).toBeInTheDocument();
     });
   });

@@ -111,7 +111,7 @@
     "loadFailed": "Failed to load billing info",
     "storage": "Document storage",
     "links": "Share links",
-    "rooms": "Deal rooms"
+    "rooms": "Data rooms"
   },
   "security": {
     "title": "Security",
@@ -134,7 +134,7 @@
     "description": "Manage visitor data subject rights: export, anonymize, or delete PII.",
     "visitorEmail": "Visitor email",
     "visitorEmailPlaceholder": "visitor@example.com",
-    "visitorEmailHint": "Enter the email address used by the visitor to access your shared links or deal rooms.",
+    "visitorEmailHint": "Enter the email address used by the visitor to access your shared links or data rooms.",
     "export": "Export data",
     "exportSuccess": "Visitor data exported",
     "anonymize": "Anonymize data",

@@ -176,7 +176,7 @@ func (s *Service) ListRoomAskInbox(
 ) ([]OwnerAskTurn, error) {
 	roomUUID, err := uuid.Parse(roomID)
 	if err != nil {
-		return nil, fmt.Errorf("invalid deal room id")
+		return nil, fmt.Errorf("invalid data room id")
 	}
 	wsUUID := pgUUID(workspaceID)
 	if !wsUUID.Valid {
@@ -191,7 +191,7 @@ func (s *Service) ListRoomAskInbox(
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFoundInWorkspace
 		}
-		return nil, fmt.Errorf("get deal room: %w", err)
+		return nil, fmt.Errorf("get data room: %w", err)
 	}
 	if err := authorizeAskHostOwnerView(ctx, s.queries, room.WorkspaceID, room.ID, userID); err != nil {
 		return nil, err

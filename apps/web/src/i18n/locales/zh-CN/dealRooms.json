@@ -34,10 +34,6 @@
   "search": {
     "placeholder": "搜索数据室..."
   },
-  "tags": {
-    "label": "标签",
-    "all": "全部标签"
-  },
   "filter": {
     "noResults": "没有匹配的数据室。",
     "clear": "清除筛选"
@@ -723,7 +719,7 @@
     "emptyPinnedFaqTitle": "暂无已 Pin 的 FAQ",
     "emptyPinnedFaqDescription": "可在「AI 已处理」或「全部」视图中将已回答的问题 Pin 为 FAQ，供访客查看。",
     "emptyFormalTitle": "暂无待审核 Formal 问题",
-    "emptyFormalDescription": "本 Deal Room 内 Formal 模式链接的问题会在此审核后再公开。",
+    "emptyFormalDescription": "本数据室内 Formal 模式链接的问题会在此审核后再公开。",
     "formalQueueBadge": "Formal",
     "formalPublishTitle": "审核并发布",
     "formalAnswerPlaceholder": "填写审核通过的公开答复…",

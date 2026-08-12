@@ -68,7 +68,7 @@ async function initI18n() {
         common: {
           preview: "Preview",
           createLink: "Create Link",
-          addToDealRoom: "Add to Deal Room",
+          addToDealRoom: "Add to Data Room",
           retry: "Retry",
         },
         documents: {
@@ -120,14 +120,14 @@ describe("DocumentDetail category guards", () => {
   it("hides add-to-room for agreement documents", async () => {
     await renderDetail("agreement");
     expect(await screen.findByText("Sample")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Add to Deal Room" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add to Data Room" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Unset as Agreement" })).toBeEnabled();
   });
 
   it("hides add-to-room and disables set-as-agreement for deal_room documents", async () => {
     await renderDetail("deal_room");
     expect(await screen.findByText("Sample")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Add to Deal Room" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add to Data Room" })).not.toBeInTheDocument();
     const agreementBtn = screen.getByRole("button", { name: "Set as Agreement" });
     expect(agreementBtn).toBeDisabled();
     await waitFor(() =>
@@ -138,6 +138,6 @@ describe("DocumentDetail category guards", () => {
   it("shows add-to-room for general documents", async () => {
     await renderDetail("general");
     expect(await screen.findByText("Sample")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Add to Deal Room" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add to Data Room" })).toBeInTheDocument();
   });
 });

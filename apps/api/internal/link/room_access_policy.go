@@ -163,7 +163,7 @@ func (s *Service) getDealRoomForWorkspace(ctx context.Context, workspaceID, deal
 		if errors.Is(err, pgx.ErrNoRows) {
 			return db.DealRoom{}, ErrDealRoomNotFound
 		}
-		return db.DealRoom{}, fmt.Errorf("get deal room: %w", err)
+		return db.DealRoom{}, fmt.Errorf("get data room: %w", err)
 	}
 	return room, nil
 }
@@ -252,7 +252,7 @@ func validateNoRoomBlockedAllows(rules []AccessRule, roomBlockedEmails []string)
 		}
 		v := strings.TrimSpace(strings.ToLower(r.Value))
 		if _, hit := roomSet[v]; hit {
-			return fmt.Errorf("%w: %s is blocked by deal room access policy", ErrInvalidAccessRule, v)
+			return fmt.Errorf("%w: %s is blocked by data room access policy", ErrInvalidAccessRule, v)
 		}
 	}
 	return nil

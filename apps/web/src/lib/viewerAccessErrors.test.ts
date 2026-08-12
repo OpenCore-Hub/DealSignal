@@ -21,7 +21,7 @@ describe("viewerAccessErrors", () => {
     const err = new ApiError({
       status: 403,
       code: "document_locked",
-      message: "document is locked in this deal room",
+      message: "document is locked in this data room",
       requestId: "req-1",
     });
     expect(viewerAccessErrorKindFromUnknown(err)).toBe("locked");

@@ -104,7 +104,7 @@ async function initI18n() {
           view: "View",
           createLink: "Create Link",
           copyLink: "Copy Link",
-          addToDealRoom: "Add to Deal Room",
+          addToDealRoom: "Add to Data Room",
           archive: "Archive",
           unarchive: "Unarchive",
           download: "Download",
@@ -298,7 +298,7 @@ describe("useDocumentColumns download/delete", () => {
     expect(within(menu).getByRole("menuitem", { name: /Create link/i })).toHaveAttribute(
       "data-disabled",
     );
-    expect(within(menu).getByRole("menuitem", { name: /Add to Deal Room/i })).toHaveAttribute(
+    expect(within(menu).getByRole("menuitem", { name: /Add to Data Room/i })).toHaveAttribute(
       "data-disabled",
     );
     expect(within(menu).getByRole("menuitem", { name: /Download/i })).toHaveAttribute(
@@ -363,7 +363,7 @@ describe("useDocumentColumns download/delete", () => {
       );
       fireEvent.click(screen.getByRole("button", { name: "More actions" }));
       const menu = await screen.findByRole("menu");
-      expect(within(menu).queryByRole("menuitem", { name: /Add to Deal Room/i })).not.toBeInTheDocument();
+      expect(within(menu).queryByRole("menuitem", { name: /Add to Data Room/i })).not.toBeInTheDocument();
       unmount();
     }
 
@@ -376,6 +376,6 @@ describe("useDocumentColumns download/delete", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "More actions" }));
     const generalMenu = await screen.findByRole("menu");
-    expect(within(generalMenu).getByRole("menuitem", { name: /Add to Deal Room/i })).toBeInTheDocument();
+    expect(within(generalMenu).getByRole("menuitem", { name: /Add to Data Room/i })).toBeInTheDocument();
   });
 });

@@ -21,7 +21,7 @@ func TestActionItemIncludesTargetIDForDealRoomShare(t *testing.T) {
 		ID:          pgtype.UUID{Bytes: itemID, Valid: true},
 		TenantID:    pgtype.UUID{Bytes: tenantID, Valid: true},
 		WorkspaceID: pgtype.UUID{Bytes: wsID, Valid: true},
-		Title:       "Approve deal room share access",
+		Title:       "Approve data room share access",
 		Impact:      "high",
 		DueAt:       pgtype.Timestamptz{Time: now, Valid: true},
 		Status:      "pending",

@@ -75,7 +75,7 @@ test.describe("Dashboard action surface navigation (MSW)", () => {
 
     const roomShareTodo = radarRow(
       page,
-      /Approve deal room share access from room-share-applicant@example\.com/i,
+      /Approve data room share access from room-share-applicant@example\.com/i,
     );
     await expect(roomShareTodo).toBeVisible({ timeout: 15000 });
     await roomShareTodo.getByRole("button", { name: "Approve", exact: true }).click();

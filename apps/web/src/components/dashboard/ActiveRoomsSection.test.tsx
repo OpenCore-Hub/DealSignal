@@ -37,7 +37,7 @@ function makeRoom(overrides: Partial<DealRoom> = {}): DealRoom {
 async function renderSection(rooms: DealRoom[]) {
   const i18n = await createTestI18n({
     dashboard: {
-      "sections.activeRooms": "Active deal rooms",
+      "sections.activeRooms": "Active data rooms",
       "empty.rooms.title": "No active rooms",
       "empty.rooms.description": "Create one",
       "empty.rooms.action": "Create",

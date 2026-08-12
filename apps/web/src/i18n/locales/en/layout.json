@@ -10,14 +10,14 @@
       "workspace": "Workspace",
       "relationships": "Relationships",
       "admin": "Admin",
-      "dealRoom": "Deal Room"
+      "dealRoom": "Data Room"
     },
     "nav": {
       "dashboard": "Deal Radar",
       "documents": "Documents",
       "agreementDocuments": "Agreements",
       "links": "Links",
-      "dealRooms": "Deal Rooms",
+      "dealRooms": "Data Rooms",
       "contacts": "Contacts",
       "insights": "Insights",
       "settings": "Settings"

@@ -63,7 +63,7 @@ test.describe("Deal room document detail navigation (real backend)", () => {
     await expect(page).toHaveURL(new RegExp(`/documents/${uploaded.id}`), { timeout: 10000 });
     await expect(page.getByText("Data room")).toBeVisible({ timeout: 5000 });
 
-    await page.getByRole("button", { name: /Back to deal rooms/i }).click();
+    await page.getByRole("button", { name: /Back to data rooms/i }).click();
     await expect(page).toHaveURL(new RegExp(`/deal-rooms/${room.id}`), { timeout: 10000 });
     await expect(page.getByRole("heading", { name: "Nav Test Room" })).toBeVisible();
   });

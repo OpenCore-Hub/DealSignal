@@ -243,7 +243,7 @@ func (s *Service) preparePublicAskStream(
 		return knowledge.VisitorAskStreamResult{}, knowledge.ErrUnavailable
 	}
 	if !link.DealRoomID.Valid {
-		return knowledge.VisitorAskStreamResult{}, fmt.Errorf("%w: link has no deal room corpus", ErrInvalidInput)
+		return knowledge.VisitorAskStreamResult{}, fmt.Errorf("%w: link has no data room corpus", ErrInvalidInput)
 	}
 
 	docIDs, err := AuthorizedDocumentIDs(ctx, s.queries, link)

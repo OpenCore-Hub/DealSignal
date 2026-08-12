@@ -2022,7 +2022,7 @@ func (h *Handler) documentsForAccessResponse(ctx context.Context, link db.Link, 
 	docs, err := listAuthorizedDocuments(ctx, h.service.queries, link)
 	if err != nil {
 		if link.DealRoomID.Valid {
-			logger.ErrorCtx(ctx, "list deal room documents for access response failed", err,
+			logger.ErrorCtx(ctx, "list data room documents for access response failed", err,
 				logger.Attr("deal_room_id", uuidToString(link.DealRoomID)),
 			)
 		} else {
@@ -3616,7 +3616,7 @@ func (h *Handler) RejectUploadedFile(c *gin.Context) {
 func (h *Handler) PublicDealRoomRedirect(c *gin.Context) {
 	token, err := h.service.ResolveDealRoomSlug(c.Request.Context(), c.Param("slug"))
 	if err != nil || token == "" {
-		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": "no active link for this deal room"})
+		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": "no active link for this data room"})
 		return
 	}
 	target := "/l/" + token

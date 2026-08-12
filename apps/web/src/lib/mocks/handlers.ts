@@ -1726,7 +1726,7 @@ export const handlers = [
       return HttpResponse.json(
         {
           code: "category_while_in_room",
-          message: "remove the document from deal rooms before changing category",
+          message: "remove the document from data rooms before changing category",
         },
         { status: 409 },
       );
@@ -1804,7 +1804,7 @@ export const handlers = [
       return HttpResponse.json(
         {
           code: "category_deal_room_via_api",
-          message: "deal room category is managed by membership",
+          message: "data room category is managed by membership",
         },
         { status: 400 },
       );
@@ -3325,7 +3325,7 @@ export const handlers = [
       documentIds,
       folderPaths: folderScopeMode === "allowlist" ? (body.folder_paths ?? []) : [],
       folderScopeMode,
-      documentTitle: "Deal room link",
+      documentTitle: "Data room link",
       shortUrl: `https://invest.acme.capital/d/${generateId("sh")}`,
       accessCount: 0,
       heatLevel: "cold",
@@ -3687,7 +3687,7 @@ export const handlers = [
     };
     if (body.ask_ai_enabled === true && !link.dealRoomId) {
       return HttpResponse.json(
-        { code: "invalid_input", message: "ask_ai_enabled requires a deal-room link" },
+        { code: "invalid_input", message: "ask_ai_enabled requires a data room link" },
         { status: 400 },
       );
     }
@@ -3723,7 +3723,7 @@ export const handlers = [
     };
     if (mockDealRooms.some((r) => r.slug === body.slug)) {
       return HttpResponse.json(
-        { code: "duplicate_slug", message: "a deal room with this URL already exists" },
+        { code: "duplicate_slug", message: "a data room with this URL already exists" },
         { status: 409 }
       );
     }
@@ -3988,7 +3988,7 @@ export const handlers = [
       return HttpResponse.json(
         {
           code: "agreement_not_allowed_in_deal_room",
-          message: "agreement documents cannot be added to a deal room",
+          message: "agreement documents cannot be added to a data room",
         },
         { status: 400 },
       );

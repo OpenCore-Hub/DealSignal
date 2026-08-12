@@ -71,7 +71,7 @@
       "requireEmailDescription": "Visitor must enter their email to access",
       "requireVerification": "Require email verification",
       "requireVerificationDescription": "Send a one-time code; identity comes from the code (no email field on the visitor page)",
-      "verificationDisabledForDocuments": "Email verification requires contacts and is only available for deal room links",
+      "verificationDisabledForDocuments": "Email verification requires contacts and is only available for data room links",
       "verificationFloorLocked": "Required by access policy — cannot be turned off on this link",
       "requirePassword": "Require password to view",
       "requirePasswordDescription": "Viewer must enter a password",
@@ -88,8 +88,8 @@
       "title": "Blocked viewers",
       "placeholder": "leaker@bad.com",
       "hint": "Block specific email addresses",
-      "roomHint": "Blocked for every share link in this deal room",
-      "dealRoomLinkHint": "Locked entries come from deal room access policy and apply at access time. You can add extra blocks for this link only."
+      "roomHint": "Blocked for every share link in this data room",
+      "dealRoomLinkHint": "Locked entries come from data room access policy and apply at access time. You can add extra blocks for this link only."
     },
     "additionalProtections": {
       "title": "Content protections",
@@ -125,7 +125,7 @@
       "fileRequests": "Enable file requests",
       "fileRequestsDescription": "Allow viewers to request additional files",
       "indexFile": "Enable index file generation",
-      "indexFileDescription": "Generate an index page for the deal room",
+      "indexFileDescription": "Generate an index page for the data room",
       "comingSoon": "Coming soon"
     },
     "emptyTitle": "No restrictions",
@@ -261,7 +261,7 @@
     "status": "Status",
     "fileRequestUpdateSuccess": "File request updated",
     "fileRequestUpdateFailed": "Failed to update file request",
-    "askPolicyNotEntitled": "Grounded AI requires a synced deal-room knowledge corpus. Sync documents in the Knowledge tab first.",
+    "askPolicyNotEntitled": "Grounded AI requires a synced data room knowledge corpus. Sync documents in the Knowledge tab first.",
     "askPolicyQuotaUsage": "{{used}} / {{limit}} AI answers this month",
     "askPolicyQuotaPaywall": "Monthly AI quota reached. New visitor questions will be handled by the host until the quota resets.",
     "fileRequestStatus": {

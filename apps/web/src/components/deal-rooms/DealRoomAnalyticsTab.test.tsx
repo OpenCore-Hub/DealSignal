@@ -23,7 +23,7 @@ i18nInstance.use(initReactI18next).init({
         analytics: {
           loadFailed: "Failed to load analytics",
           trendEmptyTitle: "No view trend yet",
-          trendEmpty: "No view trend data yet for this deal room.",
+          trendEmpty: "No view trend data yet for this data room.",
           views: "Views",
           activeLinks: "Active links",
           uniqueVisitors: "Unique visitors",

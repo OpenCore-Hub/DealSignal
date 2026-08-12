@@ -13,7 +13,7 @@ import (
 )
 
 var (
-	errDocumentLocked       = errors.New("document is locked in this deal room")
+	errDocumentLocked       = errors.New("document is locked in this data room")
 	errDocumentOutOfScope   = errors.New("document is not included in this link")
 	errDocumentAccessDenied = errors.New("document access denied")
 )

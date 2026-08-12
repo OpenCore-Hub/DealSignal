@@ -206,7 +206,7 @@
     "loadFailed": "Unable to load this document. Please try again.",
     "notFound": "Document does not exist or cannot be loaded",
     "documentLockedTitle": "This document is not available",
-    "documentLockedDescription": "This file is locked in the deal room and cannot be viewed through this link. Contact the deal team if you need access.",
+    "documentLockedDescription": "This file is locked in the data room and cannot be viewed through this link. Contact the data room owner if you need access.",
     "documentOutOfScopeTitle": "This document is not included",
     "documentOutOfScopeDescription": "This link only shares selected folders. Choose another document from the list, or ask the sender for an updated link.",
     "meta": "{{fileType}} · {{fileSize}} · {{pageCount}} pages",

@@ -189,7 +189,7 @@ var (
 	ErrNotFoundInWorkspace  = errors.New("link not found in workspace")
 
 	// Deal-room sharing / access-rule errors.
-	ErrDealRoomNotFound = errors.New("deal room not found")
+	ErrDealRoomNotFound = errors.New("data room not found")
 	ErrBlockedEmail     = errors.New("email is blocked")
 	ErrNotAllowedEmail  = errors.New("email is not allowed")
 	// ErrDeliveryEmailMismatch means the visitor submitted an email that does not
@@ -517,7 +517,7 @@ func (s *Service) CreateLink(ctx context.Context, userID, workspaceID string, re
 	if hasDealRoom {
 		drUUID, err := uuid.Parse(req.DealRoomID)
 		if err != nil {
-			return db.Link{}, fmt.Errorf("invalid deal room id: %s", req.DealRoomID)
+			return db.Link{}, fmt.Errorf("invalid data room id: %s", req.DealRoomID)
 		}
 		dealRoom, err := qtx.GetDealRoomByID(ctx, db.GetDealRoomByIDParams{
 			ID:          pgtype.UUID{Bytes: drUUID, Valid: true},
@@ -527,7 +527,7 @@ func (s *Service) CreateLink(ctx context.Context, userID, workspaceID string, re
 			if errors.Is(err, pgx.ErrNoRows) {
 				return db.Link{}, ErrDealRoomNotFound
 			}
-			return db.Link{}, fmt.Errorf("get deal room: %w", err)
+			return db.Link{}, fmt.Errorf("get data room: %w", err)
 		}
 		if uuid.UUID(dealRoom.WorkspaceID.Bytes).String() != workspaceID {
 			return db.Link{}, ErrDealRoomNotFound
@@ -1314,14 +1314,14 @@ func (s *Service) validateDealRoomFolderPaths(ctx context.Context, qtx *db.Queri
 		WorkspaceID: workspaceID,
 	})
 	if err != nil {
-		return fmt.Errorf("get deal room folders: %w", err)
+		return fmt.Errorf("get data room folders: %w", err)
 	}
 	var folders []struct {
 		Path   string `json:"path"`
 		Locked bool   `json:"locked"`
 	}
 	if err := json.Unmarshal([]byte(foldersJSON), &folders); err != nil {
-		return fmt.Errorf("parse deal room folders: %w", err)
+		return fmt.Errorf("parse data room folders: %w", err)
 	}
 	allowed := make(map[string]bool, len(folders))
 	for _, f := range folders {
@@ -1330,7 +1330,7 @@ func (s *Service) validateDealRoomFolderPaths(ctx context.Context, qtx *db.Queri
 	lockedFolders := dealroom.LockedFolderPathSetFromFolderJSON([]byte(foldersJSON))
 	for _, p := range folderPaths {
 		if !allowed[p] {
-			return fmt.Errorf("folder path not found in deal room: %s", p)
+			return fmt.Errorf("folder path not found in data room: %s", p)
 		}
 		if dealroom.FolderPathLocked(p, lockedFolders) {
 			return fmt.Errorf("%w: %s", ErrLockedFolderScope, p)
@@ -1438,7 +1438,7 @@ func (s *Service) ListDealRoomLinks(ctx context.Context, workspaceID, dealRoomID
 	workspaceUUID := pgUUID(workspaceID)
 	drUUID, err := uuid.Parse(dealRoomID)
 	if err != nil {
-		return nil, errors.New("invalid deal room id")
+		return nil, errors.New("invalid data room id")
 	}
 	return s.queries.ListLinksByDealRoom(ctx, db.ListLinksByDealRoomParams{
 		WorkspaceID: workspaceUUID,
@@ -1527,7 +1527,7 @@ func (s *Service) ListDealRoomLinksPage(
 	workspaceUUID := pgUUID(workspaceID)
 	drUUID, err := uuid.Parse(dealRoomID)
 	if err != nil {
-		return DealRoomLinksPage{}, errors.New("invalid deal room id")
+		return DealRoomLinksPage{}, errors.New("invalid data room id")
 	}
 	query = normalizeDealRoomLinksQuery(query)
 	dealRoomUUID := pgtype.UUID{Bytes: drUUID, Valid: true}
@@ -1567,7 +1567,7 @@ func (s *Service) ListDealRoomLinksPage(
 func (s *Service) ResolveDealRoomSlug(ctx context.Context, slug string) (string, error) {
 	room, err := s.queries.GetDealRoomBySlug(ctx, slug)
 	if err != nil {
-		return "", fmt.Errorf("deal room not found: %w", err)
+		return "", fmt.Errorf("data room not found: %w", err)
 	}
 	links, err := s.queries.ListLinksByDealRoom(ctx, db.ListLinksByDealRoomParams{
 		WorkspaceID: room.WorkspaceID,
@@ -2573,7 +2573,7 @@ func (s *Service) ListPendingAccessRequests(ctx context.Context, workspaceID, re
 	case PendingInboxScopeDealRoom:
 		roomUUID, perr := uuid.Parse(strings.TrimSpace(scope.DealRoomID))
 		if perr != nil {
-			return nil, errors.New("invalid deal room id")
+			return nil, errors.New("invalid data room id")
 		}
 		// Bound the room to this workspace so a guessed UUID cannot probe another tenant.
 		if _, gerr := s.queries.GetDealRoomByID(ctx, db.GetDealRoomByIDParams{
@@ -2583,7 +2583,7 @@ func (s *Service) ListPendingAccessRequests(ctx context.Context, workspaceID, re
 			if errors.Is(gerr, pgx.ErrNoRows) {
 				return nil, ErrDealRoomNotFound
 			}
-			return nil, fmt.Errorf("get deal room: %w", gerr)
+			return nil, fmt.Errorf("get data room: %w", gerr)
 		}
 		rows, qerr := s.queries.ListPendingDealRoomLinkAccessRequestsDetailedByWorkspace(ctx, db.ListPendingDealRoomLinkAccessRequestsDetailedByWorkspaceParams{
 			WorkspaceID: wsPG,
@@ -5277,7 +5277,7 @@ func (s *Service) buildIndexDocumentContext(ctx context.Context, link db.Link) (
 			WorkspaceID: link.WorkspaceID,
 		})
 		if err == nil && room.Name != "" {
-			return fmt.Sprintf("Deal room: %s\nNo document text is available yet.", room.Name), nil
+			return fmt.Sprintf("Data room: %s\nNo document text is available yet.", room.Name), nil
 		}
 		return "", errors.New("no documents available for index generation")
 	}
@@ -5480,7 +5480,7 @@ func (s *Service) ApproveUploadedFile(ctx context.Context, fileID pgtype.UUID, r
 	})
 	if memErr != nil {
 		if !errors.Is(memErr, pgx.ErrNoRows) {
-			return fmt.Errorf("lookup deal room membership: %w", memErr)
+			return fmt.Errorf("lookup data room membership: %w", memErr)
 		}
 		if _, addErr := qtx.AddDealRoomDocument(ctx, db.AddDealRoomDocumentParams{
 			TenantID:    link.TenantID,
@@ -5490,7 +5490,7 @@ func (s *Service) ApproveUploadedFile(ctx context.Context, fileID pgtype.UUID, r
 			FolderPath:  folderPath,
 			SortOrder:   0,
 		}); addErr != nil {
-			return fmt.Errorf("add deal room document: %w", addErr)
+			return fmt.Errorf("add data room document: %w", addErr)
 		}
 	} else if membership.FolderPath != folderPath {
 		if updErr := qtx.UpdateDealRoomDocumentFolder(ctx, db.UpdateDealRoomDocumentFolderParams{
@@ -5498,7 +5498,7 @@ func (s *Service) ApproveUploadedFile(ctx context.Context, fileID pgtype.UUID, r
 			ID:         membership.ID,
 			RoomID:     link.DealRoomID,
 		}); updErr != nil {
-			return fmt.Errorf("update deal room document folder: %w", updErr)
+			return fmt.Errorf("update data room document folder: %w", updErr)
 		}
 	}
 
@@ -5522,7 +5522,7 @@ func (s *Service) ApproveUploadedFile(ctx context.Context, fileID pgtype.UUID, r
 			uuid.UUID(link.CreatedBy.Bytes).String(),
 			"email",
 			fmt.Sprintf("Your uploaded file has been approved: %s", file.OriginalFilename),
-			fmt.Sprintf("The file '%s' you uploaded to the deal room has been approved and is now available.", file.OriginalFilename),
+			fmt.Sprintf("The file '%s' you uploaded to the data room has been approved and is now available.", file.OriginalFilename),
 			notification.WithRecipient(file.UploaderEmail.String),
 		)
 	}

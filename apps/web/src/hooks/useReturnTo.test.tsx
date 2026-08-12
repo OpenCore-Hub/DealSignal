@@ -21,9 +21,9 @@ describe("useReturnTo", () => {
 
   it("uses returnTo and returnLabel from location state", () => {
     const { result } = renderHook(() => useReturnTo("/default", "Back to list"), {
-      wrapper: wrapper([{ pathname: "/detail", state: { returnTo: "/deal-rooms/1", returnLabel: "Back to deal room" } }]),
+      wrapper: wrapper([{ pathname: "/detail", state: { returnTo: "/deal-rooms/1", returnLabel: "Back to data room" } }]),
     });
-    expect(result.current).toEqual({ to: "/deal-rooms/1", label: "Back to deal room" });
+    expect(result.current).toEqual({ to: "/deal-rooms/1", label: "Back to data room" });
   });
 
   it("uses default label when returnLabel is missing", () => {

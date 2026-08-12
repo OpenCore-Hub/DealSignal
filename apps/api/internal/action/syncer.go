@@ -430,9 +430,9 @@ func titleFor(sourceType, actor, target string) string {
 		return fmt.Sprintf("Approve access request from %s", actor)
 	case SourceTypeDealRoomLinkAccessRequest:
 		if target != "" {
-			return fmt.Sprintf("Approve deal room share access from %s for %s", actor, target)
+			return fmt.Sprintf("Approve data room share access from %s for %s", actor, target)
 		}
-		return fmt.Sprintf("Approve deal room share access from %s", actor)
+		return fmt.Sprintf("Approve data room share access from %s", actor)
 	case SourceTypeRoomAccessRequest:
 		if target != "" {
 			return fmt.Sprintf("Approve room access request from %s for %s", actor, target)
@@ -469,9 +469,9 @@ func titleFor(sourceType, actor, target string) string {
 		return "A share link expires soon"
 	case SourceTypeExpiringRoom:
 		if target != "" {
-			return fmt.Sprintf("Deal room %s expires soon", target)
+			return fmt.Sprintf("Data room %s expires soon", target)
 		}
-		return "A deal room expires soon"
+		return "A data room expires soon"
 	default:
 		return fmt.Sprintf("Review %s", sourceType)
 	}

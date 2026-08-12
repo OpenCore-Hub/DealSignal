@@ -168,7 +168,7 @@ func (s *Service) GetBilling(ctx context.Context, workspaceID string) (Billing, 
 	}
 	rooms, err := s.queries.ListDealRoomsByWorkspace(ctx, wsUUID)
 	if err != nil {
-		return Billing{}, fmt.Errorf("count deal rooms: %w", err)
+		return Billing{}, fmt.Errorf("count data rooms: %w", err)
 	}
 	storageUsage, err := s.queries.GetWorkspaceStorageUsage(ctx, wsUUID)
 	if err != nil {

@@ -430,7 +430,7 @@ func (s *Service) DeleteDocument(ctx context.Context, workspaceID, documentID st
 			WorkspaceID: ws,
 			DocumentID:  docID,
 		}); err != nil {
-			return fmt.Errorf("detach deal room memberships: %w", err)
+			return fmt.Errorf("detach data room memberships: %w", err)
 		}
 		if err := q.SoftDeleteDocument(ctx, db.SoftDeleteDocumentParams{
 			ID:          docID,

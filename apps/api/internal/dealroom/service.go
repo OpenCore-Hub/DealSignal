@@ -27,8 +27,8 @@ var (
 	slugRegex = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 
 	ErrRoomNotFound       = errors.New("room not found")
-	ErrInvalidSlug        = errors.New("the deal room URL can only contain lowercase letters, numbers, and hyphens")
-	ErrDuplicateSlug      = errors.New("a deal room with this URL already exists. please choose a different name")
+	ErrInvalidSlug        = errors.New("the data room URL can only contain lowercase letters, numbers, and hyphens")
+	ErrDuplicateSlug      = errors.New("a data room with this URL already exists. please choose a different name")
 	ErrNotRoomAdmin       = errors.New("not a room admin")
 	ErrMemberNotFound     = errors.New("member not found")
 	ErrRequestNotFound    = errors.New("access request not found")
@@ -44,7 +44,7 @@ var (
 	ErrAccessRequestExists = errors.New("access request already exists")
 	ErrRateLimited         = errors.New("too many requests")
 	// ErrAgreementNotAllowedInDealRoom blocks attaching agreement-library docs to rooms.
-	ErrAgreementNotAllowedInDealRoom = errors.New("agreement documents cannot be added to a deal room")
+	ErrAgreementNotAllowedInDealRoom = errors.New("agreement documents cannot be added to a data room")
 )
 
 // Beginner starts a database transaction.
@@ -401,7 +401,7 @@ func (s *Service) loadCachedRoomSummaries(ctx context.Context, workspaceID strin
 		}
 		if s.kvCache != nil {
 			if setErr := s.kvCache.Set(flightCtx, cacheKey, roomSummariesToCached(out), listCacheTTL); setErr != nil {
-				logger.ErrorCtx(flightCtx, "cache deal room list", setErr)
+				logger.ErrorCtx(flightCtx, "cache data room list", setErr)
 			}
 		}
 		return out, nil
@@ -496,7 +496,7 @@ func (s *Service) invalidateListCache(ctx context.Context, workspaceID string) {
 		return
 	}
 	if err := s.kvCache.Del(ctx, listCacheKey(workspaceID)); err != nil {
-		logger.ErrorCtx(ctx, "invalidate deal room list cache", err)
+		logger.ErrorCtx(ctx, "invalidate data room list cache", err)
 	}
 }
 
@@ -592,7 +592,7 @@ func (s *Service) GetRoomAnalytics(ctx context.Context, roomID, workspaceID, use
 		DealRoomID:  room.ID,
 	})
 	if err != nil {
-		return RoomAnalytics{}, fmt.Errorf("get deal room analytics: %w", err)
+		return RoomAnalytics{}, fmt.Errorf("get data room analytics: %w", err)
 	}
 
 	out := RoomAnalytics{
@@ -615,7 +615,7 @@ func (s *Service) GetRoomAnalytics(ctx context.Context, roomID, workspaceID, use
 		PageLimit:   dealRoomRecentVisitorsLimit,
 	})
 	if err != nil {
-		return RoomAnalytics{}, fmt.Errorf("list deal room recent visitors: %w", err)
+		return RoomAnalytics{}, fmt.Errorf("list data room recent visitors: %w", err)
 	}
 	out.RecentVisitors = make([]RoomRecentVisitor, 0, len(visitors))
 	for _, v := range visitors {
@@ -636,7 +636,7 @@ func (s *Service) GetRoomAnalytics(ctx context.Context, roomID, workspaceID, use
 	}
 	if s.kvCache != nil {
 		if setErr := s.kvCache.Set(ctx, cacheKey, out, roomAnalyticsCacheTTL); setErr != nil {
-			logger.ErrorCtx(ctx, "cache deal room analytics", setErr)
+			logger.ErrorCtx(ctx, "cache data room analytics", setErr)
 		}
 	}
 	return out, nil
