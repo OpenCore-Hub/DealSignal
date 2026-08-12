@@ -93,6 +93,8 @@ services:
       HTTP_READ_TIMEOUT_SECONDS: ${HTTP_READ_TIMEOUT_SECONDS:-30}
       DATABASE_URL: postgres://${POSTGRES_USER:-dealsignal}:${POSTGRES_PASSWORD:-dealsignal}@postgres:5432/${POSTGRES_DB:-dealsignal}?sslmode=disable
       REDIS_URL: redis:6379
+      # Queue all transactional mail by default; a deployment can explicitly opt out.
+      EMAIL_QUEUE_ENABLED: ${EMAIL_QUEUE_ENABLED:-true}
       S3_ENDPOINT: http://minio:9000
       S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-http://127.0.0.1:9003}
       ONLYOFFICE_URL: http://onlyoffice:80

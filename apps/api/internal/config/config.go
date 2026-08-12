@@ -223,7 +223,7 @@ func Load() (*Config, error) {
 		ResendMaxRetries:       getEnvInt("RESEND_MAX_RETRIES", 3),
 		ResendWebhookSecret:    os.Getenv("RESEND_WEBHOOK_SECRET"),
 
-		EmailQueueEnabled:         strings.ToLower(getEnv("EMAIL_QUEUE_ENABLED", "false")) == "true",
+		EmailQueueEnabled:         strings.ToLower(getEnv("EMAIL_QUEUE_ENABLED", "true")) == "true",
 		EmailQueueStream:          getEnv("EMAIL_QUEUE_STREAM", "mail:queue"),
 		EmailWorkerCount:          getEnvInt("EMAIL_WORKER_COUNT", 2),
 		EmailWorkerInterval:       time.Duration(getEnvInt("EMAIL_WORKER_INTERVAL_MS", 1000)) * time.Millisecond,

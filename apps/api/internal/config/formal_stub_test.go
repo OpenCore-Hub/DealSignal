@@ -5,6 +5,25 @@ import (
 	"testing"
 )
 
+func TestEmailQueueEnabledByDefault(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://u:p@localhost/db")
+	t.Setenv("REDIS_URL", "localhost:6379")
+	t.Setenv("JWT_SECRET", "test-secret")
+	t.Setenv("URL_SIGNING_SECRET", "test-url-secret")
+	t.Setenv("S3_BUCKET", "bucket")
+	t.Setenv("S3_ACCESS_KEY", "key")
+	t.Setenv("S3_SECRET_KEY", "secret")
+	t.Setenv("EMAIL_QUEUE_ENABLED", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if !cfg.EmailQueueEnabled {
+		t.Fatal("expected email queue to be enabled by default")
+	}
+}
+
 func TestFormalAskEntitlementStubRejectedInProductionLoad(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://u:p@localhost/db")
 	t.Setenv("REDIS_URL", "localhost:6379")
