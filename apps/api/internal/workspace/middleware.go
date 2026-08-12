@@ -11,8 +11,10 @@ import (
 )
 
 // AuthMiddleware validates that the authenticated user is a member of the
-// workspace identified by the :workspaceSlug route parameter.
+// workspace identified by the :workspaceSlug route parameter, injects
+// workspace/tenant/role into the context, then enforces RBAC.
 func AuthMiddleware(svc *Service) gin.HandlerFunc {
+	authz := RBACMiddleware()
 	return func(c *gin.Context) {
 		slug := c.Param("workspaceSlug")
 		if slug == "" {
@@ -52,7 +54,8 @@ func AuthMiddleware(svc *Service) gin.HandlerFunc {
 
 		c.Set("workspaceID", ws.ID)
 		c.Set("tenantID", ws.TenantID)
-		c.Next()
+		c.Set(middleware.WorkspaceRoleKey, ws.Role)
+		authz(c)
 	}
 }
 

@@ -15,12 +15,16 @@ type TokenValidator interface {
 }
 
 const (
-	userIDKey      = "userID"
-	workspaceIDKey = "workspaceID"
-	tenantIDKey    = "tenantID"
+	userIDKey        = "userID"
+	workspaceIDKey   = "workspaceID"
+	tenantIDKey      = "tenantID"
+	workspaceRoleKey = "workspaceRole"
 
 	accessTokenCookie = "access_token"
 )
+
+// WorkspaceRoleKey is the gin context key for the caller's workspace membership role.
+const WorkspaceRoleKey = workspaceRoleKey
 
 // Auth creates a middleware that validates the JWT bearer token and injects the user ID into the context.
 func Auth(validator TokenValidator) gin.HandlerFunc {
@@ -78,6 +82,15 @@ func WorkspaceIDFrom(c *gin.Context) string {
 // TenantIDFrom returns the tenant ID injected by workspace auth middleware.
 func TenantIDFrom(c *gin.Context) string {
 	v, _ := c.Get(tenantIDKey)
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return ""
+}
+
+// WorkspaceRoleFrom returns the workspace membership role injected by workspace auth middleware.
+func WorkspaceRoleFrom(c *gin.Context) string {
+	v, _ := c.Get(workspaceRoleKey)
 	if s, ok := v.(string); ok {
 		return s
 	}

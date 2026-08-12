@@ -29,9 +29,21 @@ type createInvitationRequest struct {
 	ExpiresDays int    `json:"expires_days,omitempty"`
 }
 
+type updateMemberRoleRequest struct {
+	Role string `json:"role" binding:"required"`
+}
+
+type updateInvitationRoleRequest struct {
+	Role string `json:"role" binding:"required"`
+}
+
 type updateSettingsRequest struct {
 	Name       string `json:"name" binding:"required"`
 	BrandColor string `json:"brand_color,omitempty"`
+}
+
+type putViewerDomainRequest struct {
+	Hostname string `json:"hostname" binding:"required"`
 }
 
 type updateSecurityRequest struct {
@@ -64,14 +76,24 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup) {
 	ws.GET("", h.Get)
 	ws.GET("/members", h.ListMembers)
 	ws.POST("/members", h.AddMember)
+	ws.PUT("/members/:userId", h.UpdateMember)
+	ws.DELETE("/members/:userId", h.RemoveMember)
 	ws.POST("/invitations", h.CreateInvitation)
+	ws.PUT("/invitations/:token", h.UpdateInvitation)
+	ws.DELETE("/invitations/:token", h.RevokeInvitation)
 	ws.GET("/settings", h.GetSettings)
 	ws.PUT("/settings", h.UpdateSettings)
+	ws.POST("/logo", h.UploadLogo)
+	ws.GET("/viewer-domain", h.GetViewerDomain)
+	ws.PUT("/viewer-domain", h.PutViewerDomain)
+	ws.POST("/viewer-domain/verify", h.VerifyViewerDomain)
+	ws.DELETE("/viewer-domain", h.DeleteViewerDomain)
 	ws.GET("/security", h.GetSecurity)
 	ws.PUT("/security", h.UpdateSecurity)
 	ws.GET("/billing", h.GetBilling)
 
-	// Public invitation acceptance requires authentication but not workspace membership.
+	// Public invitation preview (no auth). Accept requires authentication.
+	r.GET("/invitations/:token", h.PreviewInvitation)
 	r.POST("/invitations/:token/accept", middleware.Auth(h.validator), h.AcceptInvitation)
 }
 
@@ -191,17 +213,141 @@ func (h *Handler) CreateInvitation(c *gin.Context) {
 
 	inv, err := h.service.CreateInvitation(c.Request.Context(), actorID, workspaceID, tenantID, req.Email, req.Role, req.ExpiresDays)
 	if err != nil {
-		switch err {
-		case ErrNotMember, ErrNotManager:
-			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", err)})
-		case ErrInvalidRole:
-			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_role", "message": httpx.SafeMessage("invalid_role", err)})
-		default:
+		if !writeMemberManageError(c, err) {
 			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		}
 		return
 	}
-	c.JSON(http.StatusCreated, inv)
+	c.JSON(http.StatusCreated, gin.H{"data": inv})
+}
+
+func writeMemberManageError(c *gin.Context, err error) bool {
+	switch {
+	case errors.Is(err, ErrNotMember), errors.Is(err, ErrNotManager):
+		c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", err)})
+	case errors.Is(err, ErrCannotManageMember):
+		c.JSON(http.StatusForbidden, gin.H{"code": "cannot_manage_member", "message": httpx.SafeMessage("cannot_manage_member", err)})
+	case errors.Is(err, ErrAlreadyMember):
+		c.JSON(http.StatusConflict, gin.H{"code": "already_member", "message": httpx.SafeMessage("already_member", err)})
+	case errors.Is(err, ErrInvalidEmail):
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_email", "message": httpx.SafeMessage("invalid_email", err)})
+	case errors.Is(err, ErrInvalidRole):
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_role", "message": httpx.SafeMessage("invalid_role", err)})
+	case errors.Is(err, ErrMemberNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"code": "member_not_found", "message": httpx.SafeMessage("member_not_found", err)})
+	case errors.Is(err, ErrCannotModifyOwner):
+		c.JSON(http.StatusForbidden, gin.H{"code": "cannot_modify_owner", "message": httpx.SafeMessage("cannot_modify_owner", err)})
+	case errors.Is(err, ErrCannotModifySelf):
+		c.JSON(http.StatusForbidden, gin.H{"code": "cannot_modify_self", "message": httpx.SafeMessage("cannot_modify_self", err)})
+	case errors.Is(err, ErrInvitationNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"code": "invitation_not_found", "message": httpx.SafeMessage("invitation_not_found", err)})
+	case errors.Is(err, ErrInvitationUsed):
+		c.JSON(http.StatusConflict, gin.H{"code": "invitation_used", "message": httpx.SafeMessage("invitation_used", err)})
+	case errors.Is(err, ErrInvitationExpired):
+		c.JSON(http.StatusGone, gin.H{"code": "invitation_expired", "message": httpx.SafeMessage("invitation_expired", err)})
+	default:
+		return false
+	}
+	return true
+}
+
+// UpdateMember changes an active member's role.
+func (h *Handler) UpdateMember(c *gin.Context) {
+	var req updateMemberRoleRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
+		return
+	}
+	member, err := h.service.UpdateMemberRole(
+		c.Request.Context(),
+		middleware.UserIDFrom(c),
+		middleware.WorkspaceIDFrom(c),
+		middleware.TenantIDFrom(c),
+		c.Param("userId"),
+		req.Role,
+	)
+	if err != nil {
+		if !writeMemberManageError(c, err) {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+		}
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": member})
+}
+
+// RemoveMember removes an active workspace member.
+func (h *Handler) RemoveMember(c *gin.Context) {
+	err := h.service.RemoveMember(
+		c.Request.Context(),
+		middleware.UserIDFrom(c),
+		middleware.WorkspaceIDFrom(c),
+		middleware.TenantIDFrom(c),
+		c.Param("userId"),
+	)
+	if err != nil {
+		if !writeMemberManageError(c, err) {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+		}
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+// UpdateInvitation changes a pending invitation role.
+func (h *Handler) UpdateInvitation(c *gin.Context) {
+	var req updateInvitationRoleRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
+		return
+	}
+	inv, err := h.service.UpdateInvitationRole(
+		c.Request.Context(),
+		middleware.UserIDFrom(c),
+		middleware.WorkspaceIDFrom(c),
+		middleware.TenantIDFrom(c),
+		c.Param("token"),
+		req.Role,
+	)
+	if err != nil {
+		if !writeMemberManageError(c, err) {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+		}
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": inv})
+}
+
+// RevokeInvitation deletes a pending invitation.
+func (h *Handler) RevokeInvitation(c *gin.Context) {
+	err := h.service.RevokeInvitation(
+		c.Request.Context(),
+		middleware.UserIDFrom(c),
+		middleware.WorkspaceIDFrom(c),
+		middleware.TenantIDFrom(c),
+		c.Param("token"),
+	)
+	if err != nil {
+		if !writeMemberManageError(c, err) {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+		}
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+// PreviewInvitation returns public invitation details for the accept page.
+func (h *Handler) PreviewInvitation(c *gin.Context) {
+	token := c.Param("token")
+	preview, err := h.service.PreviewInvitation(c.Request.Context(), token)
+	if err != nil {
+		if errors.Is(err, ErrInvitationNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"code": "invitation_not_found", "message": httpx.SafeMessage("invitation_not_found", err)})
+			return
+		}
+		httpx.Internal(c, err, "preview invitation")
+		return
+	}
+	c.JSON(http.StatusOK, preview)
 }
 
 // AcceptInvitation accepts an invitation and joins the user to the workspace.
@@ -209,21 +355,24 @@ func (h *Handler) AcceptInvitation(c *gin.Context) {
 	userID := middleware.UserIDFrom(c)
 	token := c.Param("token")
 
-	member, err := h.service.AcceptInvitation(c.Request.Context(), token, userID)
+	result, err := h.service.AcceptInvitation(c.Request.Context(), token, userID)
 	if err != nil {
-		switch err {
-		case ErrInvitationNotFound:
+		switch {
+		case errors.Is(err, ErrInvitationNotFound):
 			c.JSON(http.StatusNotFound, gin.H{"code": "invitation_not_found", "message": httpx.SafeMessage("invitation_not_found", err)})
-		case ErrInvitationExpired:
+		case errors.Is(err, ErrInvitationExpired):
 			c.JSON(http.StatusGone, gin.H{"code": "invitation_expired", "message": httpx.SafeMessage("invitation_expired", err)})
-		case ErrInvitationUsed:
+		case errors.Is(err, ErrInvitationUsed):
 			c.JSON(http.StatusConflict, gin.H{"code": "invitation_used", "message": httpx.SafeMessage("invitation_used", err)})
+		case errors.Is(err, ErrInvitationEmailMismatch):
+			// Distinct from public-viewer delivery email_mismatch (reserved NDA/delivery email).
+			c.JSON(http.StatusForbidden, gin.H{"code": "invitation_email_mismatch", "message": httpx.SafeMessage("invitation_email_mismatch", err)})
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+			httpx.Internal(c, err, "accept invitation")
 		}
 		return
 	}
-	c.JSON(http.StatusOK, member)
+	c.JSON(http.StatusOK, result)
 }
 
 // GetSettings returns workspace general settings.
@@ -256,6 +405,125 @@ func (h *Handler) UpdateSettings(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, settings)
+}
+
+// UploadLogo stores a workspace brand logo. Requires owner or admin role.
+func (h *Handler) UploadLogo(c *gin.Context) {
+	userID := middleware.UserIDFrom(c)
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	if !h.service.IsManager(c.Request.Context(), userID, workspaceID) {
+		c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", errors.New("forbidden"))})
+		return
+	}
+	fileHeader, err := c.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_file", "message": httpx.SafeMessage("invalid_file", err)})
+		return
+	}
+	file, err := fileHeader.Open()
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_file", "message": httpx.SafeMessage("invalid_file", err)})
+		return
+	}
+	defer file.Close()
+
+	settings, err := h.service.UploadLogo(c.Request.Context(), workspaceID, middleware.TenantIDFrom(c), file, fileHeader)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrLogoStorageUnavailable):
+			c.JSON(http.StatusServiceUnavailable, gin.H{"code": "storage_error", "message": httpx.SafeMessage("storage_error", err)})
+		case errors.Is(err, ErrInvalidLogoType):
+			c.JSON(http.StatusUnsupportedMediaType, gin.H{"code": "unsupported_type", "message": httpx.SafeMessage("unsupported_type", err)})
+		case errors.Is(err, ErrLogoTooLarge):
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"code": "file_too_large", "message": httpx.SafeMessage("file_too_large", err)})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+		}
+		return
+	}
+	c.JSON(http.StatusCreated, settings)
+}
+
+// GetViewerDomain returns the workspace custom viewer hostname, including pending CNAME state.
+func (h *Handler) GetViewerDomain(c *gin.Context) {
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	domain, err := h.service.GetViewerDomain(c.Request.Context(), workspaceID)
+	if err != nil {
+		httpx.Internal(c, err, "get viewer domain")
+		return
+	}
+	c.JSON(http.StatusOK, domain)
+}
+
+// PutViewerDomain registers a pending workspace viewer hostname. Requires owner or admin.
+func (h *Handler) PutViewerDomain(c *gin.Context) {
+	var req putViewerDomainRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
+		return
+	}
+	userID := middleware.UserIDFrom(c)
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	if !h.service.IsManager(c.Request.Context(), userID, workspaceID) {
+		c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", errors.New("forbidden"))})
+		return
+	}
+	domain, err := h.service.PutViewerDomain(c.Request.Context(), workspaceID, req.Hostname)
+	if err != nil {
+		h.writeViewerDomainError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, domain)
+}
+
+// VerifyViewerDomain fail-closed CNAME-checks the pending hostname. Requires owner or admin.
+func (h *Handler) VerifyViewerDomain(c *gin.Context) {
+	userID := middleware.UserIDFrom(c)
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	if !h.service.IsManager(c.Request.Context(), userID, workspaceID) {
+		c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", errors.New("forbidden"))})
+		return
+	}
+	domain, err := h.service.VerifyViewerDomain(c.Request.Context(), workspaceID)
+	if err != nil {
+		h.writeViewerDomainError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, domain)
+}
+
+// DeleteViewerDomain removes the workspace viewer hostname. Requires owner or admin.
+func (h *Handler) DeleteViewerDomain(c *gin.Context) {
+	userID := middleware.UserIDFrom(c)
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	if !h.service.IsManager(c.Request.Context(), userID, workspaceID) {
+		c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", errors.New("forbidden"))})
+		return
+	}
+	if err := h.service.DeleteViewerDomain(c.Request.Context(), workspaceID); err != nil {
+		h.writeViewerDomainError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+func (h *Handler) writeViewerDomainError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, ErrInvalidViewerDomain):
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_domain", "message": httpx.SafeMessage("invalid_domain", err)})
+	case errors.Is(err, ErrViewerDomainTaken):
+		c.JSON(http.StatusConflict, gin.H{"code": "domain_exists", "message": httpx.SafeMessage("domain_exists", err)})
+	case errors.Is(err, ErrViewerDomainNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": httpx.SafeMessage("not_found", err)})
+	case errors.Is(err, ErrViewerDomainCNAMEMissing):
+		c.JSON(http.StatusBadRequest, gin.H{"code": "cname_missing", "message": httpx.SafeMessage("cname_missing", err)})
+	case errors.Is(err, ErrViewerDomainNotVerified):
+		c.JSON(http.StatusBadRequest, gin.H{"code": "not_verified", "message": httpx.SafeMessage("not_verified", err)})
+	case errors.Is(err, ErrViewerDomainNotConfigured):
+		c.JSON(http.StatusServiceUnavailable, gin.H{"code": "viewer_domain_not_configured", "message": httpx.SafeMessage("viewer_domain_not_configured", err)})
+	default:
+		httpx.Internal(c, err, "viewer domain")
+	}
 }
 
 // GetSecurity returns workspace security settings.

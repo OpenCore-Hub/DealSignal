@@ -146,6 +146,7 @@ func (s *Server) registerRoutes() error {
 			workspace.WithDBPool(s.dbPool),
 			workspace.WithMailer(appMailer),
 			workspace.WithFrontendURL(s.cfg.FrontendURL),
+			workspace.WithViewerDomain(s.cfg.CNAMETarget),
 		)
 		workspaceHandler := workspace.NewHandler(workspaceSvc, authSvc)
 		workspaceHandler.RegisterRoutes(api)
@@ -154,7 +155,7 @@ func (s *Server) registerRoutes() error {
 		domainHandler := domain.NewHandler(domainSvc, workspaceSvc, authSvc)
 		domainHandler.RegisterRoutes(api)
 
-		s.engine.Use(middleware.HostMiddleware(s.cfg.BaseDomain, hostLookup(domainSvc, s.cfg.BaseDomain)))
+		s.engine.Use(middleware.HostMiddleware(s.cfg.BaseDomain, hostLookup(domainSvc, queries, s.cfg.BaseDomain)))
 
 		public := s.engine.Group("/api/v1/public")
 		tracker := mailer.NewTracker(queries, s.cfg.AppBaseURL, s.cfg.EmailTrackingSecret, s.cfg.EmailTrackingTTL, mailer.WithRedis(s.redisClient))
@@ -165,6 +166,7 @@ func (s *Server) registerRoutes() error {
 			if err != nil {
 				return fmt.Errorf("s3 client: %w", err)
 			}
+			workspaceSvc.SetStorage(storageClient)
 
 			var llmClient *llm.Client
 			if s.cfg.OpenAIAPIKey != "" {
@@ -502,8 +504,9 @@ func (s *Server) registerRoutes() error {
 	return nil
 }
 
-func hostLookup(svc *domain.Service, baseDomain string) middleware.HostLookup {
+func hostLookup(svc *domain.Service, queries *db.Queries, baseDomain string) middleware.HostLookup {
 	return func(ctx context.Context, host string) (string, error) {
+		host = strings.ToLower(strings.TrimSpace(host))
 		if suffix := "." + baseDomain; strings.HasSuffix(host, suffix) {
 			slug := strings.TrimSuffix(host, suffix)
 			t, err := svc.GetTenantBySlug(ctx, slug)
@@ -512,7 +515,24 @@ func hostLookup(svc *domain.Service, baseDomain string) middleware.HostLookup {
 			}
 			return uuid.UUID(t.ID.Bytes).String(), nil
 		}
-		return svc.ResolveHost(ctx, host)
+		tenantID, err := svc.ResolveHost(ctx, host)
+		if err == nil && tenantID != "" {
+			return tenantID, nil
+		}
+		if queries == nil {
+			return "", err
+		}
+		row, qerr := queries.GetWorkspaceViewerDomainByHostname(ctx, host)
+		if qerr != nil {
+			if err != nil {
+				return "", err
+			}
+			return "", qerr
+		}
+		if !strings.EqualFold(row.Status, "verified") {
+			return "", domain.ErrNotVerified
+		}
+		return uuid.UUID(row.TenantID.Bytes).String(), nil
 	}
 }
 

@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
@@ -60,7 +61,10 @@ func (s *Service) ListMembers(ctx context.Context, workspaceID string) ([]Member
 		return nil, err
 	}
 	out := make([]MemberDetail, 0, len(rows))
+	activeEmails := make(map[string]struct{}, len(rows))
 	for _, r := range rows {
+		email := strings.ToLower(strings.TrimSpace(r.Email))
+		activeEmails[email] = struct{}{}
 		out = append(out, MemberDetail{
 			ID:       uuidToString(r.UserID),
 			UserID:   uuidToString(r.UserID),
@@ -69,6 +73,26 @@ func (s *Service) ListMembers(ctx context.Context, workspaceID string) ([]Member
 			Role:     r.Role,
 			JoinedAt: r.JoinedAt.Time.Format(time.RFC3339),
 			Status:   "active",
+		})
+	}
+
+	pending, err := s.queries.ListPendingWorkspaceInvitations(ctx, wsUUID)
+	if err != nil {
+		return nil, err
+	}
+	for _, inv := range pending {
+		email := strings.ToLower(strings.TrimSpace(inv.Email))
+		if _, exists := activeEmails[email]; exists {
+			continue
+		}
+		out = append(out, MemberDetail{
+			ID:       uuidToString(inv.Token),
+			UserID:   "",
+			Email:    inv.Email,
+			Name:     "",
+			Role:     inv.Role,
+			JoinedAt: inv.CreatedAt.Time.Format(time.RFC3339),
+			Status:   "pending",
 		})
 	}
 	return out, nil
@@ -88,8 +112,8 @@ func (s *Service) GetSettings(ctx context.Context, workspaceID string) (Settings
 		Name:         ws.Name,
 		Slug:         ws.Slug,
 		BrandColor:   ws.BrandColor.String,
-		ViewerDomain: "",
-		LogoURL:      "",
+		ViewerDomain: s.verifiedViewerHostname(ctx, workspaceID),
+		LogoURL:      s.resolveLogoURL(ctx, workspaceID),
 	}, nil
 }
 
@@ -111,8 +135,8 @@ func (s *Service) UpdateSettings(ctx context.Context, workspaceID, name, brandCo
 		Name:         ws.Name,
 		Slug:         ws.Slug,
 		BrandColor:   ws.BrandColor.String,
-		ViewerDomain: "",
-		LogoURL:      "",
+		ViewerDomain: s.verifiedViewerHostname(ctx, workspaceID),
+		LogoURL:      s.resolveLogoURL(ctx, workspaceID),
 	}, nil
 }
 
