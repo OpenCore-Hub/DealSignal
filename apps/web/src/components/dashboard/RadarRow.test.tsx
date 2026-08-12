@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, type Mock } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { I18nextProvider } from "react-i18next";
 import { createTestI18n } from "@/i18n/test-utils";
@@ -29,9 +29,9 @@ function makeItem(over: Partial<RadarWorkItem> = {}): RadarWorkItem {
 async function renderRow(
   item: RadarWorkItem,
   handlers: {
-    onPrimary?: ReturnType<typeof vi.fn>;
-    onSelect?: ReturnType<typeof vi.fn>;
-    onEvidence?: ReturnType<typeof vi.fn>;
+    onPrimary?: Mock<(item: RadarWorkItem) => void>;
+    onSelect?: Mock<(item: RadarWorkItem) => void>;
+    onEvidence?: Mock<(item: RadarWorkItem) => void>;
   } = {},
   opts: { hideProductLabel?: boolean } = {},
 ) {
@@ -60,9 +60,9 @@ async function renderRow(
     },
   });
 
-  const onPrimary = handlers.onPrimary ?? vi.fn();
-  const onSelect = handlers.onSelect ?? vi.fn();
-  const onEvidence = handlers.onEvidence ?? vi.fn();
+  const onPrimary = handlers.onPrimary ?? vi.fn<(item: RadarWorkItem) => void>();
+  const onSelect = handlers.onSelect ?? vi.fn<(item: RadarWorkItem) => void>();
+  const onEvidence = handlers.onEvidence ?? vi.fn<(item: RadarWorkItem) => void>();
 
   render(
     <I18nextProvider i18n={i18n}>

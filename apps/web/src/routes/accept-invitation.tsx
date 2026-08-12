@@ -112,7 +112,7 @@ export function AcceptInvitationPage() {
         return;
       }
 
-      let meEmail = "";
+      let meEmail: string;
       try {
         const me = await api.getMe();
         meEmail = me.email ?? "";
@@ -260,7 +260,7 @@ export function AcceptInvitationPage() {
                 ) : null}
                 <Button
                   onClick={() => navigate("/")}
-                  variant={emailMismatch || status === "ready" ? "outline" : "default"}
+                  variant={emailMismatch ? "outline" : "default"}
                   className="w-full"
                 >
                   {t("acceptInvitation.backHome")}
