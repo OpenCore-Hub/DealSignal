@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { Globe } from "@phosphor-icons/react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -29,7 +28,6 @@ export function SettingsLanguagePage() {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="workspace-language">{t("language.label")}</Label>
             <Select
               value={language}
               onValueChange={(value) => {
@@ -38,7 +36,11 @@ export function SettingsLanguagePage() {
                 setLanguage(lng);
               }}
             >
-              <SelectTrigger id="workspace-language" className="w-full sm:w-64">
+              <SelectTrigger
+                id="workspace-language"
+                className="w-full sm:w-64"
+                aria-label={t("language.title")}
+              >
                 <SelectValue placeholder={t("language.placeholder")} />
               </SelectTrigger>
               <SelectContent>

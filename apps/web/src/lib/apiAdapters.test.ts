@@ -3,6 +3,11 @@ import {
   toCreateLinkPayload,
   toIntegrationStatus,
   toBackendIntegrationStatus,
+  toWorkspaceMember,
+  toWorkspaceMembers,
+  toWorkspaceSettings,
+  toUpdateWorkspaceSettingsPayload,
+  toWorkspaceViewerDomain,
 } from "@/lib/apiAdapters";
 import { buildConfigFromPreset } from "@/components/links/link-bundle/pipelineUtils";
 import type { PermissionConfig } from "@/types";
@@ -117,13 +122,39 @@ describe("toCreateLinkPayload", () => {
     expect(Math.abs(expiresAt.getTime() - expected.getTime())).toBeLessThan(60000); // within 1 minute
   });
 
-  it("does not set expires_at for custom expiryDays", () => {
+  it("does not set expires_at for custom expiryDays without a datetime", () => {
     const config: PermissionConfig = {
       ...buildConfigFromPreset("public"),
       expiryDays: "custom",
     };
     const payload = toCreateLinkPayload(["doc-1"], config);
     expect(payload.expires_at).toBeUndefined();
+  });
+
+  it("sets expires_at from _editExpiresAt for custom expiry", () => {
+    const customAt = new Date();
+    customAt.setDate(customAt.getDate() + 12);
+    const iso = customAt.toISOString();
+    const config: PermissionConfig = {
+      ...buildConfigFromPreset("public"),
+      expiryDays: "custom",
+      _editExpiresAt: iso,
+    };
+    const payload = toCreateLinkPayload(["doc-1"], config);
+    expect(payload.expires_at).toBe(iso);
+  });
+
+  it("sets expires_at for 15-day preset", () => {
+    const config: PermissionConfig = {
+      ...buildConfigFromPreset("public"),
+      expiryDays: 15,
+    };
+    const payload = toCreateLinkPayload(["doc-1"], config);
+    expect(payload.expires_at).toBeDefined();
+    const expiresAt = new Date(payload.expires_at!);
+    const expected = new Date();
+    expected.setDate(expected.getDate() + 15);
+    expect(Math.abs(expiresAt.getTime() - expected.getTime())).toBeLessThan(60000);
   });
 
   it("sets max_access_count from maxViews", () => {
@@ -181,6 +212,7 @@ describe("integration status adapters", () => {
       keyPageSlackEnabled: false,
       slack: true,
       hubspot: false,
+      canManage: false,
     });
   });
 
@@ -191,6 +223,18 @@ describe("integration status adapters", () => {
       keyPageSlackEnabled: false,
       slack: false,
       hubspot: false,
+      canManage: false,
+    });
+  });
+
+  it("maps can_manage onto IntegrationStatus", () => {
+    expect(toIntegrationStatus({ can_manage: true })).toEqual({
+      emailEnabled: true,
+      dailyDigestEnabled: false,
+      keyPageSlackEnabled: false,
+      slack: false,
+      hubspot: false,
+      canManage: true,
     });
   });
 
@@ -201,6 +245,7 @@ describe("integration status adapters", () => {
       keyPageSlackEnabled: true,
       slack: false,
       hubspot: true,
+      canManage: true,
     };
     expect(toBackendIntegrationStatus(frontend)).toEqual({
       email_enabled: true,
@@ -208,6 +253,141 @@ describe("integration status adapters", () => {
       key_page_slack_enabled: true,
       slack_connected: false,
       hubspot_connected: true,
+    });
+  });
+});
+
+describe("workspace settings adapters", () => {
+  it("maps snake_case brand_color from create/get settings onto the Brand UI", () => {
+    expect(
+      toWorkspaceSettings({
+        name: "Acme",
+        slug: "acme",
+        brand_color: "#0055ff",
+        viewer_domain: "invest.acme.com",
+        logo_url: "https://cdn.example.com/logo.png",
+      }),
+    ).toEqual({
+      name: "Acme",
+      slug: "acme",
+      brandColor: "#0055ff",
+      viewerDomain: "invest.acme.com",
+      logoUrl: "https://cdn.example.com/logo.png",
+    });
+  });
+
+  it("accepts camelCase or { data } wrappers from mocks", () => {
+    expect(
+      toWorkspaceSettings({
+        data: { name: "Demo", slug: "demo", brandColor: "#0f172a" },
+      }),
+    ).toEqual({
+      name: "Demo",
+      slug: "demo",
+      brandColor: "#0f172a",
+      viewerDomain: "",
+      logoUrl: "",
+    });
+  });
+
+  it("sends brand_color on update so the DB column is persisted", () => {
+    expect(
+      toUpdateWorkspaceSettingsPayload({
+        name: "Acme",
+        slug: "acme",
+        brandColor: "#3366ff",
+        viewerDomain: "",
+        logoUrl: "",
+      }),
+    ).toEqual({
+      name: "Acme",
+      slug: "acme",
+      brand_color: "#3366ff",
+      logo_url: undefined,
+    });
+  });
+
+  it("maps viewer-domain snake_case including pending CNAME fields", () => {
+    expect(
+      toWorkspaceViewerDomain({
+        hostname: "invest.acme.com",
+        status: "pending",
+        cname_host: "invest.acme.com",
+        cname_target: "cname.dealsignal.com",
+      }),
+    ).toEqual({
+      hostname: "invest.acme.com",
+      status: "pending",
+      cnameHost: "invest.acme.com",
+      cnameTarget: "cname.dealsignal.com",
+      verifiedAt: undefined,
+    });
+  });
+});
+
+describe("workspace member adapters", () => {
+  it("maps snake_case members and pending invites", () => {
+    expect(
+      toWorkspaceMembers({
+        data: [
+          {
+            id: "u_1",
+            user_id: "u_1",
+            email: "owner@acme.com",
+            name: "",
+            role: "owner",
+            joined_at: "2026-01-01T00:00:00Z",
+            status: "active",
+          },
+          {
+            id: "tok_1",
+            user_id: "",
+            email: "pending@acme.com",
+            role: "member",
+            joined_at: "2026-01-02T00:00:00Z",
+            status: "pending",
+          },
+        ],
+      }),
+    ).toEqual([
+      {
+        id: "u_1",
+        userId: "u_1",
+        email: "owner@acme.com",
+        name: "owner@acme.com",
+        role: "owner",
+        joinedAt: "2026-01-01T00:00:00Z",
+        status: "active",
+        avatarUrl: undefined,
+      },
+      {
+        id: "tok_1",
+        userId: "",
+        email: "pending@acme.com",
+        name: "pending@acme.com",
+        role: "member",
+        joinedAt: "2026-01-02T00:00:00Z",
+        status: "pending",
+        avatarUrl: undefined,
+      },
+    ]);
+  });
+
+  it("keeps explicit names when present", () => {
+    expect(
+      toWorkspaceMember({
+        id: "u_2",
+        userId: "u_2",
+        email: "jane@acme.com",
+        name: "Jane Smith",
+        role: "admin",
+        joinedAt: "2026-01-01T00:00:00Z",
+        status: "active",
+      }),
+    ).toMatchObject({
+      name: "Jane Smith",
+      email: "jane@acme.com",
+      role: "admin",
     });
   });
 });

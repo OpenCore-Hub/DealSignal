@@ -28,6 +28,9 @@ const InsightsSuggestionsPage = lazy(() => import("@/routes/insights/suggestions
 const InsightsAccessPage = lazy(() => import("@/routes/insights/access").then((m) => ({ default: m.InsightsAccessPage })));
 const InsightsKeyPagesPage = lazy(() => import("@/routes/insights/key-pages").then((m) => ({ default: m.InsightsKeyPagesPage })));
 const SettingsPage = lazy(() => import("@/routes/settings").then((m) => ({ default: m.SettingsPage })));
+const RequireWorkspaceWrite = lazy(() =>
+  import("@/components/auth/RequireWorkspaceWrite").then((m) => ({ default: m.RequireWorkspaceWrite })),
+);
 const SettingsGeneralPage = lazy(() => import("@/routes/settings/general").then((m) => ({ default: m.SettingsGeneralPage })));
 const SettingsBrandPage = lazy(() => import("@/routes/settings/brand").then((m) => ({ default: m.SettingsBrandPage })));
 const SettingsMembersPage = lazy(() => import("@/routes/settings/members").then((m) => ({ default: m.SettingsMembersPage })));
@@ -56,6 +59,9 @@ const NotFoundPage = lazy(() => import("@/routes/not-found").then((m) => ({ defa
 const LoginPage = lazy(() => import("@/routes/login").then((m) => ({ default: m.LoginPage })));
 const RegisterPage = lazy(() => import("@/routes/register").then((m) => ({ default: m.RegisterPage })));
 const VerifyEmailPage = lazy(() => import("@/routes/verify-email").then((m) => ({ default: m.VerifyEmailPage })));
+const AcceptInvitationPage = lazy(() =>
+  import("@/routes/accept-invitation").then((m) => ({ default: m.AcceptInvitationPage })),
+);
 const WorkspacesPage = lazy(() => import("@/routes/workspaces").then((m) => ({ default: m.WorkspacesPage })));
 const CreateWorkspacePage = lazy(() => import("@/routes/workspaces/new").then((m) => ({ default: m.CreateWorkspacePage })));
 
@@ -160,6 +166,16 @@ export const router = createBrowserRouter([
     errorElement: <RouteError />,
   },
   {
+    // Must be registered before /:workspaceSlug so invite links are not treated as workspace routes.
+    path: "/invitations/:token/accept",
+    element: (
+      <Suspense fallback={<PageLoader />}>
+        <AcceptInvitationPage />
+      </Suspense>
+    ),
+    errorElement: <RouteError />,
+  },
+  {
     path: "/:workspaceSlug",
     element: (
       <ProtectedRoute>
@@ -171,18 +187,53 @@ export const router = createBrowserRouter([
       { index: true, element: <Navigate to="dashboard" replace /> },
       { path: "dashboard", element: <DashboardPage /> },
       { path: "documents", element: <DocumentsPage /> },
-      { path: "documents/upload", element: <UploadPage /> },
+      {
+        path: "documents/upload",
+        element: (
+          <RequireWorkspaceWrite>
+            <UploadPage />
+          </RequireWorkspaceWrite>
+        ),
+      },
       { path: "documents/:documentId", element: <DocumentDetailPage /> },
       { path: "agreement-documents", element: <AgreementDocumentsPage /> },
       { path: "links", element: <LinksPage /> },
-      { path: "links/new", element: <NewLinkPage /> },
-      { path: "links/:id/edit", element: <EditLinkPage /> },
+      {
+        path: "links/new",
+        element: (
+          <RequireWorkspaceWrite>
+            <NewLinkPage />
+          </RequireWorkspaceWrite>
+        ),
+      },
+      {
+        path: "links/:id/edit",
+        element: (
+          <RequireWorkspaceWrite>
+            <EditLinkPage />
+          </RequireWorkspaceWrite>
+        ),
+      },
       { path: "links/:linkId", element: <LinkDetailPage /> },
       { path: "deal-rooms", element: <DealRoomsPage /> },
-      { path: "deal-rooms/new", element: <NewDealRoomPage /> },
+      {
+        path: "deal-rooms/new",
+        element: (
+          <RequireWorkspaceWrite>
+            <NewDealRoomPage />
+          </RequireWorkspaceWrite>
+        ),
+      },
       { path: "deal-rooms/:roomId", element: <DealRoomDetailPage /> },
       { path: "contacts", element: <ContactsPage /> },
-      { path: "contacts/new", element: <NewContactPage /> },
+      {
+        path: "contacts/new",
+        element: (
+          <RequireWorkspaceWrite>
+            <NewContactPage />
+          </RequireWorkspaceWrite>
+        ),
+      },
       { path: "contacts/:contactId", element: <ContactDetailPage /> },
       {
         path: "insights",

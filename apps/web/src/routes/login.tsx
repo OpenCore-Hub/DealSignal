@@ -7,12 +7,20 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/apiErrors";
+import {
+  buildInviteAuthPath,
+  inviteEmailFromSearchParams,
+  isInviteAuthFlow,
+  safeAuthRedirect,
+} from "@/lib/inviteAuth";
 
 export function LoginPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { t } = useTranslation("auth");
-  const [email, setEmail] = useState("");
+  const invitedEmail = inviteEmailFromSearchParams(searchParams);
+  const lockEmail = isInviteAuthFlow(searchParams);
+  const [email, setEmail] = useState(invitedEmail);
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -21,7 +29,7 @@ export function LoginPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    const trimmedEmail = email.trim();
+    const trimmedEmail = (lockEmail ? invitedEmail : email).trim();
     if (!trimmedEmail || !trimmedEmail.includes("@")) {
       setError(t("login.errorInvalidEmail"));
       return;
@@ -35,9 +43,8 @@ export function LoginPage() {
     setError(null);
     try {
       await api.login(trimmedEmail, password);
-      const redirect = searchParams.get("redirect");
-      const safeRedirect = redirect && /^\/[^/]/.test(redirect) ? redirect : "/";
-      navigate(safeRedirect, { replace: true });
+      const redirect = safeAuthRedirect(searchParams.get("redirect"));
+      navigate(redirect ?? "/", { replace: true });
     } catch (err) {
       setError(apiErrorMessage(err, { context: "login", messageKey: "auth:login.errorLoginFailed" }));
       setLoading(false);
@@ -57,6 +64,9 @@ export function LoginPage() {
                 {t("login.registeredSuccess")}
               </div>
             )}
+            {lockEmail ? (
+              <div className="mb-4 rounded-md bg-muted p-3 text-sm text-muted-foreground">{t("login.inviteBanner")}</div>
+            ) : null}
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="email">{t("login.email")}</Label>
@@ -64,10 +74,16 @@ export function LoginPage() {
                   id="email"
                   type="email"
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  onChange={(e) => {
+                    if (!lockEmail) setEmail(e.target.value);
+                  }}
                   placeholder={t("login.emailPlaceholder")}
+                  autoComplete="email"
+                  readOnly={lockEmail}
+                  aria-readonly={lockEmail || undefined}
                   required
                 />
+                {lockEmail ? <p className="text-caption text-muted-foreground">{t("login.emailLockedHint")}</p> : null}
               </div>
               <div className="space-y-2">
                 <Label htmlFor="password">{t("login.password")}</Label>
@@ -77,6 +93,7 @@ export function LoginPage() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder={t("login.passwordPlaceholder")}
+                  autoComplete="current-password"
                   required
                 />
               </div>
@@ -86,7 +103,18 @@ export function LoginPage() {
               </Button>
               <p className="text-center text-sm text-muted-foreground">
                 {t("login.noAccount")}{" "}
-                <Button variant="link" className="p-0" onClick={() => navigate("/register")}>
+                <Button
+                  variant="link"
+                  className="p-0"
+                  onClick={() => {
+                    navigate(
+                      buildInviteAuthPath("register", {
+                        redirect: searchParams.get("redirect"),
+                        email: invitedEmail || undefined,
+                      }),
+                    );
+                  }}
+                >
                   {t("login.signUp")}
                 </Button>
               </p>

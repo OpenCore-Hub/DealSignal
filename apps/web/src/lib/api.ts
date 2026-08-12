@@ -55,6 +55,7 @@ import type {
   WorkspaceInvitation,
   WorkspaceMember,
   WorkspaceSettings,
+  WorkspaceViewerDomain,
   PublicAskTurn,
   PublicAskFAQ,
   PublicFormalAsk,
@@ -69,8 +70,15 @@ import {
   toCreateLinkPayload,
   toIntegrationStatus,
   toOutboundWebhookConfig,
+  toUpdateWorkspaceSettingsPayload,
+  toWorkspaceMembers,
+  toWorkspaceSettings,
+  toWorkspaceViewerDomain,
   type BackendIntegrationStatus,
   type BackendOutboundWebhook,
+  type BackendWorkspaceMember,
+  type BackendWorkspaceSettings,
+  type BackendWorkspaceViewerDomain,
   type UpdateLinkPayload,
 } from "@/lib/apiAdapters";
 import {
@@ -662,7 +670,29 @@ export const api = {
     });
   },
 
-  getWorkspaces: () => request<{ data: Workspace[] }>(undefined, "/workspaces"),
+  getWorkspaces: async () => {
+    const res = await request<{
+      data?: Array<{
+        id?: string;
+        slug?: string;
+        name?: string;
+        logo_url?: string;
+        logoUrl?: string;
+        role?: string;
+      }>;
+    }>(undefined, "/workspaces");
+    return {
+      data: (res.data ?? []).map((ws) => ({
+        id: ws.id ?? "",
+        slug: ws.slug ?? "",
+        name: ws.name ?? "",
+        logoUrl: ws.logo_url ?? ws.logoUrl,
+        role: (["owner", "admin", "member", "guest"].includes(ws.role ?? "")
+          ? ws.role
+          : undefined) as Workspace["role"] | undefined,
+      })),
+    };
+  },
   createWorkspace: (payload: { name: string; slug: string; brand_color?: string }) =>
     request<Workspace>(undefined, "/workspaces", {
       method: "POST",
@@ -1950,13 +1980,89 @@ export const api = {
       { method: "POST", body: JSON.stringify({ hours }) },
     ),
 
-  getWorkspaceMembers: () =>
-    request<{ data: WorkspaceMember[] }>(getWorkspaceSlug(), "/members"),
-  inviteWorkspaceMember: (email: string, role: WorkspaceMember["role"]) =>
-    request<{ data: WorkspaceInvitation }>(getWorkspaceSlug(), "/invitations", {
+  getWorkspaceMembers: async () => {
+    const backend = await request<{ data: BackendWorkspaceMember[] } | BackendWorkspaceMember[]>(
+      getWorkspaceSlug(),
+      "/members",
+    );
+    return { data: toWorkspaceMembers(backend) };
+  },
+  inviteWorkspaceMember: (email: string, role: Exclude<WorkspaceMember["role"], "owner">) =>
+    request<{ data: WorkspaceInvitation } | WorkspaceInvitation>(getWorkspaceSlug(), "/invitations", {
       method: "POST",
-      body: JSON.stringify({ email, role }),
+      body: JSON.stringify({ email: email.trim().toLowerCase(), role }),
     }),
+  updateWorkspaceMemberRole: (userId: string, role: Exclude<WorkspaceMember["role"], "owner">) =>
+    request<{ data: WorkspaceMember } | WorkspaceMember>(
+      getWorkspaceSlug(),
+      `/members/${encodeURIComponent(userId)}`,
+      { method: "PUT", body: JSON.stringify({ role }) },
+    ),
+  removeWorkspaceMember: (userId: string) =>
+    request<void>(getWorkspaceSlug(), `/members/${encodeURIComponent(userId)}`, {
+      method: "DELETE",
+    }),
+  updateWorkspaceInvitationRole: (token: string, role: Exclude<WorkspaceMember["role"], "owner">) =>
+    request<{ data: WorkspaceInvitation } | WorkspaceInvitation>(
+      getWorkspaceSlug(),
+      `/invitations/${encodeURIComponent(token)}`,
+      { method: "PUT", body: JSON.stringify({ role }) },
+    ),
+  revokeWorkspaceInvitation: (token: string) =>
+    request<void>(getWorkspaceSlug(), `/invitations/${encodeURIComponent(token)}`, {
+      method: "DELETE",
+    }),
+
+  acceptWorkspaceInvitation: async (token: string) => {
+    const backend = await request<{
+      user_id?: string;
+      userId?: string;
+      role?: string;
+      joined_at?: string;
+      joinedAt?: string;
+      workspace_id?: string;
+      workspaceId?: string;
+      workspace_slug?: string;
+      workspaceSlug?: string;
+      workspace_name?: string;
+      workspaceName?: string;
+    }>(undefined, `/invitations/${encodeURIComponent(token)}/accept`, {
+      method: "POST",
+    });
+    return {
+      userId: backend.user_id ?? backend.userId ?? "",
+      role: backend.role ?? "member",
+      joinedAt: backend.joined_at ?? backend.joinedAt ?? "",
+      workspaceId: backend.workspace_id ?? backend.workspaceId ?? "",
+      workspaceSlug: backend.workspace_slug ?? backend.workspaceSlug ?? "",
+      workspaceName: backend.workspace_name ?? backend.workspaceName ?? "",
+    };
+  },
+
+  previewWorkspaceInvitation: async (token: string) => {
+    const backend = await request<{
+      email?: string;
+      role?: string;
+      status?: string;
+      expires_at?: string;
+      expiresAt?: string;
+      workspace_id?: string;
+      workspaceId?: string;
+      workspace_slug?: string;
+      workspaceSlug?: string;
+      workspace_name?: string;
+      workspaceName?: string;
+    }>(undefined, `/invitations/${encodeURIComponent(token)}`);
+    return {
+      email: backend.email ?? "",
+      role: backend.role ?? "member",
+      status: (backend.status ?? "pending") as "pending" | "expired" | "used",
+      expiresAt: backend.expires_at ?? backend.expiresAt ?? "",
+      workspaceId: backend.workspace_id ?? backend.workspaceId ?? "",
+      workspaceSlug: backend.workspace_slug ?? backend.workspaceSlug ?? "",
+      workspaceName: backend.workspace_name ?? backend.workspaceName ?? "",
+    };
+  },
 
   sendMarketingBatch: (payload: SendMarketingBatchRequest, workspaceSlug?: string) =>
     request<{ data: SendMarketingBatchResult }>(
@@ -1968,25 +2074,53 @@ export const api = {
       },
     ),
 
-  getWorkspaceSettings: () => request<WorkspaceSettings>(getWorkspaceSlug(), "/settings"),
-  updateWorkspaceSettings: (settings: WorkspaceSettings) =>
-    request<WorkspaceSettings>(getWorkspaceSlug(), "/settings", {
+  getWorkspaceSettings: async () => {
+    const backend = await request<BackendWorkspaceSettings>(getWorkspaceSlug(), "/settings");
+    return toWorkspaceSettings(backend);
+  },
+  updateWorkspaceSettings: async (settings: WorkspaceSettings) => {
+    const backend = await request<BackendWorkspaceSettings>(getWorkspaceSlug(), "/settings", {
       method: "PUT",
-      body: JSON.stringify(settings),
-    }),
+      body: JSON.stringify(toUpdateWorkspaceSettingsPayload(settings)),
+    });
+    return toWorkspaceSettings(backend);
+  },
 
-  uploadWorkspaceLogo: (file: File) => {
+  uploadWorkspaceLogo: async (file: File) => {
     const formData = new FormData();
     formData.append("file", file);
-    return request<{ data: { logoUrl: string } }>(
+    const backend = await request<BackendWorkspaceSettings>(
       getWorkspaceSlug(),
       "/logo",
       {
         method: "POST",
         body: formData,
-      }
+      },
     );
+    return toWorkspaceSettings(backend);
   },
+
+  getWorkspaceViewerDomain: async (): Promise<WorkspaceViewerDomain> => {
+    const backend = await request<BackendWorkspaceViewerDomain>(getWorkspaceSlug(), "/viewer-domain");
+    return toWorkspaceViewerDomain(backend);
+  },
+  putWorkspaceViewerDomain: async (hostname: string): Promise<WorkspaceViewerDomain> => {
+    const backend = await request<BackendWorkspaceViewerDomain>(getWorkspaceSlug(), "/viewer-domain", {
+      method: "PUT",
+      body: JSON.stringify({ hostname }),
+    });
+    return toWorkspaceViewerDomain(backend);
+  },
+  verifyWorkspaceViewerDomain: async (): Promise<WorkspaceViewerDomain> => {
+    const backend = await request<BackendWorkspaceViewerDomain>(
+      getWorkspaceSlug(),
+      "/viewer-domain/verify",
+      { method: "POST" },
+    );
+    return toWorkspaceViewerDomain(backend);
+  },
+  deleteWorkspaceViewerDomain: () =>
+    request<void>(getWorkspaceSlug(), "/viewer-domain", { method: "DELETE" }),
 
   getBillingInfo: () => request<BillingInfo>(getWorkspaceSlug(), "/billing"),
 

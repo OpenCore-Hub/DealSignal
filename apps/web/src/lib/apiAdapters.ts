@@ -1,4 +1,11 @@
-import type { IntegrationStatus, OutboundWebhookConfig, PermissionConfig } from "@/types";
+import type {
+  IntegrationStatus,
+  OutboundWebhookConfig,
+  PermissionConfig,
+  WorkspaceMember,
+  WorkspaceSettings,
+  WorkspaceViewerDomain,
+} from "@/types";
 
 export interface CreateLinkPayload {
   document_ids?: string[];
@@ -188,6 +195,7 @@ export interface BackendIntegrationStatus {
   slack_connected?: boolean;
   hubspot_connected?: boolean;
   salesforce_connected?: boolean;
+  can_manage?: boolean;
   updated_at?: string;
 }
 
@@ -200,6 +208,7 @@ export function toIntegrationStatus(
     keyPageSlackEnabled: backend.key_page_slack_enabled ?? false,
     slack: backend.slack_connected ?? false,
     hubspot: backend.hubspot_connected ?? false,
+    canManage: backend.can_manage ?? false,
   };
 }
 
@@ -225,6 +234,72 @@ export type BackendOutboundWebhook = {
   updated_at?: string;
 };
 
+/** GET/PUT /settings — backend uses snake_case; UI uses WorkspaceSettings. */
+export type BackendWorkspaceSettings = {
+  name?: string;
+  slug?: string;
+  brand_color?: string;
+  brandColor?: string;
+  viewer_domain?: string;
+  viewerDomain?: string;
+  logo_url?: string;
+  logoUrl?: string;
+  data?: BackendWorkspaceSettings;
+};
+
+export function toWorkspaceSettings(
+  backend: BackendWorkspaceSettings | null | undefined,
+): WorkspaceSettings {
+  const src = backend?.data ?? backend ?? {};
+  return {
+    name: src.name ?? "",
+    slug: src.slug ?? "",
+    brandColor: src.brand_color ?? src.brandColor ?? "",
+    viewerDomain: src.viewer_domain ?? src.viewerDomain ?? "",
+    logoUrl: src.logo_url ?? src.logoUrl ?? "",
+  };
+}
+
+export function toUpdateWorkspaceSettingsPayload(settings: WorkspaceSettings): {
+  name: string;
+  slug: string;
+  brand_color: string;
+  logo_url?: string;
+} {
+  return {
+    name: settings.name,
+    slug: settings.slug,
+    brand_color: settings.brandColor,
+    logo_url: settings.logoUrl || undefined,
+  };
+}
+
+/** GET/PUT /viewer-domain — backend uses snake_case. */
+export type BackendWorkspaceViewerDomain = {
+  hostname?: string;
+  status?: string;
+  cname_host?: string;
+  cnameHost?: string;
+  cname_target?: string;
+  cnameTarget?: string;
+  verified_at?: string;
+  verifiedAt?: string;
+};
+
+export function toWorkspaceViewerDomain(
+  backend: BackendWorkspaceViewerDomain | null | undefined,
+): WorkspaceViewerDomain {
+  const src = backend ?? {};
+  const status = src.status === "pending" || src.status === "verified" ? src.status : "";
+  return {
+    hostname: src.hostname ?? "",
+    status,
+    cnameHost: src.cname_host ?? src.cnameHost ?? "",
+    cnameTarget: src.cname_target ?? src.cnameTarget ?? "",
+    verifiedAt: src.verified_at ?? src.verifiedAt,
+  };
+}
+
 export function toOutboundWebhookConfig(backend: BackendOutboundWebhook): OutboundWebhookConfig {
   return {
     configured: backend.configured ?? false,
@@ -235,4 +310,59 @@ export function toOutboundWebhookConfig(backend: BackendOutboundWebhook): Outbou
     secret: backend.secret,
     updatedAt: backend.updated_at,
   };
+}
+
+export type BackendWorkspaceMember = {
+  id?: string;
+  user_id?: string;
+  userId?: string;
+  email?: string;
+  name?: string;
+  role?: string;
+  joined_at?: string;
+  joinedAt?: string;
+  status?: string;
+  avatar_url?: string;
+  avatarUrl?: string;
+};
+
+const WORKSPACE_MEMBER_ROLES = new Set(["owner", "admin", "member", "guest"]);
+const WORKSPACE_MEMBER_STATUSES = new Set(["active", "pending", "suspended"]);
+
+function asWorkspaceMemberRole(value: string | undefined): WorkspaceMember["role"] {
+  if (value && WORKSPACE_MEMBER_ROLES.has(value)) {
+    return value as WorkspaceMember["role"];
+  }
+  return "member";
+}
+
+function asWorkspaceMemberStatus(value: string | undefined): WorkspaceMember["status"] {
+  if (value && WORKSPACE_MEMBER_STATUSES.has(value)) {
+    return value as WorkspaceMember["status"];
+  }
+  return "active";
+}
+
+/** GET /workspaces/:slug/members — snake_case API → FE WorkspaceMember. */
+export function toWorkspaceMember(backend: BackendWorkspaceMember | null | undefined): WorkspaceMember {
+  const src = backend ?? {};
+  const email = src.email ?? "";
+  const name = (src.name ?? "").trim();
+  return {
+    id: src.id ?? src.user_id ?? src.userId ?? email,
+    userId: src.user_id ?? src.userId ?? "",
+    email,
+    name: name || email,
+    role: asWorkspaceMemberRole(src.role),
+    joinedAt: src.joined_at ?? src.joinedAt ?? "",
+    status: asWorkspaceMemberStatus(src.status),
+    avatarUrl: src.avatar_url ?? src.avatarUrl,
+  };
+}
+
+export function toWorkspaceMembers(
+  backend: BackendWorkspaceMember[] | { data?: BackendWorkspaceMember[] } | null | undefined,
+): WorkspaceMember[] {
+  const rows = Array.isArray(backend) ? backend : (backend?.data ?? []);
+  return rows.map((row) => toWorkspaceMember(row));
 }

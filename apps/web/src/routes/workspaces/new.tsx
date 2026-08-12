@@ -6,15 +6,14 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
+import { ApiError } from "@/lib/apiClient";
 import { apiErrorMessage } from "@/lib/apiErrors";
 import { useTranslation } from "react-i18next";
 
 function slugify(name: string): string {
   return name
     .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
+    .replace(/[^a-z0-9]/g, "")
     .slice(0, 50);
 }
 
@@ -26,9 +25,12 @@ export function CreateWorkspacePage() {
   const [brandColor, setBrandColor] = useState("#0055ff");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [slugError, setSlugError] = useState<string | null>(null);
 
   const handleNameChange = (value: string) => {
     setName(value);
+    setSlugError(null);
+    setError(null);
     if (slug === slugify(name) || slug === "") {
       setSlug(slugify(value));
     }
@@ -38,6 +40,7 @@ export function CreateWorkspacePage() {
     e.preventDefault();
     setLoading(true);
     setError(null);
+    setSlugError(null);
     try {
       const workspace = await api.createWorkspace({
         name: name.trim(),
@@ -46,7 +49,16 @@ export function CreateWorkspacePage() {
       });
       navigate(`/${workspace.slug}/dashboard`, { replace: true });
     } catch (err) {
-      setError(apiErrorMessage(err, { fallback: "saveFailed" }));
+      if (
+        err instanceof ApiError &&
+        (err.code === "slug_conflict" || err.code === "duplicate_slug")
+      ) {
+        setSlugError(t("workspaceSlugConflict"));
+        setError(null);
+      } else {
+        setError(apiErrorMessage(err, { fallback: "saveFailed" }));
+        setSlugError(null);
+      }
       setLoading(false);
     }
   };
@@ -81,10 +93,20 @@ export function CreateWorkspacePage() {
                 <Input
                   id="slug"
                   value={slug}
-                  onChange={(e) => setSlug(slugify(e.target.value))}
+                  onChange={(e) => {
+                    setSlug(slugify(e.target.value));
+                    setSlugError(null);
+                  }}
                   placeholder={t("workspaceSlugPlaceholder")}
                   required
+                  aria-invalid={Boolean(slugError)}
+                  aria-describedby={slugError ? "workspace-slug-error" : undefined}
                 />
+                {slugError && (
+                  <p id="workspace-slug-error" className="text-caption text-error-500">
+                    {slugError}
+                  </p>
+                )}
               </div>
               <div className="space-y-2">
                 <Label htmlFor="brandColor">{t("brandColor")}</Label>

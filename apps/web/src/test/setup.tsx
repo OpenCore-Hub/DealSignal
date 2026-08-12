@@ -1,6 +1,18 @@
 /// <reference types="vitest/globals" />
 import "@testing-library/jest-dom/vitest";
 
+/** Default workspace role for unit tests: member (can write, cannot manage). */
+vi.mock("@/hooks/useWorkspaceAccess", () => ({
+  useWorkspaceAccess: vi.fn(() => ({
+    role: "member",
+    loading: false,
+    canRead: true,
+    canWrite: true,
+    canManage: false,
+    isGuest: false,
+  })),
+}));
+
 // Mock @base-ui/react/menu for jsdom — Base UI Menu relies on pointer/positioning
 // APIs that are flaky or absent under CI jsdom (portal content never opens).
 vi.mock("@base-ui/react/menu", async () => {

@@ -1,11 +1,14 @@
-import { NavLink, Outlet, useParams } from "react-router";
+import { Navigate, NavLink, Outlet, useParams } from "react-router";
 import { cn } from "@/lib/utils";
 import { PageHeader } from "@/components/common/PageHeader";
 import { useTranslation } from "react-i18next";
+import { useWorkspaceAccess } from "@/hooks/useWorkspaceAccess";
+import { Skeleton } from "@/components/ui/skeleton";
 
 export function SettingsPage() {
   const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
   const { t } = useTranslation("settings");
+  const { canManage, loading } = useWorkspaceAccess(workspaceSlug);
 
   const sections = [
     { path: "general", label: t("nav.general") },
@@ -17,6 +20,19 @@ export function SettingsPage() {
     { path: "security", label: t("nav.security") },
     { path: "compliance", label: t("nav.compliance") },
   ];
+
+  if (loading) {
+    return (
+      <div className="space-y-4 p-2">
+        <Skeleton className="h-8 w-48" />
+        <Skeleton className="h-40 w-full" />
+      </div>
+    );
+  }
+
+  if (!canManage) {
+    return <Navigate to={`/${workspaceSlug}/dashboard`} replace />;
+  }
 
   return (
     <div className="space-y-6">

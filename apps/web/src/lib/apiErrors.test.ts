@@ -8,14 +8,21 @@ const translations: Record<string, string> = {
   "common:error.codes.access_code_send_failed":
     "Could not send the verification code. Please try again.",
   "common:error.codes.blocked_email": "Email blocked",
+  "common:error.codes.email_mismatch": "Email does not match the invitation.",
+  "common:error.codes.invitation_email_mismatch":
+    "You're signed in with a different email than this invitation.",
   "common:error.codes.folder_exists": "Folder exists",
   "common:error.duplicateSlug": "Slug taken",
   "documents:viewer.emailBlocked": "This email is blocked.",
+  "documents:viewer.emailMismatch":
+    "The reserved delivery email does not match this link’s verification code.",
   "documents:viewer.invalidPassword": "Incorrect password.",
   "documents:viewer.blocked_emailDescription": "Blocked from this link.",
   "linkShare:share.linkNameDuplicate": "Name taken",
   "auth:login.errorInvalidCredentials": "Bad credentials",
   "auth:verifyEmail.error": "Verify failed",
+  "auth:acceptInvitation.emailMismatch":
+    "You're signed in with a different email than this invitation. Sign out and continue with the invited email.",
 };
 
 vi.mock("@/i18n/config", () => ({
@@ -39,8 +46,8 @@ describe("apiErrorMessage", () => {
       message: "email is blocked",
       requestId: "req-1",
     });
-    expect(apiErrorMessage(err)).toBe("This email is blocked.");
-    expect(apiErrorMessage(err)).not.toBe("email is blocked");
+    expect(apiErrorMessage(err, { context: "viewerGate" })).toBe("This email is blocked.");
+    expect(apiErrorMessage(err, { context: "viewerGate" })).not.toBe("email is blocked");
   });
 
   it("maps login context", () => {
@@ -97,7 +104,27 @@ describe("apiErrorMessage", () => {
     expect(
       apiErrorMessage(
         new ApiError({ status: 403, code: "invalid_password", message: "bad", requestId: "r" }),
+        { context: "viewerGate" },
       ),
     ).toBe("Incorrect password.");
+  });
+
+  it("keeps workspace invite email mismatch off viewer copy", () => {
+    const err = new ApiError({
+      status: 403,
+      code: "invitation_email_mismatch",
+      message: "email does not match invitation",
+      requestId: "r",
+    });
+    expect(apiErrorMessage(err, { context: "acceptInvitation" })).toBe(
+      "You're signed in with a different email than this invitation. Sign out and continue with the invited email.",
+    );
+    expect(apiErrorMessage(err)).toBe("You're signed in with a different email than this invitation.");
+    expect(
+      apiErrorMessage(
+        new ApiError({ status: 403, code: "email_mismatch", message: "mismatch", requestId: "r" }),
+        { context: "viewerGate" },
+      ),
+    ).toBe("The reserved delivery email does not match this link’s verification code.");
   });
 });

@@ -119,12 +119,30 @@ async function clearRadarFeedOverride() {
 
 let workspaceSettings = { ...defaultWorkspaceSettings };
 
+let workspaceViewerDomain = {
+  hostname: "",
+  status: "" as "" | "pending" | "verified",
+  cname_target: "cname.dealsignal.com",
+  verified_at: undefined as string | undefined,
+};
+
+function viewerDomainPayload() {
+  return {
+    hostname: workspaceViewerDomain.hostname,
+    status: workspaceViewerDomain.status,
+    cname_host: workspaceViewerDomain.hostname,
+    cname_target: workspaceViewerDomain.cname_target,
+    verified_at: workspaceViewerDomain.verified_at,
+  };
+}
+
 let integrationsStatus = {
   email_enabled: true,
   daily_digest_enabled: false,
   key_page_slack_enabled: false,
   slack_connected: false,
   hubspot_connected: false,
+  can_manage: true,
 };
 
 let outboundWebhook = {
@@ -764,6 +782,12 @@ async function resetMockState() {
     ...structuredClone(initialState.ndaTemplates),
   );
   workspaceSettings = { ...initialState.settings };
+  workspaceViewerDomain = {
+    hostname: "",
+    status: "",
+    cname_target: "cname.dealsignal.com",
+    verified_at: undefined,
+  };
   integrationsStatus = { ...initialState.integrations };
   securitySettings = { ...initialState.security };
   outboundWebhook = {
@@ -1623,7 +1647,12 @@ export const handlers = [
       brandColor: body.brand_color ?? "#0055ff",
     };
     mockWorkspaces.push(newWorkspace);
-    workspaceSettings = { ...workspaceSettings, name: body.name, slug: body.slug };
+    workspaceSettings = {
+      ...workspaceSettings,
+      name: body.name,
+      slug: body.slug,
+      brandColor: body.brand_color ?? "#0055ff",
+    };
     return HttpResponse.json(newWorkspace, { status: 201 });
   }),
 
@@ -3751,6 +3780,7 @@ export const handlers = [
       createdAt: new Date().toISOString(),
       lastAccessedAt: undefined,
       status: "active",
+      isAdmin: true,
       folders,
       documents: [],
       members: [],
@@ -4913,34 +4943,266 @@ export const handlers = [
 
   http.post("*/api/workspaces/:workspaceSlug/invitations", async ({ request }) => {
     const body = (await request.json()) as { email: string; role: WorkspaceMember["role"] };
+    const email = body.email.trim().toLowerCase();
+    const existing = mockWorkspaceMembers.find(
+      (m) => m.email.toLowerCase() === email && m.status === "active",
+    );
+    if (existing) {
+      return HttpResponse.json(
+        { code: "already_member", message: "already a member" },
+        { status: 409 },
+      );
+    }
+    const pending = mockWorkspaceMembers.find(
+      (m) => m.email.toLowerCase() === email && m.status === "pending",
+    );
+    if (pending) {
+      pending.role = body.role === "owner" ? "member" : body.role;
+      pending.joinedAt = new Date().toISOString();
+      return HttpResponse.json(
+        {
+          data: {
+            token: pending.id,
+            workspace_id: "ws_mock",
+            email,
+            role: pending.role,
+            expires_at: new Date(Date.now() + 7 * 86400_000).toISOString(),
+            created_at: pending.joinedAt,
+          },
+        },
+        { status: 201 },
+      );
+    }
     const newMember = {
       id: generateId("wm"),
-      userId: generateId("u"),
-      email: body.email,
-      name: body.email.split("@")[0],
-      role: body.role,
+      userId: "",
+      email,
+      name: "",
+      role: (body.role === "owner" ? "member" : body.role) as WorkspaceMember["role"],
       joinedAt: new Date().toISOString(),
       status: "pending" as const,
     };
     mockWorkspaceMembers.push(newMember);
-    return HttpResponse.json({ data: newMember }, { status: 201 });
+    return HttpResponse.json(
+      {
+        data: {
+          token: newMember.id,
+          workspace_id: "ws_mock",
+          email,
+          role: newMember.role,
+          expires_at: new Date(Date.now() + 7 * 86400_000).toISOString(),
+          created_at: newMember.joinedAt,
+        },
+      },
+      { status: 201 },
+    );
   }),
 
-  // Workspace settings
+  http.put("*/api/workspaces/:workspaceSlug/invitations/:token", async ({ params, request }) => {
+    const body = (await request.json()) as { role: WorkspaceMember["role"] };
+    const token = String(params.token);
+    const pending = mockWorkspaceMembers.find((m) => m.id === token && m.status === "pending");
+    if (!pending) {
+      return HttpResponse.json({ code: "invitation_not_found", message: "invitation not found" }, { status: 404 });
+    }
+    pending.role = body.role === "owner" ? "member" : body.role;
+    return HttpResponse.json({
+      data: {
+        token: pending.id,
+        workspace_id: "ws_mock",
+        email: pending.email,
+        role: pending.role,
+        expires_at: new Date(Date.now() + 7 * 86400_000).toISOString(),
+        created_at: pending.joinedAt,
+      },
+    });
+  }),
+
+  http.delete("*/api/workspaces/:workspaceSlug/invitations/:token", ({ params }) => {
+    const token = String(params.token);
+    const idx = mockWorkspaceMembers.findIndex((m) => m.id === token && m.status === "pending");
+    if (idx < 0) {
+      return HttpResponse.json({ code: "invitation_not_found", message: "invitation not found" }, { status: 404 });
+    }
+    mockWorkspaceMembers.splice(idx, 1);
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  http.post("*/api/invitations/:token/accept", ({ params }) => {
+    const token = String(params.token);
+    const pending = mockWorkspaceMembers.find((m) => m.status === "pending" && m.id === token);
+    if (!pending) {
+      return HttpResponse.json(
+        { code: "invitation_not_found", message: "invitation not found" },
+        { status: 404 },
+      );
+    }
+    pending.status = "active";
+    pending.userId = pending.userId || generateId("u");
+    pending.joinedAt = new Date().toISOString();
+    return HttpResponse.json({
+      user_id: pending.userId,
+      role: pending.role,
+      joined_at: pending.joinedAt,
+      workspace_id: "ws_mock",
+      workspace_slug: "acme-capital",
+      workspace_name: "Demo Workspace",
+    });
+  }),
+
+  http.get("*/api/invitations/:token", ({ params }) => {
+    const token = String(params.token);
+    const pending = mockWorkspaceMembers.find((m) => m.id === token && m.status === "pending");
+    if (!pending) {
+      return HttpResponse.json(
+        { code: "invitation_not_found", message: "invitation not found" },
+        { status: 404 },
+      );
+    }
+    return HttpResponse.json({
+      email: pending.email,
+      role: pending.role,
+      status: "pending",
+      expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+      workspace_id: "ws_mock",
+      workspace_slug: "acme-capital",
+      workspace_name: "Demo Workspace",
+    });
+  }),
+
+  http.put("*/api/workspaces/:workspaceSlug/members/:userId", async ({ params, request }) => {
+    const body = (await request.json()) as { role: WorkspaceMember["role"] };
+    const userId = String(params.userId);
+    const member = mockWorkspaceMembers.find(
+      (m) => m.status === "active" && (m.userId === userId || m.id === userId),
+    );
+    if (!member) {
+      return HttpResponse.json({ code: "member_not_found", message: "member not found" }, { status: 404 });
+    }
+    if (member.role === "owner") {
+      return HttpResponse.json({ code: "cannot_modify_owner", message: "cannot modify the workspace owner" }, { status: 403 });
+    }
+    member.role = body.role === "owner" ? "member" : body.role;
+    return HttpResponse.json({ data: member });
+  }),
+
+  http.delete("*/api/workspaces/:workspaceSlug/members/:userId", ({ params }) => {
+    const userId = String(params.userId);
+    const idx = mockWorkspaceMembers.findIndex(
+      (m) => m.status === "active" && (m.userId === userId || m.id === userId),
+    );
+    if (idx < 0) {
+      return HttpResponse.json({ code: "member_not_found", message: "member not found" }, { status: 404 });
+    }
+    if (mockWorkspaceMembers[idx].role === "owner") {
+      return HttpResponse.json({ code: "cannot_modify_owner", message: "cannot modify the workspace owner" }, { status: 403 });
+    }
+    mockWorkspaceMembers.splice(idx, 1);
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  // Workspace settings (snake_case matches real GET/PUT /settings)
   http.get("*/api/workspaces/:workspaceSlug/settings", () => {
-    return HttpResponse.json({ data: workspaceSettings });
+    return HttpResponse.json({
+      name: workspaceSettings.name,
+      slug: workspaceSettings.slug,
+      brand_color: workspaceSettings.brandColor,
+      viewer_domain:
+        workspaceViewerDomain.status === "verified" ? workspaceViewerDomain.hostname : "",
+      logo_url: workspaceSettings.logoUrl || undefined,
+    });
   }),
 
   http.put("*/api/workspaces/:workspaceSlug/settings", async ({ request }) => {
-    const body = (await request.json()) as typeof workspaceSettings;
-    workspaceSettings = { ...workspaceSettings, ...body };
-    return HttpResponse.json({ data: workspaceSettings });
+    const body = (await request.json()) as {
+      name?: string;
+      slug?: string;
+      brand_color?: string;
+      brandColor?: string;
+      viewer_domain?: string;
+      viewerDomain?: string;
+      logo_url?: string;
+      logoUrl?: string;
+    };
+    workspaceSettings = {
+      ...workspaceSettings,
+      name: body.name ?? workspaceSettings.name,
+      slug: body.slug ?? workspaceSettings.slug,
+      brandColor: body.brand_color ?? body.brandColor ?? workspaceSettings.brandColor,
+      logoUrl: body.logo_url ?? body.logoUrl ?? workspaceSettings.logoUrl,
+    };
+    return HttpResponse.json({
+      name: workspaceSettings.name,
+      slug: workspaceSettings.slug,
+      brand_color: workspaceSettings.brandColor,
+      viewer_domain:
+        workspaceViewerDomain.status === "verified" ? workspaceViewerDomain.hostname : "",
+      logo_url: workspaceSettings.logoUrl || undefined,
+    });
   }),
 
   http.post("*/api/workspaces/:workspaceSlug/logo", async () => {
     const mockLogoUrl = "https://placehold.co/128x128/0f172a/ffffff?text=Logo";
     workspaceSettings = { ...workspaceSettings, logoUrl: mockLogoUrl };
-    return HttpResponse.json({ data: { logoUrl: mockLogoUrl } }, { status: 201 });
+    return HttpResponse.json(
+      {
+        name: workspaceSettings.name,
+        slug: workspaceSettings.slug,
+        brand_color: workspaceSettings.brandColor,
+        viewer_domain:
+          workspaceViewerDomain.status === "verified" ? workspaceViewerDomain.hostname : "",
+        logo_url: mockLogoUrl,
+      },
+      { status: 201 },
+    );
+  }),
+
+  http.get("*/api/workspaces/:workspaceSlug/viewer-domain", () => {
+    return HttpResponse.json(viewerDomainPayload());
+  }),
+
+  http.put("*/api/workspaces/:workspaceSlug/viewer-domain", async ({ request }) => {
+    const body = (await request.json()) as { hostname?: string };
+    const hostname = String(body.hostname ?? "")
+      .trim()
+      .toLowerCase();
+    if (!hostname || !hostname.includes(".")) {
+      return HttpResponse.json(
+        { code: "invalid_domain", message: "invalid domain" },
+        { status: 400 },
+      );
+    }
+    workspaceViewerDomain = {
+      hostname,
+      status: "pending",
+      cname_target: workspaceViewerDomain.cname_target,
+      verified_at: undefined,
+    };
+    return HttpResponse.json(viewerDomainPayload());
+  }),
+
+  http.post("*/api/workspaces/:workspaceSlug/viewer-domain/verify", () => {
+    if (!workspaceViewerDomain.hostname) {
+      return HttpResponse.json({ code: "not_found", message: "not found" }, { status: 404 });
+    }
+    workspaceViewerDomain = {
+      ...workspaceViewerDomain,
+      status: "verified",
+      verified_at: new Date().toISOString(),
+    };
+    workspaceSettings = { ...workspaceSettings, viewerDomain: workspaceViewerDomain.hostname };
+    return HttpResponse.json(viewerDomainPayload());
+  }),
+
+  http.delete("*/api/workspaces/:workspaceSlug/viewer-domain", () => {
+    workspaceViewerDomain = {
+      hostname: "",
+      status: "",
+      cname_target: workspaceViewerDomain.cname_target,
+      verified_at: undefined,
+    };
+    workspaceSettings = { ...workspaceSettings, viewerDomain: "" };
+    return new HttpResponse(null, { status: 204 });
   }),
 
   http.get("*/api/workspaces/:workspaceSlug/billing", () => {

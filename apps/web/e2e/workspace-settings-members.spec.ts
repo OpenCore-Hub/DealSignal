@@ -18,9 +18,10 @@ test.describe("Workspace settings & members (real backend)", () => {
     const res = await apiFetch(`/api/workspaces/${workspaceSlug}/settings`, {
     });
     expect(res.ok).toBe(true);
-    const body = (await res.json()) as { name: string; slug: string };
+    const body = (await res.json()) as { name: string; slug: string; brand_color: string };
     expect(body.name).toBe("E2E Workspace");
     expect(body.slug).toBe(workspaceSlug);
+    expect(body.brand_color).toBe("#0055ff");
   });
 
   test("updates workspace settings via API", async () => {
@@ -90,6 +91,29 @@ test.describe("Workspace settings & members (real backend)", () => {
     expect([200, 201, 409]).toContain(res.status);
   });
 
+  test("updates and revokes a pending invitation", async () => {
+    const email = `invite-manage-${Date.now()}@example.com`;
+    const createRes = await apiFetch(`/api/workspaces/${workspaceSlug}/invitations`, {
+      method: "POST",
+      body: JSON.stringify({ email, role: "member" }),
+    });
+    expect(createRes.status).toBe(201);
+    const created = (await createRes.json()) as { data?: { token?: string }; token?: string };
+    const token = created.data?.token ?? created.token;
+    expect(token).toBeTruthy();
+
+    const updateRes = await apiFetch(`/api/workspaces/${workspaceSlug}/invitations/${token}`, {
+      method: "PUT",
+      body: JSON.stringify({ role: "guest" }),
+    });
+    expect(updateRes.ok).toBe(true);
+
+    const revokeRes = await apiFetch(`/api/workspaces/${workspaceSlug}/invitations/${token}`, {
+      method: "DELETE",
+    });
+    expect([200, 204]).toContain(revokeRes.status);
+  });
+
   // ── Logo upload ──────────────────────────────────────────────
   test("uploads workspace logo", async () => {
     // Create a tiny 1x1 PNG in base64
@@ -105,8 +129,11 @@ test.describe("Workspace settings & members (real backend)", () => {
       method: "POST",
       body: form,
     });
-    // May not be supported in all environments
-    expect([200, 201, 400, 404, 415]).toContain(res.status);
+    expect([200, 201, 503]).toContain(res.status);
+    if (res.ok) {
+      const body = (await res.json()) as { logo_url?: string };
+      expect(body.logo_url).toBeTruthy();
+    }
   });
 
   // ── Settings page renders in browser ────────────────────────

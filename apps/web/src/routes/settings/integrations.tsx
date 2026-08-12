@@ -26,7 +26,7 @@ export function SettingsIntegrationsPage() {
   ];
 
   const toggleEmailNotifications = async () => {
-    if (!status) return;
+    if (!status?.canManage) return;
     setSavingEmail(true);
     try {
       await api.updateIntegrations({ ...status, emailEnabled: !status.emailEnabled });
@@ -40,7 +40,7 @@ export function SettingsIntegrationsPage() {
   };
 
   const toggleDailyDigest = async () => {
-    if (!status) return;
+    if (!status?.canManage) return;
     setSavingDigest(true);
     try {
       await api.updateIntegrations({
@@ -57,7 +57,7 @@ export function SettingsIntegrationsPage() {
   };
 
   const toggleKeyPageSlack = async () => {
-    if (!status) return;
+    if (!status?.canManage) return;
     if (!status.slack && !status.keyPageSlackEnabled) {
       toast.error(t("integrations.keyPageSlackNeedsSlack"));
       return;
@@ -122,10 +122,19 @@ export function SettingsIntegrationsPage() {
   }, [searchParams, setSearchParams, t, refetch]);
 
   const connect = async (id: Provider) => {
+    if (!status?.canManage) return;
     setConnecting(id);
     try {
       const res = id === "slack" ? await api.connectSlack() : await api.connectHubSpot();
-      window.open(res.url, "_blank", "noopener,noreferrer");
+      const popup = window.open(res.url, "_blank", "noopener,noreferrer");
+      if (!popup) {
+        toast.info(t("integrations.popupBlocked"));
+        try {
+          window.location.assign(res.url);
+        } catch {
+          /* restricted navigation (e.g. jsdom) */
+        }
+      }
     } catch (e) {
       toast.error(apiErrorMessage(e, { messageKey: "settings:integrations.connectionFailed", messageKeyParams: { provider: id } }));
     } finally {
@@ -134,6 +143,7 @@ export function SettingsIntegrationsPage() {
   };
 
   const disconnect = async (id: Provider) => {
+    if (!status?.canManage) return;
     try {
       if (id === "slack") {
         await api.disconnectSlack();
@@ -156,6 +166,7 @@ export function SettingsIntegrationsPage() {
   };
 
   const saveWebhook = async (rotateSecret = false) => {
+    if (!status?.canManage) return;
     setSavingWebhook(true);
     try {
       const cfg = await api.saveOutboundWebhook({
@@ -179,6 +190,7 @@ export function SettingsIntegrationsPage() {
   };
 
   const deleteWebhook = async () => {
+    if (!status?.canManage) return;
     setSavingWebhook(true);
     try {
       await api.deleteOutboundWebhook();
@@ -226,6 +238,35 @@ export function SettingsIntegrationsPage() {
     );
   }
 
+  const canManage = status.canManage;
+  const manageTitle = canManage ? undefined : t("integrations.manageRequired");
+
+  const toggleWebhookEnabled = async (enabled: boolean) => {
+    if (!canManage) return;
+    const previous = webhookEnabled;
+    setWebhookEnabled(enabled);
+    if (!webhook?.configured || !webhookURL.trim()) {
+      return;
+    }
+    setSavingWebhook(true);
+    try {
+      const cfg = await api.saveOutboundWebhook({
+        url: webhookURL.trim(),
+        enabled,
+        eventTypes: ["key_page", "repeat_key_page"],
+        rotateSecret: false,
+      });
+      applyWebhookResult(cfg);
+      toast.success(t("integrations.webhookSaved"));
+      refetchWebhook();
+    } catch (e) {
+      setWebhookEnabled(previous);
+      toast.error(apiErrorMessage(e, { messageKey: "settings:integrations.webhookSaveFailed" }));
+    } finally {
+      setSavingWebhook(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <Card>
@@ -249,7 +290,8 @@ export function SettingsIntegrationsPage() {
               </div>
               <Switch
                 checked={status?.emailEnabled ?? true}
-                disabled={savingEmail || loading}
+                disabled={savingEmail || loading || !canManage}
+                title={manageTitle}
                 onCheckedChange={toggleEmailNotifications}
                 aria-label={t("integrations.emailNotifications")}
               />
@@ -268,7 +310,8 @@ export function SettingsIntegrationsPage() {
               </div>
               <Switch
                 checked={status?.dailyDigestEnabled ?? false}
-                disabled={savingDigest || loading}
+                disabled={savingDigest || loading || !canManage}
+                title={manageTitle}
                 onCheckedChange={toggleDailyDigest}
                 aria-label={t("integrations.dailyDigest")}
               />
@@ -287,7 +330,8 @@ export function SettingsIntegrationsPage() {
               </div>
               <Switch
                 checked={status?.keyPageSlackEnabled ?? false}
-                disabled={savingKeyPageSlack || loading || (!status.slack && !status.keyPageSlackEnabled)}
+                disabled={savingKeyPageSlack || loading || !canManage || (!status.slack && !status.keyPageSlackEnabled)}
+                title={manageTitle}
                 onCheckedChange={toggleKeyPageSlack}
                 aria-label={t("integrations.keyPageSlack")}
               />
@@ -310,14 +354,21 @@ export function SettingsIntegrationsPage() {
                       <span className="text-caption text-green-600">{t("integrations.connected")}</span>
                     )}
                     {connected ? (
-                      <Button variant="outline" size="sm" onClick={() => disconnect(integration.id)}>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={!canManage}
+                        title={manageTitle}
+                        onClick={() => disconnect(integration.id)}
+                      >
                         {t("integrations.disconnect")}
                       </Button>
                     ) : (
                       <Button
                         variant="outline"
                         size="sm"
-                        disabled={connecting === integration.id}
+                        disabled={!canManage || connecting === integration.id}
+                        title={manageTitle}
                         onClick={() => connect(integration.id)}
                       >
                         {connecting === integration.id
@@ -361,7 +412,8 @@ export function SettingsIntegrationsPage() {
                   value={webhookURL}
                   onChange={(e) => setWebhookURL(e.target.value)}
                   placeholder={t("integrations.webhookURLPlaceholder")}
-                  disabled={savingWebhook}
+                  disabled={savingWebhook || !canManage}
+                  title={manageTitle}
                 />
               </div>
               <div className="flex items-center justify-between">
@@ -371,8 +423,9 @@ export function SettingsIntegrationsPage() {
                 </div>
                 <Switch
                   checked={webhookEnabled}
-                  disabled={savingWebhook}
-                  onCheckedChange={setWebhookEnabled}
+                  disabled={savingWebhook || !canManage}
+                  title={manageTitle}
+                  onCheckedChange={toggleWebhookEnabled}
                   aria-label={t("integrations.webhookEnabled")}
                 />
               </div>
@@ -397,7 +450,8 @@ export function SettingsIntegrationsPage() {
               <div className="flex flex-wrap gap-2">
                 <Button
                   size="sm"
-                  disabled={savingWebhook || !webhookURL.trim()}
+                  disabled={savingWebhook || !canManage || !webhookURL.trim()}
+                  title={manageTitle}
                   onClick={() => saveWebhook(false)}
                 >
                   {savingWebhook ? t("integrations.webhookSaving") : t("integrations.webhookSave")}
@@ -407,7 +461,8 @@ export function SettingsIntegrationsPage() {
                     <Button
                       variant="outline"
                       size="sm"
-                      disabled={savingWebhook}
+                      disabled={savingWebhook || !canManage}
+                      title={manageTitle}
                       onClick={() => saveWebhook(true)}
                     >
                       {t("integrations.webhookRotateSecret")}
@@ -415,7 +470,8 @@ export function SettingsIntegrationsPage() {
                     <Button
                       variant="outline"
                       size="sm"
-                      disabled={savingWebhook}
+                      disabled={savingWebhook || !canManage}
+                      title={manageTitle}
                       onClick={deleteWebhook}
                     >
                       {t("integrations.webhookDelete")}

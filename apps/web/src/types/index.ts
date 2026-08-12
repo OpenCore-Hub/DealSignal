@@ -5,6 +5,8 @@ export interface Workspace {
   slug: string;
   name: string;
   logoUrl?: string;
+  /** Caller's membership role in this workspace (from GET /workspaces). */
+  role?: "owner" | "admin" | "member" | "guest";
 }
 
 export interface User {
@@ -582,6 +584,8 @@ export interface DealRoom {
   documents?: DealRoomFolderDocs[];
   members?: DealRoomMember[];
   accessRequests?: DealRoomAccessRequest[];
+  /** True when the caller can administer this room (API isAdmin). */
+  isAdmin?: boolean;
   /** Total views across all public/share links for this deal room. */
   viewCount?: number;
   /** Number of currently active share links for this deal room. */
@@ -980,6 +984,16 @@ export interface WorkspaceSettings {
   logoUrl?: string;
 }
 
+export type WorkspaceViewerDomainStatus = "" | "pending" | "verified";
+
+export interface WorkspaceViewerDomain {
+  hostname: string;
+  status: WorkspaceViewerDomainStatus;
+  cnameHost: string;
+  cnameTarget: string;
+  verifiedAt?: string;
+}
+
 export interface BillingInfo {
   plan: string;
   period: string;
@@ -997,6 +1011,7 @@ export interface IntegrationStatus {
   keyPageSlackEnabled: boolean;
   slack: boolean;
   hubspot: boolean;
+  canManage: boolean;
 }
 
 /** Workspace outbound webhook (Zapier Catch Hook / custom HTTPS endpoint). */

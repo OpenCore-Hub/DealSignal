@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router";
+import { useNavigate, useSearchParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -7,11 +7,20 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/apiErrors";
+import {
+  buildInviteAuthPath,
+  inviteEmailFromSearchParams,
+  isInviteAuthFlow,
+  safeAuthRedirect,
+} from "@/lib/inviteAuth";
 
 export function RegisterPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { t } = useTranslation("auth");
-  const [email, setEmail] = useState("");
+  const invitedEmail = inviteEmailFromSearchParams(searchParams);
+  const lockEmail = isInviteAuthFlow(searchParams);
+  const [email, setEmail] = useState(invitedEmail);
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -19,7 +28,7 @@ export function RegisterPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    const trimmedEmail = email.trim();
+    const trimmedEmail = (lockEmail ? invitedEmail : email).trim();
     if (!trimmedEmail || !trimmedEmail.includes("@")) {
       setError(t("register.errorInvalidEmail"));
       return;
@@ -57,7 +66,14 @@ export function RegisterPage() {
 
     try {
       await api.register(trimmedEmail, password);
-      navigate("/login?registered=true", { replace: true });
+      const redirect = safeAuthRedirect(searchParams.get("redirect"));
+      const params = new URLSearchParams({ registered: "true" });
+      if (redirect) params.set("redirect", redirect);
+      if (lockEmail && invitedEmail) {
+        params.set("email", invitedEmail);
+        params.set("invite", "1");
+      }
+      navigate(`/login?${params.toString()}`, { replace: true });
     } catch (err) {
       setError(apiErrorMessage(err, { context: "register", messageKey: "auth:register.errorRegistrationFailed" }));
       setLoading(false);
@@ -72,6 +88,9 @@ export function RegisterPage() {
             <CardTitle className="text-h2">{t("register.title")}</CardTitle>
           </CardHeader>
           <CardContent>
+            {lockEmail ? (
+              <div className="mb-4 rounded-md bg-muted p-3 text-sm text-muted-foreground">{t("register.inviteBanner")}</div>
+            ) : null}
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="email">{t("register.email")}</Label>
@@ -79,10 +98,16 @@ export function RegisterPage() {
                   id="email"
                   type="email"
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  onChange={(e) => {
+                    if (!lockEmail) setEmail(e.target.value);
+                  }}
                   placeholder={t("register.emailPlaceholder")}
+                  autoComplete="email"
+                  readOnly={lockEmail}
+                  aria-readonly={lockEmail || undefined}
                   required
                 />
+                {lockEmail ? <p className="text-caption text-muted-foreground">{t("register.emailLockedHint")}</p> : null}
               </div>
               <div className="space-y-2">
                 <Label htmlFor="password">{t("register.password")}</Label>
@@ -92,11 +117,10 @@ export function RegisterPage() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder={t("register.passwordPlaceholder")}
+                  autoComplete="new-password"
                   required
                 />
-                <p className="text-caption text-muted-foreground">
-                  {t("register.passwordRules")}
-                </p>
+                <p className="text-caption text-muted-foreground">{t("register.passwordRules")}</p>
               </div>
               {error && <p className="text-sm text-error-500">{error}</p>}
               <Button type="submit" className="w-full" disabled={loading}>
@@ -104,7 +128,18 @@ export function RegisterPage() {
               </Button>
               <p className="text-center text-sm text-muted-foreground">
                 {t("register.hasAccount")}{" "}
-                <Button variant="link" className="p-0" onClick={() => navigate("/login")}>
+                <Button
+                  variant="link"
+                  className="p-0"
+                  onClick={() => {
+                    navigate(
+                      buildInviteAuthPath("login", {
+                        redirect: searchParams.get("redirect"),
+                        email: invitedEmail || undefined,
+                      }),
+                    );
+                  }}
+                >
                   {t("register.signIn")}
                 </Button>
               </p>

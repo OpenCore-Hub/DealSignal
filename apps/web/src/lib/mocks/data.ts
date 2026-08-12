@@ -37,8 +37,8 @@ import type {
 import { groupIntoStrands } from "@/lib/radarQueue";
 
 export const mockWorkspaces: Workspace[] = [
-  { id: "ws_1", slug: "acme-capital", name: "mock.workspaces.acme.name" },
-  { id: "ws_2", slug: "ventura-fund", name: "mock.workspaces.ventura.name" },
+  { id: "ws_1", slug: "acme-capital", name: "mock.workspaces.acme.name", role: "owner" },
+  { id: "ws_2", slug: "ventura-fund", name: "mock.workspaces.ventura.name", role: "owner" },
 ];
 
 export const defaultWorkspaceSettings: WorkspaceSettings = {
@@ -731,6 +731,7 @@ export const mockDealRooms: DealRoom[] = [
     documents: mockDealRoomFolderDocs,
     members: mockDealRoomMembers,
     accessRequests: mockDealRoomAccessRequests,
+    isAdmin: true,
     recentVisitors: [
       {
         email: "investor@example.com",
@@ -754,6 +755,7 @@ export const mockDealRooms: DealRoom[] = [
     createdAt: "2026-06-15T09:00:00Z",
     lastAccessedAt: "2026-06-19T16:30:00Z",
     status: "active",
+    isAdmin: true,
     viewCount: 2,
     activeLinkCount: 1,
     tags: ["LP report", "Q2"],
@@ -775,6 +777,7 @@ export const mockDealRooms: DealRoom[] = [
     createdAt: "2026-06-12T11:00:00Z",
     lastAccessedAt: "2026-06-18T10:15:00Z",
     status: "active",
+    isAdmin: true,
     viewCount: 4,
     activeLinkCount: 1,
     tags: ["sales", "acme"],
@@ -799,6 +802,7 @@ export const mockDealRooms: DealRoom[] = [
     createdAt: "2026-04-10T10:00:00Z",
     lastAccessedAt: "2026-04-22T09:00:00Z",
     status: "active",
+    isAdmin: true,
     viewCount: 1,
     activeLinkCount: 1,
     tags: ["biotech", "series-b"],
@@ -820,6 +824,7 @@ export const mockDealRooms: DealRoom[] = [
     createdAt: "2026-05-20T10:00:00Z",
     lastAccessedAt: "2026-06-10T10:00:00Z",
     status: "active",
+    isAdmin: true,
     viewCount: 2,
     activeLinkCount: 1,
     tags: ["m&a"],
@@ -841,6 +846,7 @@ export const mockDealRooms: DealRoom[] = [
     createdAt: "2025-12-01T10:00:00Z",
     lastAccessedAt: "2025-12-15T10:00:00Z",
     status: "archived",
+    isAdmin: true,
     viewCount: 4,
     activeLinkCount: 1,
     tags: ["fundraising"],

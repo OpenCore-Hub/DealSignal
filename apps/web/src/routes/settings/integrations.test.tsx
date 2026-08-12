@@ -58,6 +58,7 @@ const mockStatus = {
   keyPageSlackEnabled: false,
   slack: false,
   hubspot: true,
+  canManage: true,
 };
 
 const mockWebhook = {
@@ -126,7 +127,7 @@ describe("SettingsIntegrationsPage", () => {
 
   it("connects slack and opens oauth url", async () => {
     connectSlackMock.mockResolvedValue({ url: "https://slack.com/oauth" });
-    const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+    const openSpy = vi.spyOn(window, "open").mockImplementation(() => ({ closed: false }) as Window);
 
     await renderPage();
 
@@ -141,8 +142,41 @@ describe("SettingsIntegrationsPage", () => {
       expect(connectSlackMock).toHaveBeenCalled();
     });
     expect(openSpy).toHaveBeenCalledWith("https://slack.com/oauth", "_blank", "noopener,noreferrer");
+    expect(toast.info).not.toHaveBeenCalled();
 
     openSpy.mockRestore();
+  });
+
+  it("falls back when oauth popup is blocked", async () => {
+    connectSlackMock.mockResolvedValue({ url: "https://slack.com/oauth" });
+    const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+
+    await renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("Slack")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getAllByRole("button", { name: /^Connect$/i })[0]);
+
+    await waitFor(() => {
+      expect(toast.info).toHaveBeenCalled();
+    });
+
+    openSpy.mockRestore();
+  });
+
+  it("disables mutating controls when the actor cannot manage integrations", async () => {
+    getIntegrationsMock.mockResolvedValue({ ...mockStatus, canManage: false, hubspot: false });
+
+    await renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("Slack")).toBeInTheDocument();
+    });
+
+    expect(screen.getByRole("switch", { name: /email notifications/i })).toBeDisabled();
+    expect(screen.getAllByRole("button", { name: /^Connect$/i })[0]).toBeDisabled();
   });
 
   it("disconnects hubspot and refetches status", async () => {
@@ -200,6 +234,37 @@ describe("SettingsIntegrationsPage", () => {
     });
   });
 
+  it("persists deliver-events immediately when webhook is already configured", async () => {
+    getOutboundWebhookMock.mockResolvedValue({
+      configured: true,
+      enabled: false,
+      url: "https://hooks.zapier.com/hooks/catch/1/abc",
+    });
+    saveOutboundWebhookMock.mockResolvedValue({
+      configured: true,
+      enabled: true,
+      url: "https://hooks.zapier.com/hooks/catch/1/abc",
+    });
+
+    await renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByRole("switch", { name: /deliver events/i })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("switch", { name: /deliver events/i }));
+
+    await waitFor(() => {
+      expect(saveOutboundWebhookMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          url: "https://hooks.zapier.com/hooks/catch/1/abc",
+          enabled: true,
+          rotateSecret: false,
+        }),
+      );
+    });
+  });
+
   it("saves outbound webhook", async () => {
     saveOutboundWebhookMock.mockResolvedValue({
       configured: true,
@@ -219,7 +284,7 @@ describe("SettingsIntegrationsPage", () => {
       target: { value: "https://hooks.zapier.com/hooks/catch/1/abc" },
     });
     fireEvent.click(screen.getByRole("switch", { name: /deliver events/i }));
-    fireEvent.click(screen.getByRole("button", { name: /save webhook/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
 
     await waitFor(() => {
       expect(saveOutboundWebhookMock).toHaveBeenCalledWith(

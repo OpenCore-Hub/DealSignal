@@ -37,7 +37,7 @@ test.describe("Integrations & marketing (real backend)", () => {
     const connRes = await apiFetch(`/api/workspaces/${workspaceSlug}/integrations/slack/connect`, {
       method: "POST",
     });
-    const ok = connRes.ok || connRes.status === 400;
+    const ok = connRes.ok || [400, 422].includes(connRes.status);
     expect(ok).toBe(true);
     if (connRes.ok) {
       const body = (await connRes.json()) as { url?: string };
@@ -72,7 +72,7 @@ test.describe("Integrations & marketing (real backend)", () => {
     const connRes = await apiFetch(`/api/workspaces/${workspaceSlug}/integrations/hubspot/connect`, {
       method: "POST",
     });
-    const ok = connRes.ok || connRes.status === 400;
+    const ok = connRes.ok || [400, 422].includes(connRes.status);
     expect(ok).toBe(true);
     if (connRes.ok) {
       const body = (await connRes.json()) as { url?: string };

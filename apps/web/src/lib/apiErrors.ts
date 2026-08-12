@@ -20,6 +20,7 @@ export type ApiErrorContext =
   | "register"
   | "verifyEmail"
   | "viewerGate"
+  | "acceptInvitation"
   | "knowledge"
   | "accessRequestApprove"
   | "accessRequestReject";
@@ -115,6 +116,12 @@ export function apiErrorMessage(
     return translate("auth:verifyEmail.error");
   }
 
+  if (options.context === "acceptInvitation") {
+    if (code === "invitation_email_mismatch" || code === "email_mismatch") {
+      return translate("auth:acceptInvitation.emailMismatch");
+    }
+  }
+
   if (options.context === "knowledge") {
     return knowledgeErrorMessage((key) => translate(`dealRooms:${key}`), code);
   }
@@ -149,9 +156,12 @@ export function apiErrorMessage(
     return translate(`documents:detail.categoryErrors.${code}`);
   }
 
-  const viewerInlineKey = VIEWER_INLINE_KEYS[code];
-  if (viewerInlineKey && hasKey(viewerInlineKey)) {
-    return translate(viewerInlineKey);
+  // Viewer gate codes (e.g. email_mismatch) must not leak into workspace-invite UX.
+  if (options.context === "viewerGate") {
+    const viewerInlineKey = VIEWER_INLINE_KEYS[code];
+    if (viewerInlineKey && hasKey(viewerInlineKey)) {
+      return translate(viewerInlineKey);
+    }
   }
 
   const policyKeys = viewerPolicyBlockI18nKeys(viewerAccessErrorKind(code));
