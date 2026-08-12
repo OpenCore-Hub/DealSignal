@@ -45,6 +45,20 @@ SET force_email_verification = $1, watermark_downloads = $2, two_factor_enabled 
 WHERE id = $4
 RETURNING *;
 
+-- name: GetWorkspaceLogo :one
+SELECT workspace_id, storage_key, content_type, updated_at
+FROM workspace_logos
+WHERE workspace_id = $1;
+
+-- name: UpsertWorkspaceLogo :one
+INSERT INTO workspace_logos (workspace_id, storage_key, content_type)
+VALUES ($1, $2, $3)
+ON CONFLICT (workspace_id) DO UPDATE
+SET storage_key = EXCLUDED.storage_key,
+    content_type = EXCLUDED.content_type,
+    updated_at = now()
+RETURNING workspace_id, storage_key, content_type, updated_at;
+
 -- name: ListWorkspacesByUser :many
 SELECT w.id, w.tenant_id, w.name, w.slug, w.brand_color, w.force_email_verification, w.watermark_downloads, w.two_factor_enabled, w.created_at, m.role
 FROM workspaces w
@@ -61,6 +75,16 @@ RETURNING workspace_id, user_id, role, joined_at;
 SELECT workspace_id, user_id, role, joined_at
 FROM workspace_members
 WHERE workspace_id = $1 AND user_id = $2 LIMIT 1;
+
+-- name: UpdateWorkspaceMemberRole :one
+UPDATE workspace_members
+SET role = $3
+WHERE workspace_id = $1 AND user_id = $2
+RETURNING workspace_id, user_id, role, joined_at;
+
+-- name: DeleteWorkspaceMember :exec
+DELETE FROM workspace_members
+WHERE workspace_id = $1 AND user_id = $2;
 
 -- name: ListWorkspaceMembers :many
 SELECT
@@ -2119,6 +2143,39 @@ WHERE id = $4 AND tenant_id = $5;
 DELETE FROM tenant_domains
 WHERE id = $1 AND tenant_id = $2;
 
+-- name: GetWorkspaceViewerDomain :one
+SELECT workspace_id, hostname, status, cname_target, verified_at, created_at, updated_at
+FROM workspace_viewer_domains
+WHERE workspace_id = $1;
+
+-- name: GetWorkspaceViewerDomainByHostname :one
+SELECT v.workspace_id, v.hostname, v.status, v.cname_target, v.verified_at, v.created_at, v.updated_at, w.tenant_id
+FROM workspace_viewer_domains v
+JOIN workspaces w ON w.id = v.workspace_id
+WHERE lower(v.hostname) = lower($1)
+LIMIT 1;
+
+-- name: UpsertWorkspaceViewerDomain :one
+INSERT INTO workspace_viewer_domains (workspace_id, hostname, status, cname_target)
+VALUES ($1, $2, 'pending', $3)
+ON CONFLICT (workspace_id) DO UPDATE SET
+    hostname = EXCLUDED.hostname,
+    status = 'pending',
+    cname_target = EXCLUDED.cname_target,
+    verified_at = NULL,
+    updated_at = now()
+RETURNING workspace_id, hostname, status, cname_target, verified_at, created_at, updated_at;
+
+-- name: MarkWorkspaceViewerDomainVerified :one
+UPDATE workspace_viewer_domains
+SET status = 'verified', verified_at = now(), updated_at = now()
+WHERE workspace_id = $1
+RETURNING workspace_id, hostname, status, cname_target, verified_at, created_at, updated_at;
+
+-- name: DeleteWorkspaceViewerDomain :exec
+DELETE FROM workspace_viewer_domains
+WHERE workspace_id = $1;
+
 -- name: ListTenantDomainsExpiringBefore :many
 SELECT id, tenant_id, domain, domain_type, is_primary, ssl_status, ssl_expires_at, verified_at, created_at, updated_at
 FROM tenant_domains
@@ -2454,6 +2511,69 @@ RETURNING token, workspace_id, email, role, expires_at, used_at, created_at;
 SELECT token, workspace_id, email, role, expires_at, used_at, created_at
 FROM workspace_invitations
 WHERE token = $1 LIMIT 1;
+
+-- name: GetInvitationByTokenForUpdate :one
+SELECT token, workspace_id, email, role, expires_at, used_at, created_at
+FROM workspace_invitations
+WHERE token = $1
+LIMIT 1
+FOR UPDATE;
+
+-- name: GetWorkspaceInvitationByEmail :one
+SELECT token, workspace_id, email, role, expires_at, used_at, created_at
+FROM workspace_invitations
+WHERE workspace_id = $1 AND email = $2
+LIMIT 1;
+
+-- name: ResendPendingWorkspaceInvitation :one
+UPDATE workspace_invitations
+SET
+    role = $3,
+    expires_at = $4,
+    token = gen_random_uuid(),
+    created_at = now()
+WHERE workspace_id = $1
+  AND email = $2
+  AND used_at IS NULL
+RETURNING token, workspace_id, email, role, expires_at, used_at, created_at;
+
+-- name: DeleteWorkspaceInvitationByEmail :exec
+DELETE FROM workspace_invitations
+WHERE workspace_id = $1 AND email = $2;
+
+-- name: UpdatePendingWorkspaceInvitationRole :one
+UPDATE workspace_invitations
+SET role = $3
+WHERE workspace_id = $1
+  AND token = $2
+  AND used_at IS NULL
+RETURNING token, workspace_id, email, role, expires_at, used_at, created_at;
+
+-- name: DeletePendingWorkspaceInvitation :exec
+DELETE FROM workspace_invitations
+WHERE workspace_id = $1
+  AND token = $2
+  AND used_at IS NULL;
+
+-- name: GetWorkspaceMemberByEmail :one
+SELECT
+    wm.workspace_id,
+    wm.user_id,
+    wm.role,
+    wm.joined_at,
+    u.email
+FROM workspace_members wm
+JOIN users u ON u.id = wm.user_id
+WHERE wm.workspace_id = $1 AND u.email = $2
+LIMIT 1;
+
+-- name: ListPendingWorkspaceInvitations :many
+SELECT token, workspace_id, email, role, expires_at, used_at, created_at
+FROM workspace_invitations
+WHERE workspace_id = $1
+  AND used_at IS NULL
+  AND expires_at > now()
+ORDER BY created_at DESC;
 
 -- name: MarkInvitationUsed :exec
 UPDATE workspace_invitations

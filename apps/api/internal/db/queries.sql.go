@@ -4514,6 +4514,23 @@ func (q *Queries) DeletePagesByDocument(ctx context.Context, documentID pgtype.U
 	return err
 }
 
+const deletePendingWorkspaceInvitation = `-- name: DeletePendingWorkspaceInvitation :exec
+DELETE FROM workspace_invitations
+WHERE workspace_id = $1
+  AND token = $2
+  AND used_at IS NULL
+`
+
+type DeletePendingWorkspaceInvitationParams struct {
+	WorkspaceID pgtype.UUID
+	Token       pgtype.UUID
+}
+
+func (q *Queries) DeletePendingWorkspaceInvitation(ctx context.Context, arg DeletePendingWorkspaceInvitationParams) error {
+	_, err := q.db.Exec(ctx, deletePendingWorkspaceInvitation, arg.WorkspaceID, arg.Token)
+	return err
+}
+
 const deleteRoomFolderPermissions = `-- name: DeleteRoomFolderPermissions :exec
 DELETE FROM room_member_folder_permissions
 WHERE room_id = $1 AND folder_path = $2
@@ -4596,6 +4613,36 @@ func (q *Queries) DeleteTenantDomain(ctx context.Context, arg DeleteTenantDomain
 	return err
 }
 
+const deleteWorkspaceInvitationByEmail = `-- name: DeleteWorkspaceInvitationByEmail :exec
+DELETE FROM workspace_invitations
+WHERE workspace_id = $1 AND email = $2
+`
+
+type DeleteWorkspaceInvitationByEmailParams struct {
+	WorkspaceID pgtype.UUID
+	Email       string
+}
+
+func (q *Queries) DeleteWorkspaceInvitationByEmail(ctx context.Context, arg DeleteWorkspaceInvitationByEmailParams) error {
+	_, err := q.db.Exec(ctx, deleteWorkspaceInvitationByEmail, arg.WorkspaceID, arg.Email)
+	return err
+}
+
+const deleteWorkspaceMember = `-- name: DeleteWorkspaceMember :exec
+DELETE FROM workspace_members
+WHERE workspace_id = $1 AND user_id = $2
+`
+
+type DeleteWorkspaceMemberParams struct {
+	WorkspaceID pgtype.UUID
+	UserID      pgtype.UUID
+}
+
+func (q *Queries) DeleteWorkspaceMember(ctx context.Context, arg DeleteWorkspaceMemberParams) error {
+	_, err := q.db.Exec(ctx, deleteWorkspaceMember, arg.WorkspaceID, arg.UserID)
+	return err
+}
+
 const deleteWorkspaceOutboundWebhook = `-- name: DeleteWorkspaceOutboundWebhook :exec
 DELETE FROM workspace_outbound_webhooks
 WHERE workspace_id = $1
@@ -4603,6 +4650,16 @@ WHERE workspace_id = $1
 
 func (q *Queries) DeleteWorkspaceOutboundWebhook(ctx context.Context, workspaceID pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, deleteWorkspaceOutboundWebhook, workspaceID)
+	return err
+}
+
+const deleteWorkspaceViewerDomain = `-- name: DeleteWorkspaceViewerDomain :exec
+DELETE FROM workspace_viewer_domains
+WHERE workspace_id = $1
+`
+
+func (q *Queries) DeleteWorkspaceViewerDomain(ctx context.Context, workspaceID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteWorkspaceViewerDomain, workspaceID)
 	return err
 }
 
@@ -6692,6 +6749,29 @@ WHERE token = $1 LIMIT 1
 
 func (q *Queries) GetInvitationByToken(ctx context.Context, token pgtype.UUID) (WorkspaceInvitation, error) {
 	row := q.db.QueryRow(ctx, getInvitationByToken, token)
+	var i WorkspaceInvitation
+	err := row.Scan(
+		&i.Token,
+		&i.WorkspaceID,
+		&i.Email,
+		&i.Role,
+		&i.ExpiresAt,
+		&i.UsedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getInvitationByTokenForUpdate = `-- name: GetInvitationByTokenForUpdate :one
+SELECT token, workspace_id, email, role, expires_at, used_at, created_at
+FROM workspace_invitations
+WHERE token = $1
+LIMIT 1
+FOR UPDATE
+`
+
+func (q *Queries) GetInvitationByTokenForUpdate(ctx context.Context, token pgtype.UUID) (WorkspaceInvitation, error) {
+	row := q.db.QueryRow(ctx, getInvitationByTokenForUpdate, token)
 	var i WorkspaceInvitation
 	err := row.Scan(
 		&i.Token,
@@ -10269,6 +10349,33 @@ func (q *Queries) GetWorkspaceDailyLinkOpensInRange(ctx context.Context, arg Get
 	return items, nil
 }
 
+const getWorkspaceInvitationByEmail = `-- name: GetWorkspaceInvitationByEmail :one
+SELECT token, workspace_id, email, role, expires_at, used_at, created_at
+FROM workspace_invitations
+WHERE workspace_id = $1 AND email = $2
+LIMIT 1
+`
+
+type GetWorkspaceInvitationByEmailParams struct {
+	WorkspaceID pgtype.UUID
+	Email       string
+}
+
+func (q *Queries) GetWorkspaceInvitationByEmail(ctx context.Context, arg GetWorkspaceInvitationByEmailParams) (WorkspaceInvitation, error) {
+	row := q.db.QueryRow(ctx, getWorkspaceInvitationByEmail, arg.WorkspaceID, arg.Email)
+	var i WorkspaceInvitation
+	err := row.Scan(
+		&i.Token,
+		&i.WorkspaceID,
+		&i.Email,
+		&i.Role,
+		&i.ExpiresAt,
+		&i.UsedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getWorkspaceKeyPageComplianceSummary = `-- name: GetWorkspaceKeyPageComplianceSummary :one
 SELECT
     COUNT(*)::bigint AS total_views,
@@ -10339,6 +10446,24 @@ func (q *Queries) GetWorkspaceKeyPageSettings(ctx context.Context, workspaceID p
 	return i, err
 }
 
+const getWorkspaceLogo = `-- name: GetWorkspaceLogo :one
+SELECT workspace_id, storage_key, content_type, updated_at
+FROM workspace_logos
+WHERE workspace_id = $1
+`
+
+func (q *Queries) GetWorkspaceLogo(ctx context.Context, workspaceID pgtype.UUID) (WorkspaceLogo, error) {
+	row := q.db.QueryRow(ctx, getWorkspaceLogo, workspaceID)
+	var i WorkspaceLogo
+	err := row.Scan(
+		&i.WorkspaceID,
+		&i.StorageKey,
+		&i.ContentType,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getWorkspaceMember = `-- name: GetWorkspaceMember :one
 SELECT workspace_id, user_id, role, joined_at
 FROM workspace_members
@@ -10358,6 +10483,45 @@ func (q *Queries) GetWorkspaceMember(ctx context.Context, arg GetWorkspaceMember
 		&i.UserID,
 		&i.Role,
 		&i.JoinedAt,
+	)
+	return i, err
+}
+
+const getWorkspaceMemberByEmail = `-- name: GetWorkspaceMemberByEmail :one
+SELECT
+    wm.workspace_id,
+    wm.user_id,
+    wm.role,
+    wm.joined_at,
+    u.email
+FROM workspace_members wm
+JOIN users u ON u.id = wm.user_id
+WHERE wm.workspace_id = $1 AND u.email = $2
+LIMIT 1
+`
+
+type GetWorkspaceMemberByEmailParams struct {
+	WorkspaceID pgtype.UUID
+	Email       string
+}
+
+type GetWorkspaceMemberByEmailRow struct {
+	WorkspaceID pgtype.UUID
+	UserID      pgtype.UUID
+	Role        string
+	JoinedAt    pgtype.Timestamptz
+	Email       string
+}
+
+func (q *Queries) GetWorkspaceMemberByEmail(ctx context.Context, arg GetWorkspaceMemberByEmailParams) (GetWorkspaceMemberByEmailRow, error) {
+	row := q.db.QueryRow(ctx, getWorkspaceMemberByEmail, arg.WorkspaceID, arg.Email)
+	var i GetWorkspaceMemberByEmailRow
+	err := row.Scan(
+		&i.WorkspaceID,
+		&i.UserID,
+		&i.Role,
+		&i.JoinedAt,
+		&i.Email,
 	)
 	return i, err
 }
@@ -10500,6 +10664,62 @@ func (q *Queries) GetWorkspaceStorageUsage(ctx context.Context, workspaceID pgty
 	var total_bytes int64
 	err := row.Scan(&total_bytes)
 	return total_bytes, err
+}
+
+const getWorkspaceViewerDomain = `-- name: GetWorkspaceViewerDomain :one
+SELECT workspace_id, hostname, status, cname_target, verified_at, created_at, updated_at
+FROM workspace_viewer_domains
+WHERE workspace_id = $1
+`
+
+func (q *Queries) GetWorkspaceViewerDomain(ctx context.Context, workspaceID pgtype.UUID) (WorkspaceViewerDomain, error) {
+	row := q.db.QueryRow(ctx, getWorkspaceViewerDomain, workspaceID)
+	var i WorkspaceViewerDomain
+	err := row.Scan(
+		&i.WorkspaceID,
+		&i.Hostname,
+		&i.Status,
+		&i.CnameTarget,
+		&i.VerifiedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getWorkspaceViewerDomainByHostname = `-- name: GetWorkspaceViewerDomainByHostname :one
+SELECT v.workspace_id, v.hostname, v.status, v.cname_target, v.verified_at, v.created_at, v.updated_at, w.tenant_id
+FROM workspace_viewer_domains v
+JOIN workspaces w ON w.id = v.workspace_id
+WHERE lower(v.hostname) = lower($1)
+LIMIT 1
+`
+
+type GetWorkspaceViewerDomainByHostnameRow struct {
+	WorkspaceID pgtype.UUID
+	Hostname    string
+	Status      string
+	CnameTarget string
+	VerifiedAt  pgtype.Timestamptz
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
+	TenantID    pgtype.UUID
+}
+
+func (q *Queries) GetWorkspaceViewerDomainByHostname(ctx context.Context, lower string) (GetWorkspaceViewerDomainByHostnameRow, error) {
+	row := q.db.QueryRow(ctx, getWorkspaceViewerDomainByHostname, lower)
+	var i GetWorkspaceViewerDomainByHostnameRow
+	err := row.Scan(
+		&i.WorkspaceID,
+		&i.Hostname,
+		&i.Status,
+		&i.CnameTarget,
+		&i.VerifiedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.TenantID,
+	)
+	return i, err
 }
 
 const hardDeleteLink = `-- name: HardDeleteLink :execrows
@@ -15599,6 +15819,43 @@ func (q *Queries) ListPendingUploadedFilesByWorkspace(ctx context.Context, works
 	return items, nil
 }
 
+const listPendingWorkspaceInvitations = `-- name: ListPendingWorkspaceInvitations :many
+SELECT token, workspace_id, email, role, expires_at, used_at, created_at
+FROM workspace_invitations
+WHERE workspace_id = $1
+  AND used_at IS NULL
+  AND expires_at > now()
+ORDER BY created_at DESC
+`
+
+func (q *Queries) ListPendingWorkspaceInvitations(ctx context.Context, workspaceID pgtype.UUID) ([]WorkspaceInvitation, error) {
+	rows, err := q.db.Query(ctx, listPendingWorkspaceInvitations, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []WorkspaceInvitation
+	for rows.Next() {
+		var i WorkspaceInvitation
+		if err := rows.Scan(
+			&i.Token,
+			&i.WorkspaceID,
+			&i.Email,
+			&i.Role,
+			&i.ExpiresAt,
+			&i.UsedAt,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPopularDocumentsByWorkspace = `-- name: ListPopularDocumentsByWorkspace :many
 SELECT
     d.id, d.tenant_id, d.workspace_id, d.created_by, COALESCE(d.title, ''::text) as title, d.source_type, d.status, d.storage_key, COALESCE(d.file_size, 0::bigint) as file_size, d.category, d.page_count, d.created_at, d.updated_at, d.deleted_at,
@@ -18282,6 +18539,28 @@ func (q *Queries) MarkSuggestionsSynced(ctx context.Context, dollar_1 []pgtype.U
 	return err
 }
 
+const markWorkspaceViewerDomainVerified = `-- name: MarkWorkspaceViewerDomainVerified :one
+UPDATE workspace_viewer_domains
+SET status = 'verified', verified_at = now(), updated_at = now()
+WHERE workspace_id = $1
+RETURNING workspace_id, hostname, status, cname_target, verified_at, created_at, updated_at
+`
+
+func (q *Queries) MarkWorkspaceViewerDomainVerified(ctx context.Context, workspaceID pgtype.UUID) (WorkspaceViewerDomain, error) {
+	row := q.db.QueryRow(ctx, markWorkspaceViewerDomainVerified, workspaceID)
+	var i WorkspaceViewerDomain
+	err := row.Scan(
+		&i.WorkspaceID,
+		&i.Hostname,
+		&i.Status,
+		&i.CnameTarget,
+		&i.VerifiedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const maxLinkPinnedFAQSort = `-- name: MaxLinkPinnedFAQSort :one
 SELECT COALESCE(MAX(pinned_faq_sort), -1)::int AS max_sort
 FROM link_ask_turns
@@ -18771,6 +19050,46 @@ func (q *Queries) ReplaceDocumentFile(ctx context.Context, arg ReplaceDocumentFi
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+	)
+	return i, err
+}
+
+const resendPendingWorkspaceInvitation = `-- name: ResendPendingWorkspaceInvitation :one
+UPDATE workspace_invitations
+SET
+    role = $3,
+    expires_at = $4,
+    token = gen_random_uuid(),
+    created_at = now()
+WHERE workspace_id = $1
+  AND email = $2
+  AND used_at IS NULL
+RETURNING token, workspace_id, email, role, expires_at, used_at, created_at
+`
+
+type ResendPendingWorkspaceInvitationParams struct {
+	WorkspaceID pgtype.UUID
+	Email       string
+	Role        string
+	ExpiresAt   pgtype.Timestamptz
+}
+
+func (q *Queries) ResendPendingWorkspaceInvitation(ctx context.Context, arg ResendPendingWorkspaceInvitationParams) (WorkspaceInvitation, error) {
+	row := q.db.QueryRow(ctx, resendPendingWorkspaceInvitation,
+		arg.WorkspaceID,
+		arg.Email,
+		arg.Role,
+		arg.ExpiresAt,
+	)
+	var i WorkspaceInvitation
+	err := row.Scan(
+		&i.Token,
+		&i.WorkspaceID,
+		&i.Email,
+		&i.Role,
+		&i.ExpiresAt,
+		&i.UsedAt,
+		&i.CreatedAt,
 	)
 	return i, err
 }
@@ -20478,6 +20797,36 @@ func (q *Queries) UpdateNotificationBody(ctx context.Context, arg UpdateNotifica
 	return err
 }
 
+const updatePendingWorkspaceInvitationRole = `-- name: UpdatePendingWorkspaceInvitationRole :one
+UPDATE workspace_invitations
+SET role = $3
+WHERE workspace_id = $1
+  AND token = $2
+  AND used_at IS NULL
+RETURNING token, workspace_id, email, role, expires_at, used_at, created_at
+`
+
+type UpdatePendingWorkspaceInvitationRoleParams struct {
+	WorkspaceID pgtype.UUID
+	Token       pgtype.UUID
+	Role        string
+}
+
+func (q *Queries) UpdatePendingWorkspaceInvitationRole(ctx context.Context, arg UpdatePendingWorkspaceInvitationRoleParams) (WorkspaceInvitation, error) {
+	row := q.db.QueryRow(ctx, updatePendingWorkspaceInvitationRole, arg.WorkspaceID, arg.Token, arg.Role)
+	var i WorkspaceInvitation
+	err := row.Scan(
+		&i.Token,
+		&i.WorkspaceID,
+		&i.Email,
+		&i.Role,
+		&i.ExpiresAt,
+		&i.UsedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const updateRoomFolderPermissionsFolderPath = `-- name: UpdateRoomFolderPermissionsFolderPath :exec
 UPDATE room_member_folder_permissions
 SET folder_path = $1, updated_at = now()
@@ -20601,6 +20950,31 @@ func (q *Queries) UpdateWorkspace(ctx context.Context, arg UpdateWorkspaceParams
 		&i.TwoFactorEnabled,
 		&i.CrmConfig,
 		&i.WebhookSecret,
+	)
+	return i, err
+}
+
+const updateWorkspaceMemberRole = `-- name: UpdateWorkspaceMemberRole :one
+UPDATE workspace_members
+SET role = $3
+WHERE workspace_id = $1 AND user_id = $2
+RETURNING workspace_id, user_id, role, joined_at
+`
+
+type UpdateWorkspaceMemberRoleParams struct {
+	WorkspaceID pgtype.UUID
+	UserID      pgtype.UUID
+	Role        string
+}
+
+func (q *Queries) UpdateWorkspaceMemberRole(ctx context.Context, arg UpdateWorkspaceMemberRoleParams) (WorkspaceMember, error) {
+	row := q.db.QueryRow(ctx, updateWorkspaceMemberRole, arg.WorkspaceID, arg.UserID, arg.Role)
+	var i WorkspaceMember
+	err := row.Scan(
+		&i.WorkspaceID,
+		&i.UserID,
+		&i.Role,
+		&i.JoinedAt,
 	)
 	return i, err
 }
@@ -21440,6 +21814,34 @@ func (q *Queries) UpsertWorkspaceKeyPageSettings(ctx context.Context, arg Upsert
 	return i, err
 }
 
+const upsertWorkspaceLogo = `-- name: UpsertWorkspaceLogo :one
+INSERT INTO workspace_logos (workspace_id, storage_key, content_type)
+VALUES ($1, $2, $3)
+ON CONFLICT (workspace_id) DO UPDATE
+SET storage_key = EXCLUDED.storage_key,
+    content_type = EXCLUDED.content_type,
+    updated_at = now()
+RETURNING workspace_id, storage_key, content_type, updated_at
+`
+
+type UpsertWorkspaceLogoParams struct {
+	WorkspaceID pgtype.UUID
+	StorageKey  string
+	ContentType string
+}
+
+func (q *Queries) UpsertWorkspaceLogo(ctx context.Context, arg UpsertWorkspaceLogoParams) (WorkspaceLogo, error) {
+	row := q.db.QueryRow(ctx, upsertWorkspaceLogo, arg.WorkspaceID, arg.StorageKey, arg.ContentType)
+	var i WorkspaceLogo
+	err := row.Scan(
+		&i.WorkspaceID,
+		&i.StorageKey,
+		&i.ContentType,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const upsertWorkspaceOutboundWebhook = `-- name: UpsertWorkspaceOutboundWebhook :one
 INSERT INTO workspace_outbound_webhooks (
     workspace_id, tenant_id, url, secret, enabled, event_types
@@ -21509,6 +21911,39 @@ func (q *Queries) UpsertWorkspaceRagTenant(ctx context.Context, arg UpsertWorksp
 		&i.WorkspaceID,
 		&i.ExternalTenantSlug,
 		&i.TenantApiKey,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const upsertWorkspaceViewerDomain = `-- name: UpsertWorkspaceViewerDomain :one
+INSERT INTO workspace_viewer_domains (workspace_id, hostname, status, cname_target)
+VALUES ($1, $2, 'pending', $3)
+ON CONFLICT (workspace_id) DO UPDATE SET
+    hostname = EXCLUDED.hostname,
+    status = 'pending',
+    cname_target = EXCLUDED.cname_target,
+    verified_at = NULL,
+    updated_at = now()
+RETURNING workspace_id, hostname, status, cname_target, verified_at, created_at, updated_at
+`
+
+type UpsertWorkspaceViewerDomainParams struct {
+	WorkspaceID pgtype.UUID
+	Hostname    string
+	CnameTarget string
+}
+
+func (q *Queries) UpsertWorkspaceViewerDomain(ctx context.Context, arg UpsertWorkspaceViewerDomainParams) (WorkspaceViewerDomain, error) {
+	row := q.db.QueryRow(ctx, upsertWorkspaceViewerDomain, arg.WorkspaceID, arg.Hostname, arg.CnameTarget)
+	var i WorkspaceViewerDomain
+	err := row.Scan(
+		&i.WorkspaceID,
+		&i.Hostname,
+		&i.Status,
+		&i.CnameTarget,
+		&i.VerifiedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)

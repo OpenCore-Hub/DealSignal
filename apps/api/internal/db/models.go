@@ -1035,6 +1035,13 @@ type WorkspaceKeyPageSetting struct {
 	UpdatedAt     pgtype.Timestamptz
 }
 
+type WorkspaceLogo struct {
+	WorkspaceID pgtype.UUID
+	StorageKey  string
+	ContentType string
+	UpdatedAt   pgtype.Timestamptz
+}
+
 type WorkspaceMember struct {
 	WorkspaceID pgtype.UUID
 	UserID      pgtype.UUID
@@ -1059,4 +1066,14 @@ type WorkspaceRagTenant struct {
 	TenantApiKey       string
 	CreatedAt          pgtype.Timestamptz
 	UpdatedAt          pgtype.Timestamptz
+}
+
+type WorkspaceViewerDomain struct {
+	WorkspaceID pgtype.UUID
+	Hostname    string
+	Status      string
+	CnameTarget string
+	VerifiedAt  pgtype.Timestamptz
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
 }
