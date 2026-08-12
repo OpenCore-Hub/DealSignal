@@ -808,6 +808,7 @@ func roomDetailResponse(r RoomDetail, internal action.MemberEmailSet) gin.H {
 	resp["documentCount"] = r.DocumentCount
 	resp["memberCount"] = r.MemberCount
 	resp["pendingApprovals"] = r.PendingApprovals
+	resp["isAdmin"] = r.IsAdmin
 	resp["folders"] = folderListResponse(r.Folders)
 	resp["documents"] = folderDocsListResponse(r.Documents)
 	resp["members"] = memberDetailListResponse(r.Members)

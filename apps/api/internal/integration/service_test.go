@@ -108,3 +108,23 @@ func TestExchangeHubSpot(t *testing.T) {
 		t.Fatalf("expected expires_at to be set")
 	}
 }
+
+func TestEnsureOAuthConfigured(t *testing.T) {
+	svc := NewService(nil, &config.Config{})
+	if err := svc.ensureOAuthConfigured("slack"); err != ErrOAuthNotConfigured {
+		t.Fatalf("expected ErrOAuthNotConfigured, got %v", err)
+	}
+	svc.cfg.SlackClientID = "id"
+	svc.cfg.SlackClientSecret = "secret"
+	if err := svc.ensureOAuthConfigured("slack"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := svc.ensureOAuthConfigured("hubspot"); err != ErrOAuthNotConfigured {
+		t.Fatalf("expected ErrOAuthNotConfigured for hubspot, got %v", err)
+	}
+	svc.cfg.HubSpotClientID = "id"
+	svc.cfg.HubSpotClientSecret = "secret"
+	if err := svc.ensureOAuthConfigured("hubspot"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}

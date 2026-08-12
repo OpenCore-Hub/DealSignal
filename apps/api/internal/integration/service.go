@@ -21,6 +21,11 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+var (
+	ErrNotManager         = errors.New("only owner or admin can manage integrations")
+	ErrOAuthNotConfigured = errors.New("oauth is not configured")
+)
+
 // Settings is the public view of notification/integration settings.
 type Settings struct {
 	WorkspaceID         string `json:"workspace_id"`
@@ -31,6 +36,7 @@ type Settings struct {
 	SlackConnected      bool   `json:"slack_connected"`
 	HubSpotConnected    bool   `json:"hubspot_connected"`
 	SalesforceConnected bool   `json:"salesforce_connected"`
+	CanManage           bool   `json:"can_manage"`
 	UpdatedAt           string `json:"updated_at"`
 }
 
@@ -55,7 +61,7 @@ func NewService(q *db.Queries, cfg *config.Config) *Service {
 }
 
 // GetSettings returns settings for a workspace.
-func (s *Service) GetSettings(ctx context.Context, workspaceID string) (Settings, error) {
+func (s *Service) GetSettings(ctx context.Context, workspaceID, actorID string) (Settings, error) {
 	wsUUID, err := pgUUID(workspaceID)
 	if err != nil {
 		return Settings{}, err
@@ -69,6 +75,7 @@ func (s *Service) GetSettings(ctx context.Context, workspaceID string) (Settings
 			settings.KeyPageSlackEnabled = keyPageSlack
 			settings.SlackConnected = s.hasToken(ctx, wsUUID, "slack")
 			settings.HubSpotConnected = s.hasToken(ctx, wsUUID, "hubspot")
+			settings.CanManage = s.isManager(ctx, actorID, workspaceID)
 			return settings, nil
 		}
 		return Settings{}, err
@@ -80,7 +87,57 @@ func (s *Service) GetSettings(ctx context.Context, workspaceID string) (Settings
 	digest, keyPageSlack := s.ruleFlags(ctx, wsUUID)
 	settings.DailyDigestEnabled = digest
 	settings.KeyPageSlackEnabled = keyPageSlack
+	settings.CanManage = s.isManager(ctx, actorID, workspaceID)
 	return settings, nil
+}
+
+func (s *Service) isManager(ctx context.Context, userID, workspaceID string) bool {
+	if userID == "" || workspaceID == "" || s.queries == nil {
+		return false
+	}
+	wsUUID, err := pgUUID(workspaceID)
+	if err != nil {
+		return false
+	}
+	uUUID, err := pgUUID(userID)
+	if err != nil {
+		return false
+	}
+	m, err := s.queries.GetWorkspaceMember(ctx, db.GetWorkspaceMemberParams{
+		WorkspaceID: wsUUID,
+		UserID:      uUUID,
+	})
+	if err != nil {
+		return false
+	}
+	return m.Role == "owner" || m.Role == "admin"
+}
+
+// RequireManager returns ErrNotManager unless the actor is owner or admin.
+func (s *Service) RequireManager(ctx context.Context, userID, workspaceID string) error {
+	if !s.isManager(ctx, userID, workspaceID) {
+		return ErrNotManager
+	}
+	return nil
+}
+
+func (s *Service) ensureOAuthConfigured(provider string) error {
+	if s.cfg == nil {
+		return ErrOAuthNotConfigured
+	}
+	switch provider {
+	case "slack":
+		if strings.TrimSpace(s.cfg.SlackClientID) == "" || strings.TrimSpace(s.cfg.SlackClientSecret) == "" {
+			return ErrOAuthNotConfigured
+		}
+	case "hubspot":
+		if strings.TrimSpace(s.cfg.HubSpotClientID) == "" || strings.TrimSpace(s.cfg.HubSpotClientSecret) == "" {
+			return ErrOAuthNotConfigured
+		}
+	default:
+		return errors.New("unsupported provider")
+	}
+	return nil
 }
 
 func (s *Service) ruleFlags(ctx context.Context, workspaceID pgtype.UUID) (digestEnabled, keyPageSlack bool) {
@@ -129,7 +186,7 @@ type SaveSettingsRequest struct {
 }
 
 // SaveSettings upserts workspace settings. Integration connected flags are managed by OAuth callbacks only.
-func (s *Service) SaveSettings(ctx context.Context, workspaceID string, req SaveSettingsRequest) (Settings, error) {
+func (s *Service) SaveSettings(ctx context.Context, workspaceID, actorID string, req SaveSettingsRequest) (Settings, error) {
 	wsUUID, err := pgUUID(workspaceID)
 	if err != nil {
 		return Settings{}, err
@@ -163,7 +220,7 @@ func (s *Service) SaveSettings(ctx context.Context, workspaceID string, req Save
 	if err := s.upsertKeyPageSlackRules(ctx, wsUUID, req.KeyPageSlackEnabled); err != nil {
 		return Settings{}, err
 	}
-	return s.GetSettings(ctx, workspaceID)
+	return s.GetSettings(ctx, workspaceID, actorID)
 }
 
 func (s *Service) slackChannels(ctx context.Context, workspaceID pgtype.UUID, includeSlack bool) []string {
@@ -224,6 +281,9 @@ func (s *Service) OAuthURL(ctx context.Context, workspaceID, provider string) (s
 	if provider != "slack" && provider != "hubspot" {
 		return "", errors.New("unsupported provider")
 	}
+	if err := s.ensureOAuthConfigured(provider); err != nil {
+		return "", err
+	}
 	state, err := randomState()
 	if err != nil {
 		return "", err
@@ -280,30 +340,30 @@ func (s *Service) OAuthCallback(ctx context.Context, provider, state, code strin
 		token, err = s.exchangeHubSpot(ctx, code)
 	}
 	if err != nil {
-		return "", fmt.Errorf("token exchange failed: %w", err)
+		return ws.Slug, fmt.Errorf("token exchange failed: %w", err)
 	}
 	token.WorkspaceID = row.WorkspaceID
 	token.Provider = provider
 
 	if err := s.queries.UpsertIntegrationToken(ctx, token); err != nil {
-		return "", err
+		return ws.Slug, err
 	}
 
 	if err := s.setConnectedFlag(ctx, row.WorkspaceID, provider, true); err != nil {
-		return "", err
+		return ws.Slug, err
 	}
 	if provider == "slack" && slackWebhook != "" {
 		if err := s.persistSlackWebhook(ctx, row.WorkspaceID, slackWebhook); err != nil {
-			return "", err
+			return ws.Slug, err
 		}
 		// Refresh rule channels so enabled Slack preferences take effect immediately.
 		_, keyPageSlack := s.ruleFlags(ctx, row.WorkspaceID)
 		if err := s.upsertKeyPageSlackRules(ctx, row.WorkspaceID, keyPageSlack); err != nil {
-			return "", err
+			return ws.Slug, err
 		}
 		if digest, _ := s.ruleFlags(ctx, row.WorkspaceID); digest {
 			if err := s.upsertDailyDigestRule(ctx, row.WorkspaceID, true); err != nil {
-				return "", err
+				return ws.Slug, err
 			}
 		}
 	}
@@ -345,7 +405,19 @@ func (s *Service) Disconnect(ctx context.Context, workspaceID, provider string) 
 	}); err != nil {
 		return err
 	}
-	return s.setConnectedFlag(ctx, wsUUID, provider, false)
+	if err := s.setConnectedFlag(ctx, wsUUID, provider, false); err != nil {
+		return err
+	}
+	if provider == "slack" {
+		digest, _ := s.ruleFlags(ctx, wsUUID)
+		if err := s.upsertKeyPageSlackRules(ctx, wsUUID, false); err != nil {
+			return err
+		}
+		if err := s.upsertDailyDigestRule(ctx, wsUUID, digest); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Service) setConnectedFlag(ctx context.Context, workspaceID pgtype.UUID, provider string, connected bool) error {

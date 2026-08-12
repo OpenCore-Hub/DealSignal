@@ -693,7 +693,8 @@ func (h *Handler) UpdateFull(c *gin.Context) {
 				"message": "formal q&a is not available on this plan",
 			})
 		case errors.Is(err, ErrRoomSecurityFloor), errors.Is(err, ErrInvalidPermission),
-			errors.Is(err, ErrInvalidInput), errors.Is(err, ErrInvalidPassword),
+			errors.Is(err, ErrInvalidInput), errors.Is(err, ErrInvalidCustomDomain),
+			errors.Is(err, ErrInvalidPassword),
 			errors.Is(err, ErrRequiresPassword), errors.Is(err, ErrConflictingAccessRule):
 			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
 		default:
@@ -1025,16 +1026,16 @@ func (h *Handler) ListPendingAccessRequests(c *gin.Context) {
 	out := make([]gin.H, 0, len(requests))
 	for _, ar := range requests {
 		item := gin.H{
-			"id":                   ar.ID,
-			"link_id":              ar.LinkID,
-			"email":                ar.Email,
-			"status":               ar.Status,
-			"created_at":           ar.CreatedAt.Format(time.RFC3339),
-			"updated_at":           ar.UpdatedAt.Format(time.RFC3339),
-			"link_name":            ar.LinkName,
-			"document_title":       ar.DocumentTitle,
-			"short_url":            publicURL(c, h.cfg, ar.PublicToken, ar.CustomDomain),
-			"is_workspace_member":  ar.IsWorkspaceMember,
+			"id":                  ar.ID,
+			"link_id":             ar.LinkID,
+			"email":               ar.Email,
+			"status":              ar.Status,
+			"created_at":          ar.CreatedAt.Format(time.RFC3339),
+			"updated_at":          ar.UpdatedAt.Format(time.RFC3339),
+			"link_name":           ar.LinkName,
+			"document_title":      ar.DocumentTitle,
+			"short_url":           publicURL(c, h.cfg, ar.PublicToken, h.service.ResolvedViewerHost(c.Request.Context(), workspaceID, ar.CustomDomain)),
+			"is_workspace_member": ar.IsWorkspaceMember,
 		}
 		if ar.Reason != "" {
 			item["reason"] = ar.Reason
@@ -1245,6 +1246,7 @@ func (h *Handler) CreateDealRoomLink(c *gin.Context) {
 			c.JSON(http.StatusConflict, gin.H{"code": "duplicate_name", "message": httpx.SafeMessage("duplicate_name", err)})
 		case errors.Is(err, ErrRoomAccessPolicyInvalid), errors.Is(err, ErrRoomSecurityFloor),
 			errors.Is(err, ErrInvalidPermission), errors.Is(err, ErrInvalidInput),
+			errors.Is(err, ErrInvalidCustomDomain),
 			errors.Is(err, ErrInvalidPassword), errors.Is(err, ErrRequiresPassword),
 			errors.Is(err, ErrConflictingAccessRule):
 			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
@@ -1618,7 +1620,8 @@ func (h *Handler) Create(c *gin.Context) {
 			c.JSON(http.StatusConflict, gin.H{"code": "document_not_ready", "message": httpx.SafeMessage("document_not_ready", err)})
 		case errors.Is(err, ErrDuplicateName):
 			c.JSON(http.StatusConflict, gin.H{"code": "duplicate_name", "message": httpx.SafeMessage("duplicate_name", err)})
-		case errors.Is(err, ErrInvalidPermission):
+		case errors.Is(err, ErrInvalidPermission), errors.Is(err, ErrInvalidInput),
+			errors.Is(err, ErrInvalidCustomDomain):
 			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_permission_config", "message": httpx.SafeMessage("invalid_permission_config", err)})
 		default:
 			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
@@ -2776,7 +2779,7 @@ func (h *Handler) linkResponse(c *gin.Context, link db.Link) (gin.H, error) {
 		"documents":                   documents,
 		"isBundle":                    isBundle,
 		"name":                        textOrNil(link.Name),
-		"shortUrl":                    publicURL(c, h.cfg, link.PublicToken, link.CustomDomain.String),
+		"shortUrl":                    publicURL(c, h.cfg, link.PublicToken, h.service.ResolvedViewerHost(ctx, workspaceIDString(link.WorkspaceID), link.CustomDomain.String)),
 		"accessCount":                 link.AccessCount,
 		"heatLevel":                   score.Level,
 		"status":                      link.Status,

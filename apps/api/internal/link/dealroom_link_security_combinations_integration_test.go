@@ -7,9 +7,24 @@ import (
 	"time"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/dealroom"
 	"github.com/google/uuid"
 )
+
+func seedVerifiedViewerDomain(t *testing.T, f *testFixture, hostname string) {
+	t.Helper()
+	if _, err := f.q.UpsertWorkspaceViewerDomain(f.ctx, db.UpsertWorkspaceViewerDomainParams{
+		WorkspaceID: f.workspace.ID,
+		Hostname:    hostname,
+		CnameTarget: "cname.example.com",
+	}); err != nil {
+		t.Fatalf("upsert viewer domain: %v", err)
+	}
+	if _, err := f.q.MarkWorkspaceViewerDomainVerified(f.ctx, f.workspace.ID); err != nil {
+		t.Fatalf("mark viewer domain verified: %v", err)
+	}
+}
 
 // TestCreateDealRoomLink_ShareAccessCombinations verifies that the service
 // accepts the security/feature combinations the frontend Share/Access tabs can
@@ -40,6 +55,7 @@ func TestCreateDealRoomLink_ShareAccessCombinations(t *testing.T) {
 	}
 
 	future := time.Now().UTC().Add(24 * time.Hour).Truncate(time.Second)
+	seedVerifiedViewerDomain(t, f, "investors.example.com")
 
 	// Each case represents a distinct combination a user can build in the
 	// Share + Access tabs. Combinations that the service is expected to reject
@@ -162,6 +178,14 @@ func TestCreateDealRoomLink_ShareAccessCombinations(t *testing.T) {
 			},
 		},
 		{
+			name: "unverified custom domain rejected",
+			req: DealRoomLinkRequest{
+				Name:         "Bad custom domain link",
+				CustomDomain: "not-verified.example.com",
+			},
+			wantErr: true,
+		},
+		{
 			name: "tags and notify",
 			req: DealRoomLinkRequest{
 				Name:           "Tagged link",
@@ -239,6 +263,7 @@ func TestCreateDealRoomLink_StoredCombinationValues(t *testing.T) {
 	}
 
 	t.Run("custom domain is stored", func(t *testing.T) {
+		seedVerifiedViewerDomain(t, f, "investors.example.com")
 		link, err := f.svc.CreateDealRoomLink(f.ctx, userID, wsID, roomID, DealRoomLinkRequest{
 			Name:         "Custom domain link",
 			CustomDomain: "investors.example.com",

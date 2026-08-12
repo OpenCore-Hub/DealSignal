@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -26,6 +27,27 @@ const (
 	outboundWebhookTimeout = 10 * time.Second
 	outboundWebhookMaxBody = 64 << 10
 )
+
+var (
+	ErrWebhookURLRequired    = errors.New("webhook url required")
+	ErrInvalidWebhookURL     = errors.New("invalid webhook url")
+	ErrWebhookURLMustHTTPS   = errors.New("webhook url must use https")
+	ErrWebhookURLCredentials = errors.New("webhook url must not include credentials")
+)
+
+// IsOutboundWebhookURLError reports whether err is a client-facing webhook URL validation failure.
+func IsOutboundWebhookURLError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, ErrWebhookURLRequired) ||
+		errors.Is(err, ErrInvalidWebhookURL) ||
+		errors.Is(err, ErrWebhookURLMustHTTPS) ||
+		errors.Is(err, ErrWebhookURLCredentials) {
+		return true
+	}
+	return strings.Contains(err.Error(), "webhook url")
+}
 
 // OutboundWebhookPayload is the signed JSON body POSTed to workspace webhooks.
 type OutboundWebhookPayload struct {
@@ -154,30 +176,64 @@ func NewOutboundWebhookSecret() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-// ValidateOutboundWebhookURL requires https (except localhost for dev) and rejects credentials in URL.
+// ValidateOutboundWebhookURL requires https (except localhost for dev), rejects
+// credentials, and blocks literal private / link-local / metadata targets.
+// Hostnames are not resolved (keeps validation offline-safe).
 func ValidateOutboundWebhookURL(raw string) error {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return errors.New("webhook url required")
+		return ErrWebhookURLRequired
 	}
 	u, err := url.Parse(raw)
 	if err != nil || u.Host == "" {
-		return errors.New("invalid webhook url")
+		return ErrInvalidWebhookURL
 	}
 	host := strings.ToLower(u.Hostname())
 	switch u.Scheme {
 	case "https":
 	case "http":
-		if host != "localhost" && host != "127.0.0.1" && host != "::1" {
-			return errors.New("webhook url must use https")
+		if !isLoopbackWebhookHost(host) {
+			return ErrWebhookURLMustHTTPS
 		}
 	default:
-		return errors.New("webhook url must use https")
+		return ErrWebhookURLMustHTTPS
 	}
 	if u.User != nil {
-		return errors.New("webhook url must not include credentials")
+		return ErrWebhookURLCredentials
+	}
+	if isBlockedWebhookHost(host) {
+		return ErrInvalidWebhookURL
 	}
 	return nil
+}
+
+func isLoopbackWebhookHost(host string) bool {
+	if host == "localhost" || host == "127.0.0.1" || host == "::1" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+func isBlockedWebhookHost(host string) bool {
+	if host == "" {
+		return true
+	}
+	switch host {
+	case "metadata.google.internal", "metadata.goog", "169.254.169.254":
+		return true
+	}
+	if strings.HasSuffix(host, ".internal") || strings.HasSuffix(host, ".local") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	if ip.IsLoopback() {
+		return false
+	}
+	return ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() || ip.IsMulticast()
 }
 
 // NormalizeOutboundEventTypes keeps only known event types; empty → key-page defaults.

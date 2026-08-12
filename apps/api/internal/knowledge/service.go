@@ -46,6 +46,11 @@ type roomAccessAdapter struct {
 	queries *db.Queries
 }
 
+const (
+	workspaceRoleOwner = "owner"
+	workspaceRoleAdmin = "admin"
+)
+
 func (a roomAccessAdapter) GetRoom(ctx context.Context, roomID, workspaceID string) (db.DealRoom, error) {
 	room, err := a.queries.GetDealRoomByID(ctx, db.GetDealRoomByIDParams{
 		ID:          pgUUID(roomID),
@@ -60,10 +65,32 @@ func (a roomAccessAdapter) GetRoom(ctx context.Context, roomID, workspaceID stri
 	return room, nil
 }
 
+func (a roomAccessAdapter) isWorkspaceManager(ctx context.Context, workspaceID, userID string) (bool, error) {
+	member, err := a.queries.GetWorkspaceMember(ctx, db.GetWorkspaceMemberParams{
+		WorkspaceID: pgUUID(workspaceID),
+		UserID:      pgUUID(userID),
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
+	return member.Role == workspaceRoleOwner || member.Role == workspaceRoleAdmin, nil
+}
+
 func (a roomAccessAdapter) RequireActiveRoomMember(ctx context.Context, roomID, workspaceID, userID string) error {
+	// Always bind the room to the caller's workspace before any role short-circuit.
 	room, err := a.GetRoom(ctx, roomID, workspaceID)
 	if err != nil {
 		return err
+	}
+	ok, err := a.isWorkspaceManager(ctx, workspaceID, userID)
+	if err != nil {
+		return err
+	}
+	if ok {
+		return nil
 	}
 	member, err := a.queries.GetRoomMemberByUserID(ctx, db.GetRoomMemberByUserIDParams{
 		RoomID: room.ID,

@@ -24,10 +24,17 @@ func TestValidateOutboundWebhookURL(t *testing.T) {
 	assert.NoError(t, ValidateOutboundWebhookURL("https://hooks.zapier.com/hooks/catch/123/abc"))
 	assert.NoError(t, ValidateOutboundWebhookURL("http://localhost:3000/hook"))
 	assert.NoError(t, ValidateOutboundWebhookURL("http://127.0.0.1:9999/hook"))
+	assert.NoError(t, ValidateOutboundWebhookURL("https://127.0.0.1:8443/hook"))
 	assert.Error(t, ValidateOutboundWebhookURL(""))
 	assert.Error(t, ValidateOutboundWebhookURL("http://example.com/hook"))
 	assert.Error(t, ValidateOutboundWebhookURL("ftp://example.com/hook"))
 	assert.Error(t, ValidateOutboundWebhookURL("https://user:pass@example.com/hook"))
+	assert.ErrorIs(t, ValidateOutboundWebhookURL("https://10.0.0.8/hook"), ErrInvalidWebhookURL)
+	assert.ErrorIs(t, ValidateOutboundWebhookURL("https://192.168.1.1/hook"), ErrInvalidWebhookURL)
+	assert.ErrorIs(t, ValidateOutboundWebhookURL("https://169.254.169.254/latest/meta-data"), ErrInvalidWebhookURL)
+	assert.ErrorIs(t, ValidateOutboundWebhookURL("https://metadata.google.internal/computeMetadata/v1/"), ErrInvalidWebhookURL)
+	assert.True(t, IsOutboundWebhookURLError(ValidateOutboundWebhookURL("http://example.com/hook")))
+	assert.False(t, IsOutboundWebhookURLError(nil))
 }
 
 func TestNormalizeOutboundEventTypes(t *testing.T) {

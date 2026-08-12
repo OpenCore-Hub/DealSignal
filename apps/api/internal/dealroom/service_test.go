@@ -852,6 +852,9 @@ func TestGetRoomDetailEnriched(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get room detail: %v", err)
 	}
+	if !detail.IsAdmin {
+		t.Fatal("expected room owner IsAdmin=true")
+	}
 	if len(detail.Folders) != 7 {
 		t.Fatalf("expected 7 template folders, got %d", len(detail.Folders))
 	}
@@ -981,6 +984,63 @@ func TestListFoldersForMemberRequiresActiveMembership(t *testing.T) {
 	}
 	if len(folders) == 0 {
 		t.Fatal("expected folders for owner")
+	}
+}
+
+func TestWorkspaceManagerCanAccessRoomWithoutRoomMembership(t *testing.T) {
+	fake := newFakeDB(t)
+	svc := NewService(db.New(fake), nil, testCfg())
+	workspaceOwnerID := uuid.NewString()
+	creatorID := uuid.NewString()
+	outsiderID := uuid.NewString()
+	wsID := uuid.NewString()
+	wsUUID := pgUUID(wsID)
+	fake.workspace = db.Workspace{
+		ID:       wsUUID,
+		TenantID: pgUUID(uuid.NewString()),
+		Name:     "Test Workspace",
+		Slug:     "test-workspace",
+	}
+	fake.workspaceMembers = []db.WorkspaceMember{
+		{WorkspaceID: wsUUID, UserID: pgUUID(workspaceOwnerID), Role: "owner", JoinedAt: nowTs()},
+		{WorkspaceID: wsUUID, UserID: pgUUID(creatorID), Role: "member", JoinedAt: nowTs()},
+	}
+
+	room, err := svc.CreateRoom(context.Background(), creatorID, wsID, CreateRoomRequest{
+		Slug: "member-created-room",
+		Name: "Member Created Room",
+	})
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	roomID := uuid.UUID(room.ID.Bytes).String()
+
+	for _, userID := range []string{workspaceOwnerID, creatorID} {
+		folders, err := svc.ListFoldersForMember(context.Background(), roomID, wsID, userID)
+		if err != nil {
+			t.Fatalf("list folders for %s: %v", userID, err)
+		}
+		if len(folders) == 0 {
+			t.Fatalf("expected folders for %s", userID)
+		}
+	}
+
+	detail, err := svc.GetRoomDetail(context.Background(), roomID, wsID, workspaceOwnerID)
+	if err != nil {
+		t.Fatalf("workspace owner get detail: %v", err)
+	}
+	if !detail.IsAdmin {
+		t.Fatal("expected workspace owner IsAdmin=true")
+	}
+	if len(detail.Members) == 0 {
+		t.Fatal("expected workspace owner to receive admin detail including members")
+	}
+	if len(detail.Folders) == 0 {
+		t.Fatal("expected folders in detail for workspace owner")
+	}
+
+	if _, err := svc.ListFoldersForMember(context.Background(), roomID, wsID, outsiderID); !errors.Is(err, ErrApprovalRequired) {
+		t.Fatalf("expected ErrApprovalRequired for outsider, got %v", err)
 	}
 }
 
@@ -1118,15 +1178,16 @@ func TestSetFolderPermissionNormalizesEmail(t *testing.T) {
 
 // fakeDB is an in-memory DBTX implementation for dealroom service tests.
 type fakeDB struct {
-	t         *testing.T
-	tenant    db.Tenant
-	workspace db.Workspace
-	rooms     []db.DealRoom
-	members   []db.RoomMember
-	documents []db.Document
-	roomDocs  []db.DealRoomDocument
-	requests  []db.RoomAccessRequest
-	perms     []db.RoomMemberFolderPermission
+	t                *testing.T
+	tenant           db.Tenant
+	workspace        db.Workspace
+	workspaceMembers []db.WorkspaceMember
+	rooms            []db.DealRoom
+	members          []db.RoomMember
+	documents        []db.Document
+	roomDocs         []db.DealRoomDocument
+	requests         []db.RoomAccessRequest
+	perms            []db.RoomMemberFolderPermission
 }
 
 func newFakeDB(t *testing.T) *fakeDB {
@@ -1478,6 +1539,16 @@ func (f *fakeDB) QueryRow(ctx context.Context, sql string, args ...interface{}) 
 
 	case strings.Contains(sqlLower, "from workspaces") && strings.Contains(sqlLower, "where id = $1 limit"):
 		return fakeRow{values: []interface{}{f.workspace.ID, f.workspace.TenantID, f.workspace.Name, f.workspace.Slug, f.workspace.BrandColor, f.workspace.CreatedAt, false, false, false, f.workspace.CrmConfig, f.workspace.WebhookSecret}}
+
+	case strings.Contains(sqlLower, "from workspace_members") && strings.Contains(sqlLower, "where workspace_id = $1 and user_id"):
+		wsID := argUUID(args, 0)
+		userID := argUUID(args, 1)
+		for _, m := range f.workspaceMembers {
+			if m.WorkspaceID == wsID && m.UserID == userID {
+				return fakeRow{values: []interface{}{m.WorkspaceID, m.UserID, m.Role, m.JoinedAt}}
+			}
+		}
+		return fakeRow{err: pgx.ErrNoRows}
 
 	case strings.Contains(sqlLower, "insert into deal_rooms"):
 		room := db.DealRoom{

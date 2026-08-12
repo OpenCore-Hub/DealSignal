@@ -1,7 +1,7 @@
 package integration
 
 import (
-	"fmt"
+	"errors"
 	"net/http"
 	"net/url"
 	"strings"
@@ -9,6 +9,8 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/httpx"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/middleware"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/notification"
 )
 
 // Handler exposes integration HTTP endpoints.
@@ -58,8 +60,58 @@ func workspaceID(c *gin.Context) string {
 	return ""
 }
 
+func (h *Handler) requireManager(c *gin.Context) bool {
+	err := h.service.RequireManager(c.Request.Context(), middleware.UserIDFrom(c), workspaceID(c))
+	if err == nil {
+		return true
+	}
+	if errors.Is(err, ErrNotManager) {
+		c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", err)})
+		return false
+	}
+	c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+	return false
+}
+
+func (h *Handler) writeOAuthURLError(c *gin.Context, err error) {
+	if errors.Is(err, ErrOAuthNotConfigured) {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"code": "oauth_not_configured", "message": httpx.SafeMessage("oauth_not_configured", err)})
+		return
+	}
+	c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+}
+
+func (h *Handler) frontendBase() string {
+	if h.service == nil || h.service.cfg == nil {
+		return ""
+	}
+	return strings.TrimRight(h.service.cfg.FrontendURL, "/")
+}
+
+func (h *Handler) redirectOAuth(c *gin.Context, slug, provider, status string) {
+	frontend := h.frontendBase()
+	if frontend == "" {
+		code := http.StatusBadRequest
+		if status == "connected" {
+			code = http.StatusOK
+		}
+		c.JSON(code, gin.H{"code": "oauth_failed", "message": httpx.SafeMessage("oauth_failed", errors.New(status))})
+		return
+	}
+	q := url.Values{}
+	if provider != "" {
+		q.Set("provider", provider)
+	}
+	q.Set("status", status)
+	path := "/settings/integrations"
+	if slug != "" {
+		path = "/" + slug + "/settings/integrations"
+	}
+	c.Redirect(http.StatusFound, frontend+path+"?"+q.Encode())
+}
+
 func (h *Handler) GetSettings(c *gin.Context) {
-	s, err := h.service.GetSettings(c.Request.Context(), workspaceID(c))
+	s, err := h.service.GetSettings(c.Request.Context(), workspaceID(c), middleware.UserIDFrom(c))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
@@ -68,12 +120,15 @@ func (h *Handler) GetSettings(c *gin.Context) {
 }
 
 func (h *Handler) SaveSettings(c *gin.Context) {
+	if !h.requireManager(c) {
+		return
+	}
 	var req saveSettingsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
 		return
 	}
-	s, err := h.service.SaveSettings(c.Request.Context(), workspaceID(c), SaveSettingsRequest(req))
+	s, err := h.service.SaveSettings(c.Request.Context(), workspaceID(c), middleware.UserIDFrom(c), SaveSettingsRequest(req))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
@@ -82,15 +137,21 @@ func (h *Handler) SaveSettings(c *gin.Context) {
 }
 
 func (h *Handler) SlackConnect(c *gin.Context) {
-	url, err := h.service.OAuthURL(c.Request.Context(), workspaceID(c), "slack")
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+	if !h.requireManager(c) {
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"url": url})
+	oauthURL, err := h.service.OAuthURL(c.Request.Context(), workspaceID(c), "slack")
+	if err != nil {
+		h.writeOAuthURLError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"url": oauthURL})
 }
 
 func (h *Handler) SlackDisconnect(c *gin.Context) {
+	if !h.requireManager(c) {
+		return
+	}
 	if err := h.service.Disconnect(c.Request.Context(), workspaceID(c), "slack"); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
@@ -99,15 +160,21 @@ func (h *Handler) SlackDisconnect(c *gin.Context) {
 }
 
 func (h *Handler) HubSpotConnect(c *gin.Context) {
-	url, err := h.service.OAuthURL(c.Request.Context(), workspaceID(c), "hubspot")
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+	if !h.requireManager(c) {
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"url": url})
+	oauthURL, err := h.service.OAuthURL(c.Request.Context(), workspaceID(c), "hubspot")
+	if err != nil {
+		h.writeOAuthURLError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"url": oauthURL})
 }
 
 func (h *Handler) HubSpotDisconnect(c *gin.Context) {
+	if !h.requireManager(c) {
+		return
+	}
 	if err := h.service.Disconnect(c.Request.Context(), workspaceID(c), "hubspot"); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
@@ -125,19 +192,20 @@ func (h *Handler) OAuthCallback(c *gin.Context) {
 	}
 	slug, err := h.service.OAuthCallback(c.Request.Context(), provider, state, code)
 	if err != nil {
+		if slug != "" {
+			h.redirectOAuth(c, slug, provider, "error")
+			return
+		}
 		c.JSON(http.StatusBadRequest, gin.H{"code": "oauth_failed", "message": httpx.SafeMessage("oauth_failed", err)})
 		return
 	}
-
-	redirectURL := fmt.Sprintf("%s/%s/settings/integrations?provider=%s&status=connected",
-		h.service.cfg.FrontendURL,
-		slug,
-		url.QueryEscape(provider),
-	)
-	c.Redirect(http.StatusFound, redirectURL)
+	h.redirectOAuth(c, slug, provider, "connected")
 }
 
 func (h *Handler) HubSpotSync(c *gin.Context) {
+	if !h.requireManager(c) {
+		return
+	}
 	if err := h.service.EnqueueHubSpotSync(c.Request.Context(), workspaceID(c)); err != nil {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"code": "sync_failed", "message": httpx.SafeMessage("sync_failed", err)})
 		return
@@ -164,6 +232,9 @@ func (h *Handler) GetOutboundWebhook(c *gin.Context) {
 }
 
 func (h *Handler) SaveOutboundWebhook(c *gin.Context) {
+	if !h.requireManager(c) {
+		return
+	}
 	var req SaveOutboundWebhookRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
@@ -171,9 +242,8 @@ func (h *Handler) SaveOutboundWebhook(c *gin.Context) {
 	}
 	v, err := h.service.SaveOutboundWebhook(c.Request.Context(), workspaceID(c), req)
 	if err != nil {
-		msg := err.Error()
-		if strings.Contains(msg, "webhook url") {
-			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": msg})
+		if notification.IsOutboundWebhookURLError(err) {
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_webhook_url", "message": httpx.SafeMessage("invalid_webhook_url", err)})
 			return
 		}
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
@@ -183,6 +253,9 @@ func (h *Handler) SaveOutboundWebhook(c *gin.Context) {
 }
 
 func (h *Handler) DeleteOutboundWebhook(c *gin.Context) {
+	if !h.requireManager(c) {
+		return
+	}
 	if err := h.service.DeleteOutboundWebhook(c.Request.Context(), workspaceID(c)); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return

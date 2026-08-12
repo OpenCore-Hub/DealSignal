@@ -204,6 +204,7 @@ var (
 	ErrInvalidAccessRule         = errors.New("invalid access rule")
 	ErrConflictingAccessRule     = errors.New("conflicting access rule")
 	ErrDuplicateName             = errors.New("a link with this name already exists")
+	ErrInvalidCustomDomain       = errors.New("custom domain must be a verified Brand viewer hostname")
 	ErrEmailCodeRateLimited      = errors.New("too many verification code requests, please try again later")
 	ErrAccessCodeContactNotFound = errors.New("access code contact not found")
 	ErrAccessCodeResendNotNeeded = errors.New("access code already delivered; pass force=true to resend")
@@ -473,6 +474,12 @@ func (s *Service) CreateLink(ctx context.Context, userID, workspaceID string, re
 	if requireEmailVerification && !hasDealRoom && len(req.ContactIDs) == 0 {
 		return db.Link{}, fmt.Errorf("%w: at least one contact is required for email verification", ErrInvalidPermission)
 	}
+
+	customDomain, err := s.normalizeLinkCustomDomain(ctx, workspaceID, req.CustomDomain, "")
+	if err != nil {
+		return db.Link{}, err
+	}
+	req.CustomDomain = customDomain
 
 	passwordHash, err := s.hashPasswordIfRequired(req.RequirePassword, req.Password)
 	if err != nil {
@@ -798,7 +805,7 @@ func (s *Service) CreateLink(ctx context.Context, userID, workspaceID string, re
 	// link_contact records are durable. Run asynchronously so SMTP latency does
 	// not block the create-link response. Bounded by a semaphore to avoid
 	// unbounded goroutine creation when links are created with many contacts.
-	linkURL := publicLinkURL(s.viewerBaseURL, token, req.CustomDomain)
+	linkURL := s.shareLinkURL(ctx, workspaceID, token, req.CustomDomain, "")
 	s.sendAccessCodeEmails(ctx, token, emailCodes, req.Name, linkURL)
 	return link, nil
 }
@@ -888,7 +895,16 @@ func (s *Service) UpdateLink(ctx context.Context, linkID, workspaceID string, re
 
 	customDomain := existing.CustomDomain
 	if req.CustomDomain != "" || existing.CustomDomain.Valid {
-		customDomain = pgtype.Text{String: req.CustomDomain, Valid: req.CustomDomain != ""}
+		normalized, normErr := s.normalizeLinkCustomDomain(
+			ctx,
+			workspaceID,
+			req.CustomDomain,
+			existing.CustomDomain.String,
+		)
+		if normErr != nil {
+			return db.Link{}, normErr
+		}
+		customDomain = pgtype.Text{String: normalized, Valid: normalized != ""}
 	}
 
 	tags := existing.Tags
@@ -1205,7 +1221,7 @@ func (s *Service) UpdateLink(ctx context.Context, linkID, workspaceID string, re
 	}
 
 	// Send verification emails after commit for updated contacts.
-	linkURL := publicLinkURL(s.viewerBaseURL, existing.PublicToken, req.CustomDomain)
+	linkURL := s.shareLinkURL(ctx, workspaceID, existing.PublicToken, customDomain.String, "")
 	s.sendAccessCodeEmails(ctx, existing.PublicToken, emailCodes, req.Name, linkURL)
 
 	// Re-fetch to get the updated record.
@@ -2059,11 +2075,8 @@ func (s *Service) InviteViewers(ctx context.Context, userID, workspaceID, linkID
 	}
 
 	// Send invitation emails after commit.
-	linkURL := publicLinkURL(s.viewerBaseURL, link.PublicToken, link.CustomDomain.String)
-	wsID := ""
-	if link.WorkspaceID.Valid {
-		wsID = uuid.UUID(link.WorkspaceID.Bytes).String()
-	}
+	wsID := workspaceIDString(link.WorkspaceID)
+	linkURL := s.shareLinkURL(ctx, wsID, link.PublicToken, link.CustomDomain.String, "")
 	creatorID := ""
 	if link.CreatedBy.Valid {
 		creatorID = uuid.UUID(link.CreatedBy.Bytes).String()
@@ -2740,11 +2753,8 @@ func (s *Service) ApproveAccessRequest(ctx context.Context, workspaceID, linkID,
 		return LinkAccessRequest{}, fmt.Errorf("commit transaction: %w", err)
 	}
 
-	linkURL := publicLinkURL(s.viewerBaseURL, link.PublicToken, link.CustomDomain.String)
-	wsID := ""
-	if link.WorkspaceID.Valid {
-		wsID = uuid.UUID(link.WorkspaceID.Bytes).String()
-	}
+	wsID := workspaceIDString(link.WorkspaceID)
+	linkURL := s.shareLinkURL(ctx, wsID, link.PublicToken, link.CustomDomain.String, "")
 	creatorID := ""
 	if link.CreatedBy.Valid {
 		creatorID = uuid.UUID(link.CreatedBy.Bytes).String()
@@ -3309,7 +3319,7 @@ func (s *Service) Access(ctx context.Context, token string, req AccessRequest) (
 			wsID = uuid.UUID(link.WorkspaceID.Bytes).String()
 		}
 		creatorID := uuid.UUID(link.CreatedBy.Bytes).String()
-		s.sendAccessNotificationEmail(ctx, wsID, creatorID, link.Name.String, emailForRecords, publicLinkURL(s.viewerBaseURL, link.PublicToken, link.CustomDomain.String))
+		s.sendAccessNotificationEmail(ctx, wsID, creatorID, link.Name.String, emailForRecords, s.shareLinkURL(ctx, wsID, link.PublicToken, link.CustomDomain.String, ""))
 	}
 
 	return AccessResult{
@@ -3472,7 +3482,7 @@ func (s *Service) SendEmailVerificationCode(ctx context.Context, token, email, v
 		return ErrEmailCodeRateLimited
 	}
 
-	linkURL := publicLinkURL(viewerBaseURL, link.PublicToken, link.CustomDomain.String)
+	linkURL := s.shareLinkURL(ctx, workspaceIDString(link.WorkspaceID), link.PublicToken, link.CustomDomain.String, viewerBaseURL)
 	if _, err := s.mailer.SendLinkAccessCodeEmail(ctx, email, lc.AccessCode, link.Name.String, linkURL); err != nil {
 		s.markAccessCodeSendStatus(ctx, link.PublicToken, email, "failed", err.Error())
 		return wrapAccessCodeSendErr(err)
@@ -3516,7 +3526,7 @@ func (s *Service) sendDealRoomEmailVerificationCode(ctx context.Context, link db
 		return fmt.Errorf("provision access code: unexpected count %d", len(codes))
 	}
 
-	linkURL := publicLinkURL(viewerBaseURL, link.PublicToken, link.CustomDomain.String)
+	linkURL := s.shareLinkURL(ctx, workspaceIDString(link.WorkspaceID), link.PublicToken, link.CustomDomain.String, viewerBaseURL)
 	if _, err := s.mailer.SendLinkAccessCodeEmail(ctx, email, codes[0].code, link.Name.String, linkURL); err != nil {
 		s.markAccessCodeSendStatus(ctx, link.PublicToken, email, "failed", err.Error())
 		return wrapAccessCodeSendErr(err)
@@ -3604,7 +3614,7 @@ func (s *Service) OwnerResendAccessCode(ctx context.Context, linkID, workspaceID
 	}
 	_ = s.bumpAccessCodeEpoch(link.PublicToken, email)
 
-	linkURL := publicLinkURL(s.viewerBaseURL, link.PublicToken, link.CustomDomain.String)
+	linkURL := s.shareLinkURL(ctx, workspaceIDString(link.WorkspaceID), link.PublicToken, link.CustomDomain.String, "")
 	if _, err := s.mailer.SendLinkAccessCodeEmail(ctx, email, code, link.Name.String, linkURL); err != nil {
 		s.markAccessCodeSendStatus(ctx, link.PublicToken, email, "failed", err.Error())
 		return wrapAccessCodeSendErr(err)
@@ -3680,6 +3690,62 @@ func publicLinkURL(baseURL, token, customDomain string) string {
 		return "/l/" + token
 	}
 	return strings.TrimRight(baseURL, "/") + "/l/" + token
+}
+
+func workspaceIDString(id pgtype.UUID) string {
+	if !id.Valid {
+		return ""
+	}
+	return uuid.UUID(id.Bytes).String()
+}
+
+// ResolvedViewerHost prefers a link-level custom domain, then a verified workspace viewer hostname.
+func (s *Service) ResolvedViewerHost(ctx context.Context, workspaceID, customDomain string) string {
+	if host := strings.TrimSpace(customDomain); host != "" {
+		return host
+	}
+	return s.verifiedWorkspaceViewerHost(ctx, workspaceID)
+}
+
+func (s *Service) verifiedWorkspaceViewerHost(ctx context.Context, workspaceID string) string {
+	if s == nil || s.queries == nil || strings.TrimSpace(workspaceID) == "" {
+		return ""
+	}
+	wsUUID := pgUUID(workspaceID)
+	if !wsUUID.Valid {
+		return ""
+	}
+	row, err := s.queries.GetWorkspaceViewerDomain(ctx, wsUUID)
+	if err != nil || !strings.EqualFold(row.Status, "verified") {
+		return ""
+	}
+	return strings.TrimSpace(row.Hostname)
+}
+
+// normalizeLinkCustomDomain allows empty (platform/workspace default resolution) or the
+// workspace's verified Brand hostname. Legacy non-Brand values may be preserved on update
+// when unchanged so existing links remain editable without forcing a Brand migration.
+func (s *Service) normalizeLinkCustomDomain(ctx context.Context, workspaceID, requested, existing string) (string, error) {
+	host := strings.ToLower(strings.TrimSpace(requested))
+	if host == "" {
+		return "", nil
+	}
+	verified := strings.ToLower(strings.TrimSpace(s.verifiedWorkspaceViewerHost(ctx, workspaceID)))
+	if verified != "" && host == verified {
+		return verified, nil
+	}
+	existingHost := strings.ToLower(strings.TrimSpace(existing))
+	if existingHost != "" && host == existingHost {
+		return existingHost, nil
+	}
+	return "", ErrInvalidCustomDomain
+}
+
+func (s *Service) shareLinkURL(ctx context.Context, workspaceID, token, customDomain, baseURL string) string {
+	if strings.TrimSpace(baseURL) == "" {
+		baseURL = s.viewerBaseURL
+	}
+	return publicLinkURL(baseURL, token, s.ResolvedViewerHost(ctx, workspaceID, customDomain))
 }
 
 type contactWriter interface {
@@ -4853,7 +4919,7 @@ func (s *Service) syncDealRoomAccessCodeEmails(ctx context.Context, link db.Link
 	if err != nil {
 		return err
 	}
-	linkURL := publicLinkURL(s.viewerBaseURL, link.PublicToken, link.CustomDomain.String)
+	linkURL := s.shareLinkURL(ctx, workspaceIDString(link.WorkspaceID), link.PublicToken, link.CustomDomain.String, "")
 	s.sendAccessCodeEmails(ctx, link.PublicToken, emailCodes, link.Name.String, linkURL)
 	return nil
 }

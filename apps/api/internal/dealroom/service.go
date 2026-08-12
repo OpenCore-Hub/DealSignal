@@ -47,6 +47,11 @@ var (
 	ErrAgreementNotAllowedInDealRoom = errors.New("agreement documents cannot be added to a data room")
 )
 
+const (
+	workspaceRoleOwner = "owner"
+	workspaceRoleAdmin = "admin"
+)
+
 // Beginner starts a database transaction.
 type Beginner interface {
 	Begin(context.Context) (pgx.Tx, error)
@@ -195,6 +200,10 @@ type RoomDetail struct {
 	Documents        []FolderDocs
 	Members          []RoomMemberDetail
 	AccessRequests   []db.RoomAccessRequest
+	// IsAdmin is true when the caller may administer the room (workspace
+	// owner/admin or active room owner/admin). Exposed so clients do not infer
+	// admin from members[] presence.
+	IsAdmin bool
 }
 
 // CreateRoom creates a data room in a workspace.
@@ -575,7 +584,7 @@ func (s *Service) GetRoomAnalytics(ctx context.Context, roomID, workspaceID, use
 	if err != nil {
 		return RoomAnalytics{}, err
 	}
-	if err := s.requireActiveRoomMember(ctx, room.ID, userID); err != nil {
+	if err := s.requireActiveRoomMember(ctx, room.WorkspaceID, room.ID, userID); err != nil {
 		return RoomAnalytics{}, err
 	}
 
@@ -685,7 +694,7 @@ func (s *Service) GetRoomDetail(ctx context.Context, roomID, workspaceID, userID
 	if err != nil {
 		return RoomDetail{}, err
 	}
-	if err := s.requireActiveRoomMember(ctx, summary.Room.ID, userID); err != nil {
+	if err := s.requireActiveRoomMember(ctx, summary.Room.WorkspaceID, summary.Room.ID, userID); err != nil {
 		return RoomDetail{}, err
 	}
 
@@ -701,7 +710,9 @@ func (s *Service) GetRoomDetail(ctx context.Context, roomID, workspaceID, userID
 
 	var members []RoomMemberDetail
 	var requests []db.RoomAccessRequest
-	if err := s.requireRoomAdmin(ctx, summary.Room.ID, userID); err == nil {
+	isAdmin := false
+	if err := s.requireRoomAdmin(ctx, summary.Room.WorkspaceID, summary.Room.ID, userID); err == nil {
+		isAdmin = true
 		if rows, err := s.queries.ListRoomMembersWithUser(ctx, summary.Room.ID); err == nil {
 			members = make([]RoomMemberDetail, len(rows))
 			for i, r := range rows {
@@ -738,6 +749,7 @@ func (s *Service) GetRoomDetail(ctx context.Context, roomID, workspaceID, userID
 		Documents:        docs,
 		Members:          members,
 		AccessRequests:   requests,
+		IsAdmin:          isAdmin,
 	}, nil
 }
 
@@ -756,7 +768,7 @@ func (s *Service) AddMember(ctx context.Context, roomID, workspaceID, inviterUse
 	if err != nil {
 		return db.RoomMember{}, err
 	}
-	if err := s.requireRoomAdmin(ctx, room.ID, inviterUserID); err != nil {
+	if err := s.requireRoomAdmin(ctx, room.WorkspaceID, room.ID, inviterUserID); err != nil {
 		return db.RoomMember{}, err
 	}
 
@@ -791,7 +803,7 @@ func (s *Service) ListMembers(ctx context.Context, roomID, workspaceID, userID s
 	if err != nil {
 		return nil, err
 	}
-	if err := s.requireRoomAdmin(ctx, room.ID, userID); err != nil {
+	if err := s.requireRoomAdmin(ctx, room.WorkspaceID, room.ID, userID); err != nil {
 		return nil, err
 	}
 	rows, err := s.queries.ListRoomMembersWithUser(ctx, room.ID)
@@ -825,7 +837,7 @@ func (s *Service) RemoveMember(ctx context.Context, roomID, workspaceID, userID,
 	if err != nil {
 		return err
 	}
-	if err := s.requireRoomAdmin(ctx, room.ID, userID); err != nil {
+	if err := s.requireRoomAdmin(ctx, room.WorkspaceID, room.ID, userID); err != nil {
 		return err
 	}
 	member, err := s.queries.GetRoomMemberByID(ctx, db.GetRoomMemberByIDParams{
@@ -971,7 +983,7 @@ func (s *Service) ApproveAccessRequest(ctx context.Context, requestID, roomID, w
 	if err != nil {
 		return db.RoomAccessRequest{}, err
 	}
-	if err := s.requireRoomAdmin(ctx, room.ID, approverUserID); err != nil {
+	if err := s.requireRoomAdmin(ctx, room.WorkspaceID, room.ID, approverUserID); err != nil {
 		return db.RoomAccessRequest{}, err
 	}
 
@@ -1039,7 +1051,7 @@ func (s *Service) RejectAccessRequest(ctx context.Context, requestID, roomID, wo
 	if err != nil {
 		return db.RoomAccessRequest{}, err
 	}
-	if err := s.requireRoomAdmin(ctx, room.ID, userID); err != nil {
+	if err := s.requireRoomAdmin(ctx, room.WorkspaceID, room.ID, userID); err != nil {
 		return db.RoomAccessRequest{}, err
 	}
 
@@ -1078,7 +1090,7 @@ func (s *Service) ListAccessRequests(ctx context.Context, roomID, workspaceID, u
 	if err != nil {
 		return nil, err
 	}
-	if err := s.requireRoomAdmin(ctx, room.ID, userID); err != nil {
+	if err := s.requireRoomAdmin(ctx, room.WorkspaceID, room.ID, userID); err != nil {
 		return nil, err
 	}
 	return s.queries.ListAccessRequestsByRoom(ctx, room.ID)
@@ -1179,7 +1191,7 @@ func (s *Service) SetFolderPermission(ctx context.Context, roomID, workspaceID, 
 	if err != nil {
 		return db.RoomMemberFolderPermission{}, err
 	}
-	if err := s.requireRoomAdmin(ctx, room.ID, adminUserID); err != nil {
+	if err := s.requireRoomAdmin(ctx, room.WorkspaceID, room.ID, adminUserID); err != nil {
 		return db.RoomMemberFolderPermission{}, err
 	}
 	member, err := s.queries.GetRoomMemberByEmail(ctx, db.GetRoomMemberByEmailParams{
@@ -1248,7 +1260,7 @@ func (s *Service) AddDocument(ctx context.Context, roomID, workspaceID, adminUse
 	if err != nil {
 		return db.DealRoomDocument{}, err
 	}
-	if err := s.requireRoomAdmin(ctx, room.ID, adminUserID); err != nil {
+	if err := s.requireRoomAdmin(ctx, room.WorkspaceID, room.ID, adminUserID); err != nil {
 		return db.DealRoomDocument{}, err
 	}
 	folders, err := s.loadFolders(room)
@@ -1377,7 +1389,7 @@ func (s *Service) RemoveDocument(ctx context.Context, roomID, workspaceID, userI
 	if err != nil {
 		return err
 	}
-	if err := s.requireRoomAdmin(ctx, room.ID, userID); err != nil {
+	if err := s.requireRoomAdmin(ctx, room.WorkspaceID, room.ID, userID); err != nil {
 		return err
 	}
 	id, err := uuid.Parse(documentID)
@@ -1464,7 +1476,7 @@ func (s *Service) MoveDocument(ctx context.Context, roomID, workspaceID, userID,
 	if err != nil {
 		return err
 	}
-	if err := s.requireRoomAdmin(ctx, room.ID, userID); err != nil {
+	if err := s.requireRoomAdmin(ctx, room.WorkspaceID, room.ID, userID); err != nil {
 		return err
 	}
 	folders, err := s.ListFolders(ctx, roomID, workspaceID)
@@ -1518,7 +1530,7 @@ func (s *Service) ReorderDocuments(ctx context.Context, roomID, workspaceID, use
 	if err != nil {
 		return err
 	}
-	if err := s.requireRoomAdmin(ctx, room.ID, userID); err != nil {
+	if err := s.requireRoomAdmin(ctx, room.WorkspaceID, room.ID, userID); err != nil {
 		return err
 	}
 	return s.runInTx(ctx, func(q *db.Queries) error {
@@ -1634,18 +1646,9 @@ func (s *Service) GetRoomDocuments(ctx context.Context, roomID, workspaceID, use
 	if err != nil {
 		return nil, err
 	}
-	member, err := s.queries.GetRoomMemberByUserID(ctx, db.GetRoomMemberByUserIDParams{
-		RoomID: room.ID,
-		UserID: pgUUID(userID),
-	})
+	access, err := s.resolveRoomAccess(ctx, room.WorkspaceID, room.ID, userID)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ErrApprovalRequired
-		}
 		return nil, err
-	}
-	if member.Status != "active" {
-		return nil, ErrApprovalRequired
 	}
 
 	folders, err := s.loadFolders(room)
@@ -1685,9 +1688,14 @@ func (s *Service) GetRoomDocuments(ctx context.Context, roomID, workspaceID, use
 	}
 
 	// Single batch query replaces N per-folder GetFolderPermission calls.
-	permMap, err := s.batchFolderPermissions(ctx, room.ID, member.Email)
-	if err != nil {
-		return nil, err
+	var permMap map[string]string
+	if access.manager {
+		permMap = map[string]string{}
+	} else {
+		permMap, err = s.batchFolderPermissions(ctx, room.ID, access.memberEmail)
+		if err != nil {
+			return nil, err
+		}
 	}
 	// Default all real folders to view when no explicit permission is set.
 	for _, f := range folders {
@@ -1737,7 +1745,7 @@ func (s *Service) ListFoldersForMember(ctx context.Context, roomID, workspaceID,
 	if err != nil {
 		return nil, err
 	}
-	if err := s.requireActiveRoomMember(ctx, room.ID, userID); err != nil {
+	if err := s.requireActiveRoomMember(ctx, room.WorkspaceID, room.ID, userID); err != nil {
 		return nil, err
 	}
 	return s.loadFolders(room)
@@ -1749,7 +1757,7 @@ func (s *Service) CreateFolder(ctx context.Context, roomID, workspaceID, userID,
 	if err != nil {
 		return nil, err
 	}
-	if err := s.requireRoomAdmin(ctx, room.ID, userID); err != nil {
+	if err := s.requireRoomAdmin(ctx, room.WorkspaceID, room.ID, userID); err != nil {
 		return nil, err
 	}
 	name = strings.TrimSpace(name)
@@ -1812,7 +1820,7 @@ func (s *Service) RenameFolder(ctx context.Context, roomID, workspaceID, userID,
 	if err != nil {
 		return nil, err
 	}
-	if err := s.requireRoomAdmin(ctx, room.ID, userID); err != nil {
+	if err := s.requireRoomAdmin(ctx, room.WorkspaceID, room.ID, userID); err != nil {
 		return nil, err
 	}
 	oldPath = normalizeFolderPath(oldPath)
@@ -1933,7 +1941,7 @@ func (s *Service) SetResourceLocks(
 	if err != nil {
 		return err
 	}
-	if err := s.requireRoomAdmin(ctx, room.ID, userID); err != nil {
+	if err := s.requireRoomAdmin(ctx, room.WorkspaceID, room.ID, userID); err != nil {
 		return err
 	}
 	if len(req.FolderPaths) == 0 && len(req.DocumentIDs) == 0 {
@@ -2044,7 +2052,7 @@ func (s *Service) DeleteFolder(ctx context.Context, roomID, workspaceID, userID,
 	if err != nil {
 		return nil, err
 	}
-	if err := s.requireRoomAdmin(ctx, room.ID, userID); err != nil {
+	if err := s.requireRoomAdmin(ctx, room.WorkspaceID, room.ID, userID); err != nil {
 		return nil, err
 	}
 	path = normalizeFolderPath(path)
@@ -2175,7 +2183,57 @@ func (s *Service) saveFoldersWithQueries(ctx context.Context, q *db.Queries, roo
 	})
 }
 
-func (s *Service) requireRoomAdmin(ctx context.Context, roomID pgtype.UUID, userID string) error {
+func (s *Service) isWorkspaceManager(ctx context.Context, workspaceID pgtype.UUID, userID string) (bool, error) {
+	wm, err := s.queries.GetWorkspaceMember(ctx, db.GetWorkspaceMemberParams{
+		WorkspaceID: workspaceID,
+		UserID:      pgUUID(userID),
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
+	return wm.Role == workspaceRoleOwner || wm.Role == workspaceRoleAdmin, nil
+}
+
+// roomAccess is the caller's effective deal-room access after ACL resolution.
+type roomAccess struct {
+	manager     bool
+	memberEmail string
+}
+
+// resolveRoomAccess allows workspace owner/admin without a room_members row, or
+// an active room member. Callers that need folder permissions use memberEmail
+// for non-managers (one membership fetch, no re-query).
+func (s *Service) resolveRoomAccess(ctx context.Context, workspaceID, roomID pgtype.UUID, userID string) (roomAccess, error) {
+	if ok, err := s.isWorkspaceManager(ctx, workspaceID, userID); err != nil {
+		return roomAccess{}, err
+	} else if ok {
+		return roomAccess{manager: true}, nil
+	}
+	member, err := s.queries.GetRoomMemberByUserID(ctx, db.GetRoomMemberByUserIDParams{
+		RoomID: roomID,
+		UserID: pgUUID(userID),
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return roomAccess{}, ErrApprovalRequired
+		}
+		return roomAccess{}, err
+	}
+	if member.Status != "active" {
+		return roomAccess{}, ErrApprovalRequired
+	}
+	return roomAccess{memberEmail: member.Email}, nil
+}
+
+func (s *Service) requireRoomAdmin(ctx context.Context, workspaceID, roomID pgtype.UUID, userID string) error {
+	if ok, err := s.isWorkspaceManager(ctx, workspaceID, userID); err != nil {
+		return err
+	} else if ok {
+		return nil
+	}
 	members, err := s.queries.ListRoomMembers(ctx, roomID)
 	if err != nil {
 		return err
@@ -2189,21 +2247,9 @@ func (s *Service) requireRoomAdmin(ctx context.Context, roomID pgtype.UUID, user
 	return ErrNotRoomAdmin
 }
 
-func (s *Service) requireActiveRoomMember(ctx context.Context, roomID pgtype.UUID, userID string) error {
-	member, err := s.queries.GetRoomMemberByUserID(ctx, db.GetRoomMemberByUserIDParams{
-		RoomID: roomID,
-		UserID: pgUUID(userID),
-	})
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return ErrApprovalRequired
-		}
-		return err
-	}
-	if member.Status != "active" {
-		return ErrApprovalRequired
-	}
-	return nil
+func (s *Service) requireActiveRoomMember(ctx context.Context, workspaceID, roomID pgtype.UUID, userID string) error {
+	_, err := s.resolveRoomAccess(ctx, workspaceID, roomID, userID)
+	return err
 }
 
 func (s *Service) runInTx(ctx context.Context, fn func(*db.Queries) error) error {
