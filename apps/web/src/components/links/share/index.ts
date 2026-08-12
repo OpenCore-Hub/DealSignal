@@ -28,6 +28,8 @@ export {
   validateDraft,
   getPublicUrl,
 } from "./utils";
+export { resolveShareViewerDomains } from "./viewerDomains";
+export type { ShareViewerDomains } from "./viewerDomains";
 export {
   loadNdaPickerSources,
   mapAgreementDocuments,

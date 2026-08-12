@@ -22,6 +22,7 @@ import {
 } from "@/lib/ownerAskInbox";
 import { answerOwnerAskQuestion, ownerAskTurnToVisitorQuestion } from "@/lib/ownerAskTurn";
 import { formatRelativeTime } from "@/lib/formatters";
+import { useWorkspaceAccess } from "@/hooks/useWorkspaceAccess";
 import { cn } from "@/lib/utils";
 import type { DealRoomKnowledgeQueryHit, OwnerAskTurn } from "@/types";
 
@@ -78,6 +79,7 @@ export function OwnerAskInboxCard({
   onOpenCitation,
 }: OwnerAskInboxCardProps) {
   const { t } = useTranslation(i18nNs);
+  const { canWrite } = useWorkspaceAccess();
   const [submitting, setSubmitting] = useState(false);
   const [formalSubmitting, setFormalSubmitting] = useState(false);
   const [formalAnswer, setFormalAnswer] = useState("");
@@ -96,11 +98,11 @@ export function OwnerAskInboxCard({
   };
 
   const aiPayload = turn.ai_payload;
-  const showHostReply = ownerAskTurnNeedsHostReply(turn);
-  const showFormalPublish = ownerAskTurnNeedsFormalPublish(turn);
+  const showHostReply = canWrite && ownerAskTurnNeedsHostReply(turn);
+  const showFormalPublish = canWrite && ownerAskTurnNeedsFormalPublish(turn);
   const showAIPreview = ownerAskTurnHasAIPreview(turn);
-  const canPinFAQ = ownerAskTurnCanPinFAQ(turn);
-  const canUnpinFAQ = ownerAskTurnCanUnpinFAQ(turn);
+  const canPinFAQ = canWrite && ownerAskTurnCanPinFAQ(turn);
+  const canUnpinFAQ = canWrite && ownerAskTurnCanUnpinFAQ(turn);
   const showAiRefusedHint =
     (turn.lane === "ai" && turn.status === "ai_refused") ||
     (turn.lane === "hybrid" &&

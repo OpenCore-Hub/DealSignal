@@ -39,7 +39,7 @@ const BOOL_FIELDS = [
   "watermarkEnabled",
 ] as const;
 
-const EXPIRY_VALUES = [7, 30, 90, "custom"] as const;
+const EXPIRY_VALUES = [7, 15, 30, "custom"] as const;
 const MAX_VIEWS_VALUES = ["unlimited", 10, 50, 100] as const;
 
 const NAMED_PRESETS: PermissionPreset[] = [
@@ -143,7 +143,7 @@ function accessGate(store: StoreResult, req: AccessRequest): GateResult {
 
 interface GuardResult {
   blocked: boolean;
-  reason?: "contactRequired" | "ndaDocumentRequired";
+  reason?: "contactRequired" | "ndaDocumentRequired" | "customExpiresAtRequired" | "customExpiresAtFuture";
 }
 
 function clientGuard(config: PermissionConfig): GuardResult {
@@ -403,17 +403,21 @@ describe("Boolean switch cartesian product → backend storage correctness", () 
 
 describe("Advanced settings Expiry × MaxViews storage", () => {
   it.each(EXPIRY_VALUES)("expiryDays=%s → expiresAt correct", (expiry) => {
+    const futureCustom = new Date();
+    futureCustom.setDate(futureCustom.getDate() + 12);
     const config: PermissionConfig = {
       ...buildConfigFromPreset("customized"),
       expiryDays: expiry,
+      ...(expiry === "custom"
+        ? { _editExpiresAt: futureCustom.toISOString() }
+        : {}),
     };
     const payload = toCreateLinkPayload(["doc-1"], config);
 
-    if (typeof expiry === "number") {
-      expect(payload.expires_at).toBeDefined();
-      expect(() => new Date(payload.expires_at!)).not.toThrow();
-    } else {
-      expect(payload.expires_at).toBeUndefined();
+    expect(payload.expires_at).toBeDefined();
+    expect(() => new Date(payload.expires_at!)).not.toThrow();
+    if (expiry === "custom") {
+      expect(payload.expires_at).toBe(futureCustom.toISOString());
     }
   });
 

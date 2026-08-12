@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useParams } from "react-router";
 import { toast } from "sonner";
 import { Link as LinkIcon, Check } from "@phosphor-icons/react";
 import {
@@ -20,6 +21,7 @@ import type {
   DealRoomFolder,
   DealRoomFolderDocs,
   Link,
+  WorkspaceViewerDomain,
 } from "@/types";
 import { useAsyncData } from "@/hooks/useAsyncData";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
@@ -35,6 +37,7 @@ import {
 import type { DraftLink } from "@/components/links/share";
 import { useNdaPickerSources } from "@/components/links/share/hooks";
 import { resolveNdaDocumentFallback } from "@/components/links/share/ndaPicker";
+import { resolveShareViewerDomains } from "@/components/links/share/viewerDomains";
 import {
   clampDraftToRoomPolicy,
   buildLinkScopedRules,
@@ -70,14 +73,16 @@ interface DialogData {
   folders: DealRoomFolder[];
   documents: DealRoomFolderDocs[];
   policy: DealRoomAccessPolicy | null;
+  viewerDomain: WorkspaceViewerDomain | null;
 }
 
 async function fetchDialogData(roomId: string, linkId?: string): Promise<DialogData> {
-  const [linksRes, docsRes, foldersRes, policyRes] = await Promise.all([
+  const [linksRes, docsRes, foldersRes, policyRes, viewerDomain] = await Promise.all([
     api.getDealRoomLinks(roomId),
     api.getDealRoomDocuments(roomId),
     api.getDealRoomFolders(roomId),
     api.getDealRoomAccessPolicy(roomId),
+    api.getWorkspaceViewerDomain().catch(() => null),
   ]);
   const loadedLinks = linksRes.data;
   const documents = docsRes.data ?? [];
@@ -86,7 +91,15 @@ async function fetchDialogData(roomId: string, linkId?: string): Promise<DialogD
   const policy = policyRes?.data ?? (policyRes as unknown as DealRoomAccessPolicy | null) ?? null;
 
   if (!linkId) {
-    return { links: loadedLinks, selectedLink: null, rules: [], folders, documents, policy };
+    return {
+      links: loadedLinks,
+      selectedLink: null,
+      rules: [],
+      folders,
+      documents,
+      policy,
+      viewerDomain,
+    };
   }
 
   let selectedLink = loadedLinks.find((l) => l.id === linkId) || null;
@@ -106,7 +119,15 @@ async function fetchDialogData(roomId: string, linkId?: string): Promise<DialogD
   }
 
   if (!selectedLink) {
-    return { links: loadedLinks, selectedLink: null, rules: [], folders, documents, policy };
+    return {
+      links: loadedLinks,
+      selectedLink: null,
+      rules: [],
+      folders,
+      documents,
+      policy,
+      viewerDomain,
+    };
   }
 
   const rulesRes = await api.getLinkAccessRules(selectedLink.id);
@@ -118,6 +139,7 @@ async function fetchDialogData(roomId: string, linkId?: string): Promise<DialogD
     folders,
     documents,
     policy,
+    viewerDomain,
   };
 }
 
@@ -146,6 +168,12 @@ function DealRoomShareDialogContent({
 }: DealRoomShareDialogContentProps) {
   const { t } = useTranslation("dealRooms");
   const { t: lt } = useTranslation("linkShare");
+  const { workspaceSlug } = useParams<{ workspaceSlug?: string }>();
+  const shareDomains = useMemo(
+    () => resolveShareViewerDomains(data?.viewerDomain),
+    [data?.viewerDomain],
+  );
+  const brandSettingsHref = workspaceSlug ? `/${workspaceSlug}/settings/brand` : undefined;
   const [draft, setDraft] = useState<DraftLink>(() => {
     if (data?.selectedLink) {
       return hydrateEditDraftFromRoomPolicy(data.selectedLink, data.rules, data.policy);
@@ -420,6 +448,9 @@ function DealRoomShareDialogContent({
               slug={slug}
               highlightedFields={highlightedFields}
               documents={data.documents}
+              availableDomains={shareDomains.availableDomains}
+              pendingHostname={shareDomains.pendingHostname}
+              brandSettingsHref={brandSettingsHref}
             />
             <div className="space-y-4">
               <div className="space-y-1">

@@ -18,6 +18,7 @@ import {
 import {
   SHARE_CONTENT_DOCUMENT_CATEGORY,
   buildEditModeDocumentLists,
+  resolveExpiryDaysFromExpiresAt,
 } from "./pipelineUtils";
 import type { PermissionConfig } from "@/types";
 import { api } from "@/lib/api";
@@ -83,21 +84,9 @@ function BundlePipelineInner() {
         // Reconstruct all contact IDs (multi-contact support).
         const contactIds = link.contactIds ?? [];
 
-        // Compute expiryDays from expiresAt for display/editing in the UI.
-        let expiryDays: number | "custom" = 30;
-        if (link.expiresAt) {
-          const expires = new Date(link.expiresAt);
-          const now = new Date();
-          const diffMs = expires.getTime() - now.getTime();
-          const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
-          if (diffDays > 0) {
-            expiryDays = diffDays;
-          } else {
-            // Link already expired — show minimum value; _editExpiresAt preserves
-            // the original timestamp so the backend still receives the correct date.
-            expiryDays = 1;
-          }
-        }
+        // Snap expiresAt onto 7/15/30 or Custom for the Security select.
+        const { expiryDays, _editExpiresAt: resolvedExpiresAt } =
+          resolveExpiryDaysFromExpiresAt(link.expiresAt);
 
         const securityConfig: Omit<PermissionConfig, "level" | "isCustomized"> = {
           requireEmailVerification: hasEmailVerification,
@@ -121,12 +110,12 @@ function BundlePipelineInner() {
           contactIds,
         };
         const { level, isCustomized: customized } = classifyPresetFromConfig(securityConfig);
-        // Preserve the original expiresAt to avoid round-trip drift when saving.
+        // Prefer the exact stored timestamp so save does not drift ±1 day.
         const config: PermissionConfig = {
           ...securityConfig,
           level,
           isCustomized: customized,
-          _editExpiresAt: link.expiresAt,
+          _editExpiresAt: link.expiresAt ?? resolvedExpiresAt,
         };
 
         // Parse publicToken from shortUrl. The token is the last path segment.

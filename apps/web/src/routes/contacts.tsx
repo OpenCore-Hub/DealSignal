@@ -12,6 +12,7 @@ import { EmptyState } from "@/components/common/EmptyState";
 import { api } from "@/lib/api";
 import { formatDuration, formatRelativeTime } from "@/lib/formatters";
 import { useAsyncData } from "@/hooks/useAsyncData";
+import { useWorkspaceAccess } from "@/hooks/useWorkspaceAccess";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import type { Contact } from "@/types";
@@ -29,6 +30,7 @@ export function ContactsPage() {
 function ContactsPageInner({ workspaceSlug }: { workspaceSlug: string }) {
   const { t, i18n } = useTranslation("contacts");
   const { t: tc } = useTranslation("common");
+  const { canWrite } = useWorkspaceAccess(workspaceSlug);
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -111,11 +113,13 @@ function ContactsPageInner({ workspaceSlug }: { workspaceSlug: string }) {
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-4">
         <PageHeader title={t("page.title")} description={t("page.description")} />
-        <MarketingBatchDialog
-          workspaceSlug={workspaceSlug}
-          contacts={selectedContacts}
-          onSent={clearSelection}
-        />
+        {canWrite ? (
+          <MarketingBatchDialog
+            workspaceSlug={workspaceSlug}
+            contacts={selectedContacts}
+            onSent={clearSelection}
+          />
+        ) : null}
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
@@ -131,7 +135,7 @@ function ContactsPageInner({ workspaceSlug }: { workspaceSlug: string }) {
             className="pl-9"
           />
         </div>
-        {!loading && !error && filtered.length > 0 ? (
+        {!loading && !error && filtered.length > 0 && canWrite ? (
           <div className="flex items-center gap-3">
             <label className="flex items-center gap-2 text-sm text-muted-foreground">
               <Checkbox
@@ -204,18 +208,20 @@ function ContactsPageInner({ workspaceSlug }: { workspaceSlug: string }) {
                 }}
               >
                 <CardContent className="flex items-start gap-3 p-5">
-                  <div
-                    className="pt-0.5"
-                    onClick={(e) => e.stopPropagation()}
-                    onKeyDown={(e) => e.stopPropagation()}
-                  >
-                    <Checkbox
-                      checked={selected}
-                      onCheckedChange={(v) => toggleSelected(contact.id, v)}
-                      aria-label={t("selection.selectContact", { name: contact.name })}
-                      data-testid={`contact-select-${contact.id}`}
-                    />
-                  </div>
+                  {canWrite ? (
+                    <div
+                      className="pt-0.5"
+                      onClick={(e) => e.stopPropagation()}
+                      onKeyDown={(e) => e.stopPropagation()}
+                    >
+                      <Checkbox
+                        checked={selected}
+                        onCheckedChange={(v) => toggleSelected(contact.id, v)}
+                        aria-label={t("selection.selectContact", { name: contact.name })}
+                        data-testid={`contact-select-${contact.id}`}
+                      />
+                    </div>
+                  ) : null}
                   <div className="min-w-0 flex-1">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">

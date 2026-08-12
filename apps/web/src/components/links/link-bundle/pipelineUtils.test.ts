@@ -3,6 +3,7 @@ import {
   buildConfigFromPreset,
   buildEditModeDocumentLists,
   validateBundleSecurityConfig,
+  resolveExpiryDaysFromExpiresAt,
 } from "./pipelineUtils";
 import { PRESET_TEMPLATES } from "../smart-link/levelConfig";
 import type { Document, DocumentSummary, PermissionPreset } from "@/types";
@@ -66,11 +67,11 @@ describe("buildConfigFromPreset", () => {
   it("applies overrides to template values", () => {
     const config = buildConfigFromPreset("public", {
       requireEmailVerification: true,
-      expiryDays: 90,
+      expiryDays: 15,
     });
     expect(config.level).toBe("public");
     expect(config.requireEmailVerification).toBe(true);
-    expect(config.expiryDays).toBe(90);
+    expect(config.expiryDays).toBe(15);
     // Unchanged template values
     expect(config.passwordEnabled).toBe(false);
     expect(config.watermarkEnabled).toBe(true);
@@ -147,6 +148,59 @@ describe("validateBundleSecurityConfig", () => {
       ndaTemplateId: "tpl-1",
     });
     expect(validateBundleSecurityConfig(config)).toEqual({ ok: true });
+  });
+
+  it("blocks custom expiry without datetime", () => {
+    const config = buildConfigFromPreset("public", { expiryDays: "custom" });
+    expect(validateBundleSecurityConfig(config)).toEqual({
+      ok: false,
+      reason: "customExpiresAtRequired",
+    });
+  });
+
+  it("blocks custom expiry in the past", () => {
+    const past = new Date();
+    past.setDate(past.getDate() - 1);
+    const config = buildConfigFromPreset("public", {
+      expiryDays: "custom",
+      _editExpiresAt: past.toISOString(),
+    });
+    expect(validateBundleSecurityConfig(config)).toEqual({
+      ok: false,
+      reason: "customExpiresAtFuture",
+    });
+  });
+
+  it("passes custom expiry in the future", () => {
+    const future = new Date();
+    future.setDate(future.getDate() + 12);
+    const config = buildConfigFromPreset("public", {
+      expiryDays: "custom",
+      _editExpiresAt: future.toISOString(),
+    });
+    expect(validateBundleSecurityConfig(config)).toEqual({ ok: true });
+  });
+});
+
+describe("resolveExpiryDaysFromExpiresAt", () => {
+  it("defaults to 30 when missing", () => {
+    expect(resolveExpiryDaysFromExpiresAt(undefined).expiryDays).toBe(30);
+  });
+
+  it("snaps presets within ±1 day", () => {
+    const now = new Date("2026-08-11T12:00:00.000Z");
+    const in15 = new Date(now);
+    in15.setDate(in15.getDate() + 15);
+    expect(resolveExpiryDaysFromExpiresAt(in15.toISOString(), now).expiryDays).toBe(15);
+  });
+
+  it("uses custom for non-preset day counts", () => {
+    const now = new Date("2026-08-11T12:00:00.000Z");
+    const in12 = new Date(now);
+    in12.setDate(in12.getDate() + 12);
+    const resolved = resolveExpiryDaysFromExpiresAt(in12.toISOString(), now);
+    expect(resolved.expiryDays).toBe("custom");
+    expect(resolved._editExpiresAt).toBe(in12.toISOString());
   });
 });
 

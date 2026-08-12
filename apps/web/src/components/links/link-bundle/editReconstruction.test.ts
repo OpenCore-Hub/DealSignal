@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { Link, PermissionConfig } from "@/types";
+import { resolveExpiryDaysFromExpiresAt } from "./pipelineUtils";
 
 /**
  * Tests for the edit-mode security config reconstruction logic
@@ -10,17 +11,12 @@ import type { Link, PermissionConfig } from "@/types";
  * download/watermark/expiry/maxViews settings.
  */
 
-function reconstructConfig(link: Link): Pick<PermissionConfig, "allowDownload" | "watermarkEnabled" | "expiryDays" | "maxViews"> {
-  let expiryDays: number | "custom" = 30;
-  if (link.expiresAt) {
-    const expires = new Date(link.expiresAt);
-    const now = new Date();
-    const diffMs = expires.getTime() - now.getTime();
-    const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
-    if (diffDays > 0) {
-      expiryDays = diffDays;
-    }
-  }
+function reconstructConfig(
+  link: Link,
+): Pick<PermissionConfig, "allowDownload" | "watermarkEnabled" | "expiryDays" | "maxViews"> & {
+  _editExpiresAt?: string;
+} {
+  const { expiryDays, _editExpiresAt } = resolveExpiryDaysFromExpiresAt(link.expiresAt);
 
   const maxViews: number | "unlimited" =
     typeof link.maxAccessCount === "number" && link.maxAccessCount > 0
@@ -32,6 +28,7 @@ function reconstructConfig(link: Link): Pick<PermissionConfig, "allowDownload" |
     watermarkEnabled: link.watermarkEnabled ?? true,
     expiryDays,
     maxViews,
+    _editExpiresAt: link.expiresAt ?? _editExpiresAt,
   };
 }
 
@@ -82,22 +79,29 @@ describe("edit mode PermissionConfig reconstruction", () => {
       ...baseLink,
       expiresAt: future.toISOString(),
     });
-    expect(typeof config.expiryDays).toBe("number");
-    // Should be ~7 days from now (allow ±1 for rounding)
-    expect([6, 7, 8]).toContain(config.expiryDays as number);
+    expect(config.expiryDays).toBe(7);
   });
 
-  it("computes expiryDays for 90-day expiry", () => {
+  it("snaps 15-day expiry onto the preset", () => {
     const future = new Date();
-    future.setDate(future.getDate() + 90);
+    future.setDate(future.getDate() + 15);
     const config = reconstructConfig({
       ...baseLink,
       expiresAt: future.toISOString(),
     });
-    // Should be ~90 days (±1)
-    const days = config.expiryDays as number;
-    expect(days).toBeGreaterThanOrEqual(89);
-    expect(days).toBeLessThanOrEqual(91);
+    expect(config.expiryDays).toBe(15);
+  });
+
+  it("maps non-preset expiry (e.g. 90 days) to custom", () => {
+    const future = new Date();
+    future.setDate(future.getDate() + 90);
+    const iso = future.toISOString();
+    const config = reconstructConfig({
+      ...baseLink,
+      expiresAt: iso,
+    });
+    expect(config.expiryDays).toBe("custom");
+    expect(config._editExpiresAt).toBe(iso);
   });
 
   it("defaults to 30 days when no expiresAt", () => {
@@ -105,20 +109,21 @@ describe("edit mode PermissionConfig reconstruction", () => {
     expect(config.expiryDays).toBe(30);
   });
 
-  it("keeps 30 days when link has expired", () => {
+  it("uses custom when link has already expired", () => {
     const past = new Date();
     past.setDate(past.getDate() - 10);
+    const iso = past.toISOString();
     const config = reconstructConfig({
       ...baseLink,
-      expiresAt: past.toISOString(),
+      expiresAt: iso,
     });
-    // Expired link: diffDays <= 0, so falls back to 30
-    expect(config.expiryDays).toBe(30);
+    expect(config.expiryDays).toBe("custom");
+    expect(config._editExpiresAt).toBe(iso);
   });
 
   it("maps maxAccessCount to maxViews", () => {
-    const config = reconstructConfig({ ...baseLink, maxAccessCount: 100 });
-    expect(config.maxViews).toBe(100);
+    const config = reconstructConfig({ ...baseLink, maxAccessCount: 50 });
+    expect(config.maxViews).toBe(50);
   });
 
   it("maps maxAccessCount=10 to maxViews", () => {
@@ -126,12 +131,12 @@ describe("edit mode PermissionConfig reconstruction", () => {
     expect(config.maxViews).toBe(10);
   });
 
-  it("defaults to unlimited when maxAccessCount is undefined", () => {
+  it("maps missing maxAccessCount to unlimited", () => {
     const config = reconstructConfig({ ...baseLink, maxAccessCount: undefined });
     expect(config.maxViews).toBe("unlimited");
   });
 
-  it("treats maxAccessCount=0 as unlimited", () => {
+  it("maps zero maxAccessCount to unlimited", () => {
     const config = reconstructConfig({ ...baseLink, maxAccessCount: 0 });
     expect(config.maxViews).toBe("unlimited");
   });
@@ -139,12 +144,13 @@ describe("edit mode PermissionConfig reconstruction", () => {
   it("reconstructs a full confidential bundle config", () => {
     const future = new Date();
     future.setDate(future.getDate() + 45);
+    const iso = future.toISOString();
     const config = reconstructConfig({
       ...baseLink,
       downloadEnabled: false,
       watermarkEnabled: true,
       maxAccessCount: 50,
-      expiresAt: future.toISOString(),
+      expiresAt: iso,
       isBundle: true,
       documents: [
         { id: "doc-1", title: "A", sourceType: "pdf", pageCount: 10, status: "ready" },
@@ -154,6 +160,7 @@ describe("edit mode PermissionConfig reconstruction", () => {
     expect(config.allowDownload).toBe(false);
     expect(config.watermarkEnabled).toBe(true);
     expect(config.maxViews).toBe(50);
-    expect(typeof config.expiryDays).toBe("number");
+    expect(config.expiryDays).toBe("custom");
+    expect(config._editExpiresAt).toBe(iso);
   });
 });

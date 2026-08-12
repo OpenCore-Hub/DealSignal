@@ -11,6 +11,7 @@ import {
 } from "@phosphor-icons/react";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -21,6 +22,7 @@ import {
 import { cn } from "@/lib/utils";
 import type { PermissionConfig } from "@/types";
 import { useNdaPickerSources } from "@/components/links/share/hooks";
+import { toDateTimeLocal, toRFC3339 } from "@/components/links/share/utils";
 import { useSecurityOptions } from "../smart-link/useSecurityOptions";
 
 interface NdaOption {
@@ -307,11 +309,21 @@ export function BundleSecurityOptions({
               </label>
               <Select
                 value={String(config.expiryDays)}
-                onValueChange={(value) =>
+                onValueChange={(value) => {
+                  if (value === "custom") {
+                    const d = new Date();
+                    d.setDate(d.getDate() + 7);
+                    update({
+                      expiryDays: "custom",
+                      _editExpiresAt: config._editExpiresAt ?? d.toISOString(),
+                    });
+                    return;
+                  }
                   update({
-                    expiryDays: value === "custom" ? "custom" : Number(value),
-                  })
-                }
+                    expiryDays: Number(value),
+                    _editExpiresAt: undefined,
+                  });
+                }}
               >
                 <SelectTrigger
                   data-testid="security-expiry-select"
@@ -321,13 +333,30 @@ export function BundleSecurityOptions({
                 </SelectTrigger>
                 <SelectContent side="bottom" alignItemWithTrigger={false}>
                   <SelectItem value="7">{t("creator.expiryDays.7")}</SelectItem>
+                  <SelectItem value="15">{t("creator.expiryDays.15")}</SelectItem>
                   <SelectItem value="30">{t("creator.expiryDays.30")}</SelectItem>
-                  <SelectItem value="90">{t("creator.expiryDays.90")}</SelectItem>
                   <SelectItem value="custom">
                     {t("creator.expiryDays.custom")}
                   </SelectItem>
                 </SelectContent>
               </Select>
+              {config.expiryDays === "custom" ? (
+                <Input
+                  type="datetime-local"
+                  data-testid="security-expiry-custom-datetime"
+                  aria-label={t("creator.customExpiresAt")}
+                  className="h-9 border-border/60 bg-transparent shadow-none"
+                  value={toDateTimeLocal(config._editExpiresAt)}
+                  min={toDateTimeLocal(new Date().toISOString())}
+                  onChange={(e) => {
+                    const rfc = toRFC3339(e.target.value);
+                    update({
+                      expiryDays: "custom",
+                      _editExpiresAt: rfc || undefined,
+                    });
+                  }}
+                />
+              ) : null}
             </div>
             <div className="space-y-1.5">
               <label className="flex items-center gap-1.5 text-[12px] font-medium text-muted-foreground">

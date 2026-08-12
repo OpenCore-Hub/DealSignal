@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { MemoryRouter } from "react-router";
 import { I18nextProvider, initReactI18next } from "react-i18next";
 import i18n from "i18next";
 import { Button } from "@/components/ui/button";
@@ -28,7 +29,11 @@ i18nInstance.use(initReactI18next).init({
 });
 
 function Wrapper({ children }: { children: React.ReactNode }) {
-  return <I18nextProvider i18n={i18nInstance}>{children}</I18nextProvider>;
+  return (
+    <MemoryRouter initialEntries={["/acme/links"]}>
+      <I18nextProvider i18n={i18nInstance}>{children}</I18nextProvider>
+    </MemoryRouter>
+  );
 }
 
 vi.mock("@/lib/api", () => ({
@@ -45,6 +50,7 @@ vi.mock("@/lib/api", () => ({
     updateFileRequestStatus: vi.fn(),
     listNDATemplates: vi.fn(() => Promise.resolve({ data: [] })),
     getDocuments: vi.fn(() => Promise.resolve({ data: [] })),
+    getWorkspaceViewerDomain: vi.fn(),
   },
 }));
 
@@ -82,6 +88,12 @@ describe("LinkShareDialog", () => {
     vi.mocked(api.getAccessLogs).mockResolvedValue({ data: [] });
     vi.mocked(api.listLinkAsk).mockResolvedValue({ data: [] });
     vi.mocked(api.listLinkFileRequests).mockResolvedValue({ data: [] });
+    vi.mocked(api.getWorkspaceViewerDomain).mockResolvedValue({
+      hostname: "",
+      status: "",
+      cnameHost: "",
+      cnameTarget: "",
+    });
   });
 
   afterEach(() => {

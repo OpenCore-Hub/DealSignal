@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router";
 import { I18nextProvider, initReactI18next } from "react-i18next";
 import i18n from "i18next";
 import { ShareTab } from "./ShareTab";
@@ -20,7 +21,11 @@ i18nInstance.use(initReactI18next).init({
 });
 
 function Wrapper({ children }: { children: React.ReactNode }) {
-  return <I18nextProvider i18n={i18nInstance}>{children}</I18nextProvider>;
+  return (
+    <MemoryRouter>
+      <I18nextProvider i18n={i18nInstance}>{children}</I18nextProvider>
+    </MemoryRouter>
+  );
 }
 
 function renderShareTab(
@@ -28,6 +33,9 @@ function renderShareTab(
   options: {
     link?: Parameters<typeof ShareTab>[0]["link"];
     slug?: string;
+    availableDomains?: string[];
+    pendingHostname?: string;
+    brandSettingsHref?: string;
   } = {}
 ) {
   const updateDraft = vi.fn();
@@ -42,6 +50,9 @@ function renderShareTab(
         onEditAccess={onEditAccess}
         errors={{}}
         slug={options.slug}
+        availableDomains={options.availableDomains}
+        pendingHostname={options.pendingHostname}
+        brandSettingsHref={options.brandSettingsHref}
       />
     </Wrapper>
   );
@@ -106,19 +117,68 @@ describe("ShareTab", () => {
     expect(updateDraft).toHaveBeenCalledWith({ expiresAt: "" });
   });
 
-  it("updates custom domain", async () => {
-    const { updateDraft } = renderShareTab(baseDraft);
+  it("lists verified Brand domains in the custom domain dropdown", async () => {
+    renderShareTab(baseDraft, { availableDomains: ["invest.example.com"] });
     const trigger = screen.getByRole("combobox", { name: /custom domain/i });
     fireEvent.pointerDown(trigger);
     fireEvent.click(trigger);
-    const customOption = await waitFor(() => screen.getByRole("option", { name: /custom domain\.\.\./i }));
+    expect(
+      await waitFor(() => screen.getByRole("option", { name: "invest.example.com" })),
+    ).toBeInTheDocument();
+  });
+
+  it("selects a verified Brand domain from the dropdown", async () => {
+    const { updateDraft } = renderShareTab(baseDraft, {
+      availableDomains: ["invest.example.com"],
+    });
+    const trigger = screen.getByRole("combobox", { name: /custom domain/i });
+    fireEvent.pointerDown(trigger);
+    fireEvent.click(trigger);
+    const option = await waitFor(() =>
+      screen.getByRole("option", { name: "invest.example.com" }),
+    );
+    fireEvent.pointerDown(option);
+    fireEvent.click(option);
+    expect(updateDraft).toHaveBeenCalledWith({ customDomain: "invest.example.com" });
+  });
+
+  it("routes Custom domain… to Brand settings instead of free-form input", async () => {
+    renderShareTab(baseDraft, {
+      brandSettingsHref: "/acme/settings/brand",
+    });
+    const trigger = screen.getByRole("combobox", { name: /custom domain/i });
+    fireEvent.pointerDown(trigger);
+    fireEvent.click(trigger);
+    const customOption = await waitFor(() =>
+      screen.getByRole("option", { name: /custom domain\.\.\./i }),
+    );
     fireEvent.pointerDown(customOption);
     fireEvent.click(customOption);
 
-    fireEvent.change(screen.getByPlaceholderText(/yourdomain\.com/i), {
-      target: { value: "invest.acme.capital" },
+    expect(screen.getByTestId("share-custom-domain-brand-cta")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /open brand settings/i })).toHaveAttribute(
+      "href",
+      "/acme/settings/brand",
+    );
+    expect(screen.queryByPlaceholderText(/yourdomain\.com/i)).not.toBeInTheDocument();
+  });
+
+  it("shows pending Brand hostname hint when DNS is not verified yet", () => {
+    renderShareTab(baseDraft, { pendingHostname: "invest.example.com" });
+    expect(screen.getByTestId("share-custom-domain-pending")).toHaveTextContent(
+      "invest.example.com",
+    );
+  });
+
+  it("keeps free-form input for legacy per-link custom domains", () => {
+    const { updateDraft } = renderShareTab({
+      ...baseDraft,
+      customDomain: "legacy.example.com",
     });
-    expect(updateDraft).toHaveBeenCalledWith({ customDomain: "invest.acme.capital" });
+    fireEvent.change(screen.getByPlaceholderText(/yourdomain\.com/i), {
+      target: { value: "legacy-updated.example.com" },
+    });
+    expect(updateDraft).toHaveBeenCalledWith({ customDomain: "legacy-updated.example.com" });
   });
 
   it("toggles notify on access", () => {
@@ -141,19 +201,11 @@ describe("ShareTab", () => {
     openSpy.mockRestore();
   });
 
-  it("shows custom domain invalid message for malformed domain", async () => {
-    const { updateDraft } = renderShareTab(baseDraft);
-    const trigger = screen.getByRole("combobox", { name: /custom domain/i });
-    fireEvent.pointerDown(trigger);
-    fireEvent.click(trigger);
-    const customOption = await waitFor(() => screen.getByRole("option", { name: /custom domain\.\.\./i }));
-    fireEvent.pointerDown(customOption);
-    fireEvent.click(customOption);
-
-    fireEvent.change(screen.getByPlaceholderText(/yourdomain\.com/i), {
-      target: { value: "not a valid domain" },
+  it("shows custom domain invalid message for malformed legacy domains", () => {
+    renderShareTab({
+      ...baseDraft,
+      customDomain: "not a valid domain",
     });
-    expect(updateDraft).toHaveBeenCalledWith({ customDomain: "not a valid domain" });
     expect(screen.getByText(/please enter a valid domain/i)).toBeInTheDocument();
   });
 

@@ -27,6 +27,7 @@ import {
   type RadarWorkItem,
 } from "@/lib/radarQueue";
 import { RadarRow, type SnoozeHours } from "./RadarRow";
+import { useWorkspaceAccess } from "@/hooks/useWorkspaceAccess";
 import type { ActionStatus } from "@/types";
 
 interface RadarQueueProps {
@@ -52,6 +53,7 @@ export function RadarQueue({
   onStatusChange,
 }: RadarQueueProps) {
   const { t } = useTranslation("dashboard");
+  const { canWrite } = useWorkspaceAccess(workspaceSlug);
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const filter = parseRadarFilter(searchParams.get("filter"));
@@ -147,6 +149,7 @@ export function RadarQueue({
         if (prev) onSelect(prev);
         return;
       }
+      if (!canWrite) return;
       if (key === "e" || key === "d") {
         event.preventDefault();
         onStatusChange(
@@ -164,7 +167,7 @@ export function RadarQueue({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [ordered, selectedId, onSelect, onStatusChange]);
+  }, [canWrite, ordered, selectedId, onSelect, onStatusChange]);
 
   return (
     <section data-testid="radar-queue" className="min-w-0">
@@ -299,12 +302,14 @@ export function RadarQueue({
                 <ChartLine size={16} />
                 {t("radar.analyzeInInsights")}
               </Button>
-              <Button
-                variant="ghost"
-                onClick={() => navigate(`/${workspaceSlug}/deal-rooms/new`)}
-              >
-                {t("empty.actions.createDealRoom")}
-              </Button>
+              {canWrite ? (
+                <Button
+                  variant="ghost"
+                  onClick={() => navigate(`/${workspaceSlug}/deal-rooms/new`)}
+                >
+                  {t("empty.actions.createDealRoom")}
+                </Button>
+              ) : null}
             </div>
           </div>
         ) : (
@@ -323,11 +328,13 @@ export function RadarQueue({
             }
             action={
               filter === "all"
-                ? {
-                    label: t("empty.actions.createDealRoom"),
-                    onClick: () =>
-                      navigate(`/${workspaceSlug}/deal-rooms/new`),
-                  }
+                ? canWrite
+                  ? {
+                      label: t("empty.actions.createDealRoom"),
+                      onClick: () =>
+                        navigate(`/${workspaceSlug}/deal-rooms/new`),
+                    }
+                  : undefined
                 : {
                     label: t("radar.filters.all"),
                     onClick: () => setFilter("all"),
@@ -359,7 +366,7 @@ export function RadarQueue({
                 onPrimary={onPrimary}
                 onSelect={onSelect}
                 onEvidence={onSelect}
-                onStatusChange={onStatusChange}
+                onStatusChange={canWrite ? onStatusChange : undefined}
               />
             </div>
           ) : null}
@@ -412,7 +419,7 @@ export function RadarQueue({
                           onPrimary={onPrimary}
                           onSelect={onSelect}
                           onEvidence={onSelect}
-                          onStatusChange={onStatusChange}
+                          onStatusChange={canWrite ? onStatusChange : undefined}
                         />
                       ))}
                     </div>

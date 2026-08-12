@@ -11,6 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/common/EmptyState";
+import { useWorkspaceAccess } from "@/hooks/useWorkspaceAccess";
 import { formatRelativeTime } from "@/lib/formatters";
 import type { DealRoom } from "@/types";
 
@@ -25,6 +26,7 @@ export function ActiveRoomsSection({
 }: ActiveRoomsSectionProps) {
   const { t } = useTranslation("dashboard");
   const { t: tCommon } = useTranslation("common");
+  const { canWrite } = useWorkspaceAccess(workspaceSlug);
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -82,10 +84,14 @@ export function ActiveRoomsSection({
             icon={<FolderOpen size={32} />}
             title={t("empty.rooms.title")}
             description={t("empty.rooms.description")}
-            action={{
-              label: t("empty.rooms.action"),
-              onClick: () => navigate(`/${workspaceSlug}/deal-rooms/new`),
-            }}
+            action={
+              canWrite
+                ? {
+                    label: t("empty.rooms.action"),
+                    onClick: () => navigate(`/${workspaceSlug}/deal-rooms/new`),
+                  }
+                : undefined
+            }
           />
         ) : (
           <>

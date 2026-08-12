@@ -43,6 +43,7 @@ import {
   UploadCancelledError,
   useDocumentUploadConflict,
 } from "@/hooks/useDocumentUploadConflict";
+import { useWorkspaceAccess } from "@/hooks/useWorkspaceAccess";
 import type { DealRoomFolderDocs, Link } from "@/types";
 
 interface UploadProgressItem {
@@ -75,6 +76,7 @@ export function DealRoomDetailPage() {
   const { t: td } = useTranslation("documents");
   const { uploadDocument, conflictDialog } = useDocumentUploadConflict();
   const { workspaceSlug, roomId } = useParams<{ workspaceSlug: string; roomId: string }>();
+  const { canWrite } = useWorkspaceAccess(workspaceSlug);
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams] = useSearchParams();
@@ -154,6 +156,9 @@ export function DealRoomDetailPage() {
   const { data, loading, error, refetch } = useAsyncData(fetchRoom, [roomId]);
 
   const room = data?.room ?? null;
+
+  // Folder-tree admin chrome: workspace write + server-resolved room admin.
+  const isRoomAdmin = Boolean(canWrite && room?.isAdmin);
 
   useEffect(() => {
     if (!roomId) {
@@ -585,7 +590,7 @@ export function DealRoomDetailPage() {
                     folders={room.folders ?? []}
                     folderDocs={room.documents ?? []}
                     roomDocuments={allRoomDocuments}
-                    isAdmin={true}
+                    isAdmin={isRoomAdmin}
                     onFolderCreate={handleFolderCreate}
                     onFolderRename={handleFolderRename}
                     onFolderDelete={handleFolderDelete}

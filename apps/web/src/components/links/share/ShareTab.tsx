@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Link as RouterLink } from "react-router";
 import { Eye } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -34,8 +35,12 @@ interface ShareTabProps {
   errors: Record<string, string>;
   slug?: string;
   highlightedFields?: string[];
-  /** Workspace-configured custom domains available for this link. */
+  /** Verified Brand custom domains available for this link. */
   availableDomains?: string[];
+  /** Pending Brand hostname awaiting DNS verification (not selectable yet). */
+  pendingHostname?: string;
+  /** Settings → Brand path for configuring viewer domains (same flow as Brand page). */
+  brandSettingsHref?: string;
   /** Deal-room documents grouped by folder, used for document-scope counting in the summary. */
   documents?: DealRoomFolderDocs[];
 }
@@ -51,20 +56,24 @@ export function ShareTab({
   slug,
   highlightedFields = [],
   availableDomains = [],
+  pendingHostname = "",
+  brandSettingsHref,
   documents = [],
 }: ShareTabProps) {
   const { t } = useTranslation("linkShare");
 
   const publicUrl = getPublicUrl(link);
-  const isCustomValue =
+  // Legacy per-link freeform domains (pre-Brand) stay editable; new Custom… opens Brand.
+  const isLegacyCustomValue =
     draft.customDomain !== "" && !availableDomains.includes(draft.customDomain);
-  const [customDomainMode, setCustomDomainMode] = useState(isCustomValue);
+  const [customDomainMode, setCustomDomainMode] = useState(isLegacyCustomValue);
   const [customDomainInput, setCustomDomainInput] = useState(
-    isCustomValue ? draft.customDomain : ""
+    isLegacyCustomValue ? draft.customDomain : ""
   );
   const selectedDomainValue = customDomainMode
     ? CUSTOM_DOMAIN_VALUE
     : draft.customDomain;
+  const showLegacyCustomInput = customDomainMode && isLegacyCustomValue;
 
   const expiresEnabled = Boolean(draft.expiresAt);
 
@@ -77,7 +86,9 @@ export function ShareTab({
   };
 
   const customDomainInvalid =
-    customDomainMode && customDomainInput.length > 0 && !isValidCustomDomain(customDomainInput);
+    showLegacyCustomInput &&
+    customDomainInput.length > 0 &&
+    !isValidCustomDomain(customDomainInput);
 
   return (
     <div className="space-y-6 py-2">
@@ -182,7 +193,8 @@ export function ShareTab({
           onValueChange={(value) => {
             if (value === CUSTOM_DOMAIN_VALUE) {
               setCustomDomainMode(true);
-              updateDraft({ customDomain: customDomainInput });
+              // New custom domains are configured in Brand (DNS + verify), not free-typed here.
+              updateDraft({ customDomain: isLegacyCustomValue ? customDomainInput : "" });
             } else {
               setCustomDomainMode(false);
               updateDraft({ customDomain: value ?? "" });
@@ -202,7 +214,23 @@ export function ShareTab({
             <SelectItem value={CUSTOM_DOMAIN_VALUE}>{t("share.customDomainCustom")}</SelectItem>
           </SelectContent>
         </Select>
-        {selectedDomainValue === CUSTOM_DOMAIN_VALUE && (
+        {selectedDomainValue === CUSTOM_DOMAIN_VALUE && !showLegacyCustomInput && (
+          <div
+            className="rounded-lg border border-border/80 bg-muted/30 px-3 py-2.5 text-sm"
+            data-testid="share-custom-domain-brand-cta"
+          >
+            <p className="text-muted-foreground">{t("share.customDomainConfigureHint")}</p>
+            {brandSettingsHref ? (
+              <RouterLink
+                to={brandSettingsHref}
+                className="mt-1 inline-flex text-sm font-medium text-primary underline-offset-4 hover:underline"
+              >
+                {t("share.customDomainConfigureCta")}
+              </RouterLink>
+            ) : null}
+          </div>
+        )}
+        {showLegacyCustomInput && (
           <Input
             value={customDomainInput}
             onChange={(e) => {
@@ -212,6 +240,11 @@ export function ShareTab({
             placeholder={t("share.customDomainPlaceholder")}
           />
         )}
+        {pendingHostname ? (
+          <p className="text-xs text-muted-foreground" data-testid="share-custom-domain-pending">
+            {t("share.customDomainPendingHint", { host: pendingHostname })}
+          </p>
+        ) : null}
         {errors.customDomain && <p className="text-xs text-destructive">{errors.customDomain}</p>}
         {customDomainInvalid && !errors.customDomain && (
           <p className="text-xs text-destructive">{t("share.customDomainInvalid")}</p>

@@ -84,10 +84,13 @@ async function initI18n() {
             expiryPlaceholder: "Expiration",
             expiryDays: {
               "7": "7 days",
+              "15": "15 days",
               "30": "30 days",
-              "90": "90 days",
               custom: "Custom",
             },
+            customExpiresAt: "Custom expiration",
+            customExpiresAtRequired: "Choose a custom expiration date",
+            customExpiresAtFuture: "Expiration must be in the future",
             maxViews: "Max views",
             maxViewsPlaceholder: "Max views",
             maxViewsOptions: {

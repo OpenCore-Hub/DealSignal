@@ -11,6 +11,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { formatRelativeTime } from "@/lib/formatters";
+import { useWorkspaceAccess } from "@/hooks/useWorkspaceAccess";
 import { cn } from "@/lib/utils";
 import type { LinkAccessRequest } from "@/types";
 
@@ -45,6 +46,7 @@ export function AccessRequestsInbox({
   onReject,
 }: AccessRequestsInboxProps) {
   const { t } = useTranslation("linkShare");
+  const { canWrite } = useWorkspaceAccess();
   const focusRef = useRef<HTMLDivElement | null>(null);
   const focusRequestId = useMemo(() => {
     if (!focusLinkId) return null;
@@ -142,27 +144,29 @@ export function AccessRequestsInbox({
                   {formatRelativeTime(request.created_at)}
                 </p>
               </div>
-              <div className="flex shrink-0 gap-2">
-                <Button
-                  size="sm"
-                  className="gap-1"
-                  disabled={busyId === request.id}
-                  onClick={() => onApprove(request)}
-                >
-                  <Check size={14} />
-                  {t("accessRequests.approve")}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="gap-1"
-                  disabled={busyId === request.id}
-                  onClick={() => onReject(request)}
-                >
-                  <X size={14} />
-                  {t("accessRequests.reject")}
-                </Button>
-              </div>
+              {canWrite ? (
+                <div className="flex shrink-0 gap-2">
+                  <Button
+                    size="sm"
+                    className="gap-1"
+                    disabled={busyId === request.id}
+                    onClick={() => onApprove(request)}
+                  >
+                    <Check size={14} />
+                    {t("accessRequests.approve")}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-1"
+                    disabled={busyId === request.id}
+                    onClick={() => onReject(request)}
+                  >
+                    <X size={14} />
+                    {t("accessRequests.reject")}
+                  </Button>
+                </div>
+              ) : null}
             </div>
           );
         })}

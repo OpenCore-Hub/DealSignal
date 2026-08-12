@@ -21,11 +21,14 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import type { WorkspaceSettings } from "@/types";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useWorkspaceAccess } from "@/hooks/useWorkspaceAccess";
 
 interface NavItem {
   to: string;
   labelKey: string;
   icon: typeof ChartPie;
+  /** When true, only owner/admin see this item. */
+  manageOnly?: boolean;
 }
 
 interface NavGroup {
@@ -55,7 +58,7 @@ const navGroups: NavGroup[] = [
   },
   {
     labelKey: "sidebar.groups.admin",
-    items: [{ to: "settings", labelKey: "sidebar.nav.settings", icon: Gear }],
+    items: [{ to: "settings", labelKey: "sidebar.nav.settings", icon: Gear, manageOnly: true }],
   },
 ];
 
@@ -66,6 +69,7 @@ export function Sidebar() {
   const { sidebarOpen, toggleSidebar, setSidebarOpen } = useUIStore();
   const isMobile = useMediaQuery("(max-width: 767px)");
   const reducedMotion = useReducedMotion();
+  const { canManage } = useWorkspaceAccess(workspaceSlug);
   const [settings, setSettings] = useState<WorkspaceSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const navRef = useRef<HTMLElement>(null);
@@ -205,7 +209,13 @@ export function Sidebar() {
           aria-label={t("sidebar.mainNavigation")}
         >
           <div className="space-y-7">
-            {navGroups.map((group, groupIndex) => (
+            {navGroups.map((group, groupIndex) => {
+              const visibleItems = group.items.filter((item) => {
+                if (item.manageOnly) return canManage;
+                return true;
+              });
+              if (visibleItems.length === 0) return null;
+              return (
               <div key={group.labelKey}>
                 <div
                   className={cn(
@@ -230,7 +240,7 @@ export function Sidebar() {
                 ) : null}
 
                 <ul className="space-y-0.5">
-                  {group.items.map((item) => {
+                  {visibleItems.map((item) => {
                     const Icon = item.icon;
                     const stagger = itemIndex++;
                     // Create/edit/detail under /links stay highlighted on Document Library.
@@ -352,7 +362,8 @@ export function Sidebar() {
                   })}
                 </ul>
               </div>
-            ))}
+              );
+            })}
           </div>
         </nav>
 

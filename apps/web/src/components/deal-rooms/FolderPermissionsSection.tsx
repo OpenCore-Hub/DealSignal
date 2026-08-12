@@ -40,6 +40,7 @@ import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { copyToClipboard } from "@/lib/clipboard";
 import { useAsyncData } from "@/hooks/useAsyncData";
+import { useWorkspaceAccess } from "@/hooks/useWorkspaceAccess";
 import { DealRoomShareDialog } from "./DealRoomShareDialog";
 import { SendVerificationCodeDialog } from "./SendVerificationCodeDialog";
 import { LinkActivityDialog } from "@/components/links/share";
@@ -82,6 +83,7 @@ export function FolderPermissionsSection({
   onManageAccess,
 }: FolderPermissionsSectionProps) {
   const { t } = useTranslation("dealRooms");
+  const { canWrite } = useWorkspaceAccess();
   const emptyCell = t("common:emDash");
   const [page, setPage] = useState(1);
   // null = default newest-first load; first header click locks to desc, then toggles.
@@ -319,9 +321,11 @@ export function FolderPermissionsSection({
           <div className="flex flex-col items-center justify-center rounded-xl bg-rose-50/40 px-6 py-16 text-center dark:bg-rose-950/15">
             <LinkIcon size={40} className="mb-3 text-muted-foreground" />
             <p className="text-body text-muted-foreground">{t("permissions.links.emptyTitle")}</p>
-            <Button className="mt-4" onClick={handleCreateLink}>
-              {t("permissions.links.createLink")}
-            </Button>
+            {canWrite ? (
+              <Button className="mt-4" onClick={handleCreateLink}>
+                {t("permissions.links.createLink")}
+              </Button>
+            ) : null}
           </div>
         </div>
       ) : (
@@ -346,18 +350,22 @@ export function FolderPermissionsSection({
                 maxLength={MAX_SEARCH_LEN}
               />
             </div>
-            <Button onClick={handleCreateLink} data-testid="deal-room-create-new-link">
-              {t("permissions.links.createNewLink")}
-            </Button>
-            <Button
-              variant="outline"
-              disabled={selectedIds.size === 0 || bulkDeleteLoading}
-              onClick={() => setBulkDeleteOpen(true)}
-              data-testid="deal-room-bulk-delete-links"
-            >
-              <Trash size={14} className="mr-1.5" />
-              {t("permissions.links.bulkDelete")}
-            </Button>
+            {canWrite ? (
+              <Button onClick={handleCreateLink} data-testid="deal-room-create-new-link">
+                {t("permissions.links.createNewLink")}
+              </Button>
+            ) : null}
+            {canWrite ? (
+              <Button
+                variant="outline"
+                disabled={selectedIds.size === 0 || bulkDeleteLoading}
+                onClick={() => setBulkDeleteOpen(true)}
+                data-testid="deal-room-bulk-delete-links"
+              >
+                <Trash size={14} className="mr-1.5" />
+                {t("permissions.links.bulkDelete")}
+              </Button>
+            ) : null}
           </div>
           <div className="overflow-hidden rounded-lg border">
             <Table>
@@ -498,6 +506,7 @@ export function FolderPermissionsSection({
                             checked={link.isActive ?? false}
                             onCheckedChange={(checked) => handleActiveChange(link.id, checked)}
                             onClick={(e) => e.stopPropagation()}
+                            disabled={!canWrite}
                             aria-label={t("permissions.links.table.active")}
                           />
                         </TableCell>
@@ -514,17 +523,19 @@ export function FolderPermissionsSection({
                             >
                               <ChartLine size={16} />
                             </Button>
-                            <Button
-                              type="button"
-                              size="icon-sm"
-                              variant="ghost"
-                              className="shrink-0 text-muted-foreground"
-                              aria-label={t("permissions.links.actions.edit")}
-                              title={t("permissions.links.actions.edit")}
-                              onClick={() => setEditLink(link)}
-                            >
-                              <PencilSimple size={16} />
-                            </Button>
+                            {canWrite ? (
+                              <Button
+                                type="button"
+                                size="icon-sm"
+                                variant="ghost"
+                                className="shrink-0 text-muted-foreground"
+                                aria-label={t("permissions.links.actions.edit")}
+                                title={t("permissions.links.actions.edit")}
+                                onClick={() => setEditLink(link)}
+                              >
+                                <PencilSimple size={16} />
+                              </Button>
+                            ) : null}
                             {pendingCount > 0 && onManageAccess ? (
                               <Button
                                 type="button"
@@ -538,7 +549,7 @@ export function FolderPermissionsSection({
                                 <UserPlus size={16} />
                               </Button>
                             ) : null}
-                            {link.requireEmailVerification ? (
+                            {canWrite && link.requireEmailVerification ? (
                               <Button
                                 type="button"
                                 size="icon-sm"
@@ -551,17 +562,19 @@ export function FolderPermissionsSection({
                                 <EnvelopeSimple size={16} />
                               </Button>
                             ) : null}
-                            <Button
-                              type="button"
-                              size="icon-sm"
-                              variant="ghost"
-                              className="shrink-0 text-muted-foreground hover:text-destructive"
-                              aria-label={t("permissions.links.actions.delete")}
-                              title={t("permissions.links.actions.delete")}
-                              onClick={() => setDeleteLink(link)}
-                            >
-                              <Trash size={16} />
-                            </Button>
+                            {canWrite ? (
+                              <Button
+                                type="button"
+                                size="icon-sm"
+                                variant="ghost"
+                                className="shrink-0 text-muted-foreground hover:text-destructive"
+                                aria-label={t("permissions.links.actions.delete")}
+                                title={t("permissions.links.actions.delete")}
+                                onClick={() => setDeleteLink(link)}
+                              >
+                                <Trash size={16} />
+                              </Button>
+                            ) : null}
                           </div>
                         </TableCell>
                       </TableRow>

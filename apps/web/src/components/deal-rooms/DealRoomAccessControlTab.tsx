@@ -9,6 +9,7 @@ import { Switch } from "@/components/ui/switch";
 import { ApiError } from "@/lib/apiClient";
 import { api } from "@/lib/api";
 import { useAsyncData } from "@/hooks/useAsyncData";
+import { useWorkspaceAccess } from "@/hooks/useWorkspaceAccess";
 import { ContactEmailTagInput } from "@/components/links/share";
 import { DealRoomAccessRequestsPanel } from "./DealRoomAccessRequestsPanel";
 import {
@@ -37,6 +38,7 @@ export function DealRoomAccessControlTab({
   const { t } = useTranslation("dealRooms");
   const { t: lt } = useTranslation("linkShare");
   const { t: tc } = useTranslation("common");
+  const { canWrite } = useWorkspaceAccess();
 
   const [draft, setDraft] = useState<DraftLink>(() => draftFromRoomAccessPolicy(null));
   const [saving, setSaving] = useState(false);
@@ -135,6 +137,7 @@ export function DealRoomAccessControlTab({
                 onChange={(values) => updateDraft({ blockedViewers: values })}
                 placeholder={lt("accessRules.blockedViewers.placeholder")}
                 hint={lt("accessRules.blockedViewers.roomHint")}
+                disabled={!canWrite}
               />
             </CardContent>
           </Card>
@@ -158,6 +161,7 @@ export function DealRoomAccessControlTab({
                       requireEmail: checked ? false : draft.requireEmail,
                     })
                   }
+                  disabled={!canWrite}
                   aria-label={t("accessControl.floorMustVerify")}
                 />
               </div>
@@ -168,6 +172,7 @@ export function DealRoomAccessControlTab({
                 <Switch
                   checked={draft.requireNda}
                   onCheckedChange={(checked) => updateDraft({ requireNda: checked })}
+                  disabled={!canWrite}
                   aria-label={t("accessControl.floorMustNda")}
                 />
               </div>
@@ -176,7 +181,7 @@ export function DealRoomAccessControlTab({
         </div>
       )}
 
-      {!loading && data ? (
+      {!loading && data && canWrite ? (
         <div className="sticky bottom-[-1.5rem] z-10 -mx-6 border-t bg-background/95 px-6 pt-3 pb-[calc(0.75rem+1.5rem)] backdrop-blur supports-[backdrop-filter]:bg-background/80 md:bottom-[-2rem] md:-mx-8 md:px-8 md:pb-[calc(0.75rem+2rem)]">
           <div className="flex items-center justify-between gap-3">
             <p className="text-xs text-muted-foreground">{t("accessControl.saveHint")}</p>

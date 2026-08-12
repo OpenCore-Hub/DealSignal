@@ -34,6 +34,17 @@ vi.mock("@/lib/formatters", () => ({
   formatRelativeTime: vi.fn(() => "just now"),
 }));
 
+vi.mock("@/hooks/useWorkspaceAccess", () => ({
+  useWorkspaceAccess: () => ({
+    role: "member",
+    loading: false,
+    canRead: true,
+    canWrite: true,
+    canManage: false,
+    isGuest: false,
+  }),
+}));
+
 vi.mock("./DocumentAnalytics", () => ({ DocumentAnalytics: () => null }));
 vi.mock("./DocumentContent", () => ({ DocumentContent: () => null }));
 vi.mock("./DocumentInsights", () => ({ DocumentInsights: () => null }));

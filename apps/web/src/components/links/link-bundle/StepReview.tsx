@@ -103,11 +103,15 @@ export function StepReview() {
   const handleSubmit = useCallback(() => {
     const guard = validateBundleSecurityConfig(config);
     if (!guard.ok) {
-      toast.error(
+      const messageKey =
         guard.reason === "ndaDocumentRequired"
-          ? t("creator.ndaDocumentRequired")
-          : t("creator.contactRequired"),
-      );
+          ? "creator.ndaDocumentRequired"
+          : guard.reason === "customExpiresAtRequired"
+            ? "creator.customExpiresAtRequired"
+            : guard.reason === "customExpiresAtFuture"
+              ? "creator.customExpiresAtFuture"
+              : "creator.contactRequired";
+      toast.error(t(messageKey));
       return;
     }
     // In edit mode, show a confirmation dialog on the review step so the user

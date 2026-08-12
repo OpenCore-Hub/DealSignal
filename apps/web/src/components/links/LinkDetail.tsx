@@ -21,6 +21,7 @@ import { documentsSharePath } from "@/lib/documentsSharePath";
 import { formatDate, formatDuration, formatRelativeTime } from "@/lib/formatters";
 import { calculateUniqueVisitors } from "@/lib/calculations";
 import { parseOwnerAskInboxView } from "@/lib/ownerAskInbox";
+import { useWorkspaceAccess } from "@/hooks/useWorkspaceAccess";
 import type { AccessLog, Document, Link } from "@/types";
 
 function buildPageDurationData(
@@ -57,6 +58,7 @@ export function LinkDetail() {
   const { t } = useTranslation("links");
   const { t: tShare } = useTranslation("linkShare");
   const { t: tc } = useTranslation("common");
+  const { canWrite } = useWorkspaceAccess(workspaceSlug);
   const askInboxView = parseOwnerAskInboxView(searchParams.get("askInbox"));
   const [link, setLink] = useState<Link | null>(null);
   const [document, setDocument] = useState<Document | null>(null);
@@ -152,14 +154,16 @@ export function LinkDetail() {
           date: formatDate(link.createdAt),
         })}
       >
-        <Button
-          variant="outline"
-          className="gap-1.5"
-          onClick={() => navigate(`/${workspaceSlug}/links/${link.id}/edit`)}
-        >
-          <PencilSimple size={16} />
-          {tc("edit")}
-        </Button>
+        {canWrite ? (
+          <Button
+            variant="outline"
+            className="gap-1.5"
+            onClick={() => navigate(`/${workspaceSlug}/links/${link.id}/edit`)}
+          >
+            <PencilSimple size={16} />
+            {tc("edit")}
+          </Button>
+        ) : null}
         <Button
           variant="outline"
           className="gap-1.5"
@@ -170,17 +174,19 @@ export function LinkDetail() {
           <Copy size={16} />
           {tc("copy")}
         </Button>
-        <Button
-          className="gap-1.5"
-          onClick={async () => {
-            const next = !link.isActive;
-            const updated = await api.updateLink(link.id, { isActive: next });
-            setLink(updated);
-          }}
-        >
-          <ToggleRight size={16} />
-          {link.isActive ? tc("status.disabled") : tc("status.enabled")}
-        </Button>
+        {canWrite ? (
+          <Button
+            className="gap-1.5"
+            onClick={async () => {
+              const next = !link.isActive;
+              const updated = await api.updateLink(link.id, { isActive: next });
+              setLink(updated);
+            }}
+          >
+            <ToggleRight size={16} />
+            {link.isActive ? tc("status.disabled") : tc("status.enabled")}
+          </Button>
+        ) : null}
       </PageHeader>
 
       {link.isBundle && link.documents.length > 0 && (

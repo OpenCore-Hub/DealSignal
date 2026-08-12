@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useParams } from "react-router";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "motion/react";
 import { ShareNetwork, Check } from "@phosphor-icons/react";
@@ -17,7 +18,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
 import { ApiError } from "@/lib/apiClient";
 import { apiErrorMessage } from "@/lib/apiErrors";
-import type { AccessRule, DealRoomAccessPolicy, Link } from "@/types";
+import type { AccessRule, DealRoomAccessPolicy, Link, WorkspaceViewerDomain } from "@/types";
 import { useAsyncData } from "@/hooks/useAsyncData";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import {
@@ -37,6 +38,7 @@ import {
 } from "@/components/deal-rooms/roomAccessPolicy";
 import { useNdaPickerSources } from "./hooks";
 import { resolveNdaDocumentFallback } from "./ndaPicker";
+import { resolveShareViewerDomains } from "./viewerDomains";
 import type { DraftLink } from "./types";
 
 interface LinkShareDialogProps {
@@ -61,12 +63,14 @@ interface DialogData {
   link: Link;
   rules: AccessRule[];
   policy: DealRoomAccessPolicy | null;
+  viewerDomain: WorkspaceViewerDomain | null;
 }
 
 async function fetchDialogData(linkId: string): Promise<DialogData | null> {
-  const [link, rulesRes] = await Promise.all([
+  const [link, rulesRes, viewerDomain] = await Promise.all([
     api.getLinkById(linkId),
     api.getLinkAccessRules(linkId),
+    api.getWorkspaceViewerDomain().catch(() => null),
   ]);
   if (!link) return null;
   let policy: DealRoomAccessPolicy | null = null;
@@ -82,6 +86,7 @@ async function fetchDialogData(linkId: string): Promise<DialogData | null> {
     link,
     rules: rulesRes.data,
     policy,
+    viewerDomain,
   };
 }
 
@@ -103,6 +108,12 @@ function LinkShareDialogContent({
   registerCloseGuard: (guard: () => boolean) => void;
 }) {
   const { t } = useTranslation("linkShare");
+  const { workspaceSlug } = useParams<{ workspaceSlug?: string }>();
+  const shareDomains = useMemo(
+    () => resolveShareViewerDomains(data?.viewerDomain),
+    [data?.viewerDomain],
+  );
+  const brandSettingsHref = workspaceSlug ? `/${workspaceSlug}/settings/brand` : undefined;
   const [tab, setTab] = useState<"share" | "access">(defaultTab);
   const [draft, setDraft] = useState<DraftLink>(() =>
     data?.link?.dealRoomId
@@ -314,6 +325,9 @@ function LinkShareDialogContent({
                     onEditAccess={() => setTab("access")}
                     errors={validationErrors}
                     highlightedFields={highlightedFields}
+                    availableDomains={shareDomains.availableDomains}
+                    pendingHostname={shareDomains.pendingHostname}
+                    brandSettingsHref={brandSettingsHref}
                   />
                 </TabsContent>
                 <TabsContent value="access" className="space-y-4">

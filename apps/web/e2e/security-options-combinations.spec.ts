@@ -27,7 +27,7 @@ const BOOL_FIELDS = [
 type BoolKey = (typeof BOOL_FIELDS)[number]["key"];
 type BoolCombo = Record<BoolKey, boolean>;
 
-const EXPIRY_VALUES = [7, 30, 90, "custom"] as const;
+const EXPIRY_VALUES = [7, 15, 30, "custom"] as const;
 const MAX_VIEWS_VALUES = ["unlimited", 10, 50, 100] as const;
 
 // ── 辅助函数 ──────────────────────────────────────────────────────

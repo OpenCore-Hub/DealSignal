@@ -189,13 +189,20 @@ export function pipelineReducer(state: BundlePipelineState, action: BundlePipeli
       return { ...state, searchQuery: action.query };
 
     case "SET_CONFIG": {
-      // When expiryDays changes in edit mode, clear _editExpiresAt so the
-      // new value takes effect instead of being silently discarded.
+      // When switching to a numeric preset, clear _editExpiresAt so day-math
+      // produces a fresh expires_at. Custom keeps an explicit timestamp (picker
+      // default / edit reconstruction) so create/update still send expires_at.
       const expiryChanged =
         typeof action.config.expiryDays !== typeof state.config.expiryDays ||
         action.config.expiryDays !== state.config.expiryDays;
       const nextConfig = expiryChanged
-        ? { ...action.config, _editExpiresAt: undefined }
+        ? {
+            ...action.config,
+            _editExpiresAt:
+              action.config.expiryDays === "custom"
+                ? action.config._editExpiresAt
+                : undefined,
+          }
         : action.config;
       return { ...state, config: nextConfig, ...markDirty(state) };
     }

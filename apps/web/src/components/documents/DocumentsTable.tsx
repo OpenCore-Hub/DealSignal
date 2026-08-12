@@ -15,6 +15,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { DocumentFilter } from "@/types";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { useWorkspaceAccess } from "@/hooks/useWorkspaceAccess";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -107,6 +108,7 @@ export function DocumentsTable({ category }: DocumentsTableProps) {
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const { t } = useTranslation(["documents", "common", "links", "agreementDocuments"]);
+  const { canWrite } = useWorkspaceAccess(workspaceSlug);
   const isAgreement = category === "agreement";
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { uploadDocument, conflictDialog } = useDocumentUploadConflict();
@@ -409,10 +411,10 @@ export function DocumentsTable({ category }: DocumentsTableProps) {
     workspaceSlug,
     navigate,
     refetch,
-    onAddToDealRoom: setDocToAddToRoom,
-    onArchive: setDocToArchive,
-    onShare: isAgreement ? undefined : setDocToShare,
-    onDelete: setDocToDelete,
+    onAddToDealRoom: canWrite ? setDocToAddToRoom : undefined,
+    onArchive: canWrite ? setDocToArchive : undefined,
+    onShare: canWrite && !isAgreement ? setDocToShare : undefined,
+    onDelete: canWrite ? setDocToDelete : undefined,
     returnTo: location.pathname + location.search,
     returnLabel: t("documents:detail.back"),
   });
@@ -521,8 +523,10 @@ export function DocumentsTable({ category }: DocumentsTableProps) {
                     }),
                   )
                 }
+                disabled={!canWrite}
                 className="gap-1.5 shrink-0"
                 data-testid="share-create-link"
+                title={canWrite ? undefined : t("common:error.codes.insufficient_role")}
               >
                 <Plus size={16} weight="bold" />
                 {t("links:page.createLink")}
@@ -572,9 +576,10 @@ export function DocumentsTable({ category }: DocumentsTableProps) {
       </DropdownMenu>
       <Button
         onClick={openUpload}
-        disabled={isUploading}
+        disabled={isUploading || !canWrite}
         className="gap-1.5 shrink-0"
         data-testid="agreement-upload-button"
+        title={canWrite ? undefined : t("common:error.codes.insufficient_role")}
       >
         <Plus size={15} weight="bold" />
         {t("documents:table.upload")}
@@ -660,9 +665,10 @@ export function DocumentsTable({ category }: DocumentsTableProps) {
       </div>
       <Button
         onClick={openUpload}
-        disabled={isUploading}
+        disabled={isUploading || !canWrite}
         className="gap-1.5 shrink-0 shadow-[0_1px_0_rgba(15,23,42,0.06)]"
         data-testid="documents-upload-button"
+        title={canWrite ? undefined : t("common:error.codes.insufficient_role")}
       >
         <Plus size={16} weight="bold" />
         {t("documents:table.upload")}
@@ -707,7 +713,7 @@ export function DocumentsTable({ category }: DocumentsTableProps) {
                 : t("documents:table.emptyDescription")
             }
             action={
-              isAgreement
+              isAgreement || !canWrite
                 ? undefined
                 : {
                     label: t("documents:table.upload"),
@@ -744,7 +750,7 @@ export function DocumentsTable({ category }: DocumentsTableProps) {
                     key={row.id}
                     doc={row.original}
                     onOpen={() => openDocument(row.original.id)}
-                    onDelete={() => setDocToDelete(row.original)}
+                    onDelete={canWrite ? () => setDocToDelete(row.original) : undefined}
                   />
                 ))}
               </div>

@@ -23,6 +23,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { useWorkspaceAccess } from "@/hooks/useWorkspaceAccess";
 import {
   Dialog,
   DialogContent,
@@ -40,7 +41,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { HeatBadge } from "@/components/common/HeatBadge";
-import { RowActions } from "@/components/common/RowActions";
+import { RowActions, type RowAction } from "@/components/common/RowActions";
 import { EmptyState } from "@/components/common/EmptyState";
 import { SkeletonList } from "@/components/common/SkeletonLayout";
 import { SortableColumnHeader } from "@/components/common/SortableColumnHeader";
@@ -118,6 +119,7 @@ export function LinksTable({
   const location = useLocation();
   const { t } = useTranslation("links");
   const { t: tc } = useTranslation("common");
+  const { canWrite } = useWorkspaceAccess(workspaceSlug);
 
   const openLink = (linkId: string) => {
     navigate(`/${workspaceSlug}/links/${linkId}`, {
@@ -292,48 +294,57 @@ export function LinksTable({
           const link = row.original;
           const busy = busyLinkId === link.id;
           const downloadOn = link.downloadEnabled ?? false;
-          return (
-            <RowActions
-              actions={[
-                {
-                  label: t("actions.viewLog"),
-                  icon: <ArrowRight size={16} />,
-                  onClick: () => navigate(`/${workspaceSlug}/links/${link.id}`),
-                },
-                {
-                  label: t("actions.editLink"),
-                  icon: <PencilSimple size={16} />,
-                  onClick: () => navigate(`/${workspaceSlug}/links/${link.id}/edit`),
-                },
-                {
-                  label: t("actions.exportData"),
-                  icon: <Export size={16} />,
-                  onClick: () => { void handleExportAccessData(link); },
-                  disabled: busy,
-                },
-                {
-                  label: downloadOn
-                    ? t("actions.disallowDownload")
-                    : t("actions.allowDownload"),
-                  icon: <DownloadSimple size={16} />,
-                  onClick: () => { void handleToggleDownload(link); },
-                  disabled: busy,
-                },
-                {
-                  label: tc("delete"),
-                  icon: <Trash size={16} />,
-                  onClick: () => setLinkToDelete(link),
-                  destructive: true,
-                  disabled: busy,
-                },
-              ]}
-            />
-          );
+          const actions: RowAction[] = [
+            {
+              label: t("actions.viewLog"),
+              icon: <ArrowRight size={16} />,
+              onClick: () => navigate(`/${workspaceSlug}/links/${link.id}`),
+            },
+          ];
+          if (canWrite) {
+            actions.push(
+              {
+                label: t("actions.editLink"),
+                icon: <PencilSimple size={16} />,
+                onClick: () => navigate(`/${workspaceSlug}/links/${link.id}/edit`),
+              },
+              {
+                label: t("actions.exportData"),
+                icon: <Export size={16} />,
+                onClick: () => { void handleExportAccessData(link); },
+                disabled: busy,
+              },
+              {
+                label: downloadOn
+                  ? t("actions.disallowDownload")
+                  : t("actions.allowDownload"),
+                icon: <DownloadSimple size={16} />,
+                onClick: () => { void handleToggleDownload(link); },
+                disabled: busy,
+              },
+              {
+                label: tc("delete"),
+                icon: <Trash size={16} />,
+                onClick: () => setLinkToDelete(link),
+                destructive: true,
+                disabled: busy,
+              },
+            );
+          } else {
+            actions.push({
+              label: t("actions.exportData"),
+              icon: <Export size={16} />,
+              onClick: () => { void handleExportAccessData(link); },
+              disabled: busy,
+            });
+          }
+          return <RowActions actions={actions} />;
         },
       },
     ],
     [
       busyLinkId,
+      canWrite,
       handleExportAccessData,
       handleToggleDownload,
       navigate,
@@ -412,18 +423,18 @@ export function LinksTable({
 
     const emptyTitle = isFiltered && documentTitle ? t("empty.filteredTitle", { title: documentTitle }) : t("empty.title");
     const emptyDescription = isFiltered && documentTitle ? t("empty.filteredDescription") : t("empty.description");
-    // Parent Document Library Share tab already exposes Create Link.
-    const emptyAction = embedded
-      ? undefined
-      : {
-          label: t("empty.createLink"),
-          onClick: () =>
-            navigate(
-              documentsCreateLinkPath(workspaceSlug!, {
-                documentId: isFiltered ? documentId : undefined,
-              }),
-            ),
-        };
+    const emptyAction =
+      embedded || !canWrite
+        ? undefined
+        : {
+            label: t("empty.createLink"),
+            onClick: () =>
+              navigate(
+                documentsCreateLinkPath(workspaceSlug!, {
+                  documentId: isFiltered ? documentId : undefined,
+                }),
+              ),
+          };
 
     return (
       <div className="space-y-4">

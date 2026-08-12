@@ -35,10 +35,49 @@ export function buildEditModeDocumentLists(
   return { pickerDocuments: pickerDocs, selectedDocuments };
 }
 
+/** Preset expiry options shown in the Security step (plus Custom). */
+export const LINK_EXPIRY_PRESET_DAYS = [7, 15, 30] as const;
+export type LinkExpiryPresetDays = (typeof LINK_EXPIRY_PRESET_DAYS)[number];
+
+/**
+ * Map a stored expiresAt onto the Security expiry select.
+ * Presets snap within ±1 day (ceil + time-of-day); everything else is Custom
+ * so the datetime picker can show the exact timestamp.
+ */
+export function resolveExpiryDaysFromExpiresAt(
+  expiresAt: string | undefined | null,
+  now: Date = new Date(),
+): { expiryDays: number | "custom"; _editExpiresAt?: string } {
+  if (!expiresAt) {
+    return { expiryDays: 30 };
+  }
+  const expires = new Date(expiresAt);
+  if (Number.isNaN(expires.getTime())) {
+    return { expiryDays: 30 };
+  }
+  const diffMs = expires.getTime() - now.getTime();
+  const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+  if (diffDays <= 0) {
+    return { expiryDays: "custom", _editExpiresAt: expiresAt };
+  }
+  for (const preset of LINK_EXPIRY_PRESET_DAYS) {
+    if (Math.abs(diffDays - preset) <= 1) {
+      return { expiryDays: preset, _editExpiresAt: expiresAt };
+    }
+  }
+  return { expiryDays: "custom", _editExpiresAt: expiresAt };
+}
+
+export type BundleSecurityGuardReason =
+  | "contactRequired"
+  | "ndaDocumentRequired"
+  | "customExpiresAtRequired"
+  | "customExpiresAtFuture";
+
 /** Client-side guards before create/update — mirrors StepReview checks. */
 export function validateBundleSecurityConfig(
   config: PermissionConfig,
-): { ok: true } | { ok: false; reason: "contactRequired" | "ndaDocumentRequired" } {
+): { ok: true } | { ok: false; reason: BundleSecurityGuardReason } {
   const emailRequired =
     config.requireEmailVerification || config.ndaEnabled;
   if (emailRequired && config.contactIds.length === 0) {
@@ -46,6 +85,15 @@ export function validateBundleSecurityConfig(
   }
   if (config.ndaEnabled && !config.ndaTemplateId && !config.ndaDocumentId) {
     return { ok: false, reason: "ndaDocumentRequired" };
+  }
+  if (config.expiryDays === "custom") {
+    if (!config._editExpiresAt) {
+      return { ok: false, reason: "customExpiresAtRequired" };
+    }
+    const ts = new Date(config._editExpiresAt).getTime();
+    if (Number.isNaN(ts) || ts <= Date.now()) {
+      return { ok: false, reason: "customExpiresAtFuture" };
+    }
   }
   return { ok: true };
 }

@@ -46,9 +46,10 @@ async function setupI18n() {
           "creator.expiry": "Expiry",
           "creator.expiryPlaceholder": "Expiry",
           "creator.expiryDays.7": "7 days",
+          "creator.expiryDays.15": "15 days",
           "creator.expiryDays.30": "30 days",
-          "creator.expiryDays.90": "90 days",
           "creator.expiryDays.custom": "Custom",
+          "creator.customExpiresAt": "Custom expiration",
           "creator.maxViews": "Max views",
           "creator.maxViewsPlaceholder": "Max views",
           "creator.maxViewsOptions.unlimited": "Unlimited",
@@ -161,17 +162,15 @@ describe("BundleSecurityOptions switch interaction", () => {
     });
   });
 
-  it("loads NDA candidates from agreement documents, not the general library", async () => {
+  it("shows custom datetime input when expiry is custom", async () => {
+    const future = new Date();
+    future.setDate(future.getDate() + 12);
     const config = {
       ...buildConfigFromPreset("customized"),
-      ndaEnabled: true,
-      requireEmailVerification: true,
+      expiryDays: "custom" as const,
+      _editExpiresAt: future.toISOString(),
     };
-    await renderSecurityOptions(config);
-
-    await waitFor(() => {
-      expect(getDocumentsMock).toHaveBeenCalledWith("all", "agreement");
-    });
-    expect(listNDATemplatesMock).toHaveBeenCalled();
+    await renderSecurityOptions(config, vi.fn());
+    expect(screen.getByTestId("security-expiry-custom-datetime")).toBeInTheDocument();
   });
 });

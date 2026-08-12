@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { InviteMemberDialog } from "@/components/deal-rooms/InviteMemberDialog";
+import { useWorkspaceAccess } from "@/hooks/useWorkspaceAccess";
 import { deriveRoomStage } from "@/lib/dealRoomNav";
 import type { DealRoom } from "@/types";
 
@@ -21,6 +22,7 @@ export function DealRoomSettingsTab({
   onMemberInvited,
 }: DealRoomSettingsTabProps) {
   const { t } = useTranslation("dealRooms");
+  const { canWrite } = useWorkspaceAccess();
   const stage = deriveRoomStage(activeLinkCount);
 
   const rows = [
@@ -68,12 +70,14 @@ export function DealRoomSettingsTab({
             </div>
             <p className="text-body text-muted-foreground">{t("settings.description")}</p>
           </div>
-          <InviteMemberDialog roomId={roomId} onInvited={onMemberInvited ?? (() => undefined)}>
-            <Button variant="outline" className="gap-1.5 shrink-0">
-              <Envelope size={16} />
-              {t("settings.inviteMembers")}
-            </Button>
-          </InviteMemberDialog>
+          {canWrite ? (
+            <InviteMemberDialog roomId={roomId} onInvited={onMemberInvited ?? (() => undefined)}>
+              <Button variant="outline" className="gap-1.5 shrink-0">
+                <Envelope size={16} />
+                {t("settings.inviteMembers")}
+              </Button>
+            </InviteMemberDialog>
+          ) : null}
         </div>
       </CardHeader>
       <CardContent className="space-y-4">

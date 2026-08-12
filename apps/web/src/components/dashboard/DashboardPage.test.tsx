@@ -6,6 +6,7 @@ import { MemoryRouter, Routes, Route } from "react-router";
 import { DashboardPage } from "./DashboardPage";
 import { createTestI18n } from "@/i18n/test-utils";
 import type { RadarFeed, RadarWorkItem } from "@/lib/radarQueue";
+import { useWorkspaceAccess } from "@/hooks/useWorkspaceAccess";
 
 const mockFns = vi.hoisted(() => ({
   getRadar: vi.fn(),
@@ -199,6 +200,14 @@ async function renderPage(waitForLoad = true, entry = "/acme/dashboard") {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(useWorkspaceAccess).mockReturnValue({
+    role: "member",
+    loading: false,
+    canRead: true,
+    canWrite: true,
+    canManage: false,
+    isGuest: false,
+  });
   mockFns.getRadar.mockResolvedValue(makeFeed());
   mockFns.getRadarEvidence.mockResolvedValue({
     itemId: "act-1",
@@ -277,6 +286,20 @@ describe("DashboardPage inbox", () => {
       await screen.findByRole("button", { name: "Create data room" }),
     );
     expect(mockFns.navigate).toHaveBeenCalledWith("/acme/deal-rooms/new");
+  });
+
+  it("hides create data room for guest read-only access", async () => {
+    vi.mocked(useWorkspaceAccess).mockReturnValue({
+      role: "guest",
+      loading: false,
+      canRead: true,
+      canWrite: false,
+      canManage: false,
+      isGuest: true,
+    });
+    await renderPage();
+    expect(await screen.findByTestId("radar-queue")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Create data room" })).not.toBeInTheDocument();
   });
 
   it("shows error state and allows retry", async () => {

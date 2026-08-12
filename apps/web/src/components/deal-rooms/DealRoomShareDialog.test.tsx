@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { MemoryRouter } from "react-router";
 import { I18nextProvider } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
@@ -36,6 +37,7 @@ vi.mock("@/lib/api", () => ({
     listNDATemplates: vi.fn(),
     getDocuments: vi.fn(),
     getLinkAskPolicy: vi.fn(),
+    getWorkspaceViewerDomain: vi.fn(),
   },
 }));
 
@@ -76,7 +78,11 @@ async function renderDialog(ui: React.ReactNode) {
       disable: "Disable",
     },
   });
-  return render(<I18nextProvider i18n={i18n}>{ui}</I18nextProvider>);
+  return render(
+    <MemoryRouter initialEntries={["/acme/deal-rooms/room-1"]}>
+      <I18nextProvider i18n={i18n}>{ui}</I18nextProvider>
+    </MemoryRouter>,
+  );
 }
 
 describe("DealRoomShareDialog", () => {
@@ -122,6 +128,12 @@ describe("DealRoomShareDialog", () => {
     });
     vi.mocked(api.listNDATemplates).mockResolvedValue({ data: [] });
     vi.mocked(api.getDocuments).mockResolvedValue({ data: [] });
+    vi.mocked(api.getWorkspaceViewerDomain).mockResolvedValue({
+      hostname: "",
+      status: "",
+      cnameHost: "",
+      cnameTarget: "",
+    });
   });
 
   it("opens in create mode with share settings and document scope", async () => {

@@ -15,6 +15,7 @@ import { api } from "@/lib/api";
 import { accessRequestReviewErrorMessage } from "@/lib/accessRequestErrors";
 import { useAccessRequestReview } from "@/hooks/useAccessRequestReview";
 import { useAsyncData } from "@/hooks/useAsyncData";
+import { useWorkspaceAccess } from "@/hooks/useWorkspaceAccess";
 
 type PendingAccessRequest = {
   id: string;
@@ -45,6 +46,7 @@ export function DealRoomAccessRequestsPanel({
   onChanged,
 }: DealRoomAccessRequestsPanelProps) {
   const { t } = useTranslation(["dealRooms", "linkShare", "common"]);
+  const { canWrite } = useWorkspaceAccess();
   const [busyId, setBusyId] = useState<string | null>(null);
   const {
     data: requests,
@@ -271,27 +273,29 @@ export function DealRoomAccessRequestsPanel({
                 <p className="text-sm text-muted-foreground">{request.reason}</p>
               ) : null}
             </div>
-            <div className="flex shrink-0 gap-2">
-              <Button
-                size="sm"
-                className="gap-1"
-                disabled={activeBusyId === request.id}
-                onClick={() => { void handleApprove(request); }}
-              >
-                <Check size={14} />
-                {t("dealRooms:accessRequests.approve")}
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                className="gap-1"
-                disabled={activeBusyId === request.id}
-                onClick={() => { void handleReject(request); }}
-              >
-                <X size={14} />
-                {t("dealRooms:accessRequests.reject")}
-              </Button>
-            </div>
+            {canWrite ? (
+              <div className="flex shrink-0 gap-2">
+                <Button
+                  size="sm"
+                  className="gap-1"
+                  disabled={activeBusyId === request.id}
+                  onClick={() => { void handleApprove(request); }}
+                >
+                  <Check size={14} />
+                  {t("dealRooms:accessRequests.approve")}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-1"
+                  disabled={activeBusyId === request.id}
+                  onClick={() => { void handleReject(request); }}
+                >
+                  <X size={14} />
+                  {t("dealRooms:accessRequests.reject")}
+                </Button>
+              </div>
+            ) : null}
           </div>
           );
         })}

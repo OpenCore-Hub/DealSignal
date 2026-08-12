@@ -203,87 +203,91 @@ export function RadarRow({
           </Button>
         ) : null}
 
-        {completeDirectly ? (
-          <Button
-            size="icon-sm"
-            variant="outline"
-            aria-label={tCommon("complete")}
-            onClick={(e) => {
-              e.stopPropagation();
-              onStatusChange?.(
-                item.actionId,
-                "done",
-                undefined,
-                defaultOutcomeForProduct(item.product),
-              );
-            }}
-          >
-            <Check size={16} />
-          </Button>
-        ) : (
+        {onStatusChange ? (
+          completeDirectly ? (
+            <Button
+              size="icon-sm"
+              variant="outline"
+              aria-label={tCommon("complete")}
+              onClick={(e) => {
+                e.stopPropagation();
+                onStatusChange(
+                  item.actionId,
+                  "done",
+                  undefined,
+                  defaultOutcomeForProduct(item.product),
+                );
+              }}
+            >
+              <Check size={16} />
+            </Button>
+          ) : (
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={(props) => (
+                  <Button
+                    size="icon-sm"
+                    variant="outline"
+                    aria-label={t("radar.outcome.choose")}
+                    data-testid="radar-complete-menu"
+                    {...props}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <Check size={16} />
+                  </Button>
+                )}
+              />
+              <DropdownMenuContent align="end">
+                {outcomes.map((outcome) => (
+                  <DropdownMenuItem
+                    key={outcome}
+                    onClick={() =>
+                      onStatusChange(item.actionId, "done", undefined, outcome)
+                    }
+                  >
+                    {t(`radar.outcome.${outcome}`)}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )
+        ) : null}
+
+        {onStatusChange ? (
           <DropdownMenu>
             <DropdownMenuTrigger
               render={(props) => (
                 <Button
                   size="icon-sm"
-                  variant="outline"
-                  aria-label={t("radar.outcome.choose")}
-                  data-testid="radar-complete-menu"
+                  variant="ghost"
+                  aria-label={t("actions.moreOptions")}
                   {...props}
                   onClick={(e) => e.stopPropagation()}
                 >
-                  <Check size={16} />
+                  <DotsThree size={18} />
                 </Button>
               )}
             />
             <DropdownMenuContent align="end">
-              {outcomes.map((outcome) => (
+              {([24, 72, 168] as SnoozeHours[]).map((hours) => (
                 <DropdownMenuItem
-                  key={outcome}
-                  onClick={() =>
-                    onStatusChange?.(item.actionId, "done", undefined, outcome)
-                  }
+                  key={hours}
+                  onClick={() => onStatusChange(item.actionId, "snoozed", hours)}
                 >
-                  {t(`radar.outcome.${outcome}`)}
+                  <ClockCounterClockwise size={16} className="mr-1.5" />
+                  {t(`radar.snoozeHours.${hours}`)}
                 </DropdownMenuItem>
               ))}
+              <DropdownMenuItem
+                variant="destructive"
+                onClick={() => onStatusChange(item.actionId, "ignored")}
+              >
+                <X size={16} className="mr-1.5" />
+                {t("actions.ignore")}
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-        )}
-
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            render={(props) => (
-              <Button
-                size="icon-sm"
-                variant="ghost"
-                aria-label={t("actions.moreOptions")}
-                {...props}
-                onClick={(e) => e.stopPropagation()}
-              >
-                <DotsThree size={18} />
-              </Button>
-            )}
-          />
-          <DropdownMenuContent align="end">
-            {([24, 72, 168] as SnoozeHours[]).map((hours) => (
-              <DropdownMenuItem
-                key={hours}
-                onClick={() => onStatusChange?.(item.actionId, "snoozed", hours)}
-              >
-                <ClockCounterClockwise size={16} className="mr-1.5" />
-                {t(`radar.snoozeHours.${hours}`)}
-              </DropdownMenuItem>
-            ))}
-            <DropdownMenuItem
-              variant="destructive"
-              onClick={() => onStatusChange?.(item.actionId, "ignored")}
-            >
-              <X size={16} className="mr-1.5" />
-              {t("actions.ignore")}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        ) : null}
 
         {onEvidence ? (
           <Button

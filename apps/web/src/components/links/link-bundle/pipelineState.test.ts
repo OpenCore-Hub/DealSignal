@@ -166,6 +166,42 @@ describe("BundlePipelineState transitions", () => {
       state = pipelineReducer(state, { type: "SET_CONFIG", config: newConfig });
       expect(state.isDirty).toBe(false);
     });
+
+    it("SET_CONFIG keeps custom _editExpiresAt when switching to custom", () => {
+      const customAt = new Date();
+      customAt.setDate(customAt.getDate() + 12);
+      const iso = customAt.toISOString();
+      state = pipelineReducer(state, {
+        type: "SET_CONFIG",
+        config: {
+          ...state.config,
+          expiryDays: "custom",
+          _editExpiresAt: iso,
+        },
+      });
+      expect(state.config.expiryDays).toBe("custom");
+      expect(state.config._editExpiresAt).toBe(iso);
+    });
+
+    it("SET_CONFIG clears _editExpiresAt when switching to a day preset", () => {
+      const customAt = new Date();
+      customAt.setDate(customAt.getDate() + 12);
+      state.config = {
+        ...state.config,
+        expiryDays: "custom",
+        _editExpiresAt: customAt.toISOString(),
+      };
+      state = pipelineReducer(state, {
+        type: "SET_CONFIG",
+        config: {
+          ...state.config,
+          expiryDays: 15,
+          _editExpiresAt: customAt.toISOString(),
+        },
+      });
+      expect(state.config.expiryDays).toBe(15);
+      expect(state.config._editExpiresAt).toBeUndefined();
+    });
   });
 
   describe("submission state", () => {

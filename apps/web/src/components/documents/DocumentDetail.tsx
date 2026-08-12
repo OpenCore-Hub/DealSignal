@@ -18,6 +18,7 @@ import { DocumentCategoryBadge } from "./DocumentCategoryBadge";
 import { api } from "@/lib/api";
 import { ApiError } from "@/lib/apiClient";
 import { useAsyncData } from "@/hooks/useAsyncData";
+import { useWorkspaceAccess } from "@/hooks/useWorkspaceAccess";
 import {
   isLegacyDocumentDetailTab,
   parseDocumentDetailTab,
@@ -48,6 +49,7 @@ export function DocumentDetail() {
   const { workspaceSlug, documentId } = useParams<{ workspaceSlug: string; documentId: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const { t } = useTranslation(["documents", "common", "agreementDocuments"]);
+  const { canWrite } = useWorkspaceAccess(workspaceSlug);
   const [addToRoomOpen, setAddToRoomOpen] = useState(false);
   const [togglingCategory, setTogglingCategory] = useState(false);
 
@@ -186,17 +188,19 @@ export function DocumentDetail() {
               <Eye size={15} />
               {t("common:preview")}
             </Button>
-            <Button
-              size="sm"
-              className="gap-1.5"
-              onClick={() => navigate(`/${workspaceSlug}/links/new?documentId=${doc.id}`)}
-            >
-              <LinkIcon size={15} />
-              {t("common:createLink")}
-            </Button>
+            {canWrite ? (
+              <Button
+                size="sm"
+                className="gap-1.5"
+                onClick={() => navigate(`/${workspaceSlug}/links/new?documentId=${doc.id}`)}
+              >
+                <LinkIcon size={15} />
+                {t("common:createLink")}
+              </Button>
+            ) : null}
           </div>
           <div className="flex flex-wrap items-center gap-1.5 sm:justify-end">
-            {canAddToDealRoom ? (
+            {canWrite && canAddToDealRoom ? (
               <Button
                 variant="ghost"
                 size="sm"
@@ -208,28 +212,30 @@ export function DocumentDetail() {
                 {t("common:addToDealRoom")}
               </Button>
             ) : null}
-            <Button
-              variant="ghost"
-              size="sm"
-              className={cn(
-                "gap-1.5 text-muted-foreground hover:text-foreground",
-                isAgreement && "bg-foreground/[0.04] text-foreground",
-              )}
-              onClick={() => { void handleToggleCategory(); }}
-              disabled={togglingCategory || isDealRoomDoc || (!isAgreement && !canMarkAgreement)}
-              title={
-                isDealRoomDoc
-                  ? t("documents:detail.categoryErrors.category_immutable")
-                  : !isAgreement && !canMarkAgreement
-                    ? t("agreementDocuments:page.pdfOnly")
-                    : undefined
-              }
-            >
-              <Scales size={15} />
-              {isAgreement
-                ? t("agreementDocuments:page.unsetAsAgreement")
-                : t("agreementDocuments:page.setAsAgreement")}
-            </Button>
+            {canWrite ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                className={cn(
+                  "gap-1.5 text-muted-foreground hover:text-foreground",
+                  isAgreement && "bg-foreground/[0.04] text-foreground",
+                )}
+                onClick={() => { void handleToggleCategory(); }}
+                disabled={togglingCategory || isDealRoomDoc || (!isAgreement && !canMarkAgreement)}
+                title={
+                  isDealRoomDoc
+                    ? t("documents:detail.categoryErrors.category_immutable")
+                    : !isAgreement && !canMarkAgreement
+                      ? t("agreementDocuments:page.pdfOnly")
+                      : undefined
+                }
+              >
+                <Scales size={15} />
+                {isAgreement
+                  ? t("agreementDocuments:page.unsetAsAgreement")
+                  : t("agreementDocuments:page.setAsAgreement")}
+              </Button>
+            ) : null}
           </div>
         </div>
       </header>

@@ -53,6 +53,17 @@ vi.mock("@/hooks/useDocumentUploadConflict", () => ({
   }),
 }));
 
+vi.mock("@/hooks/useWorkspaceAccess", () => ({
+  useWorkspaceAccess: () => ({
+    role: "member",
+    loading: false,
+    canRead: true,
+    canWrite: true,
+    canManage: false,
+    isGuest: false,
+  }),
+}));
+
 vi.mock("@/components/links/LinksTable", () => ({
   LinksTable: ({
     documentId,

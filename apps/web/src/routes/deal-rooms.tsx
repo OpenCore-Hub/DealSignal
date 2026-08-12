@@ -1,17 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
-import { Plus, Lock, Folder, MagnifyingGlass, Tag } from "@phosphor-icons/react";
+import { Plus, Lock, Folder, MagnifyingGlass } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-} from "@/components/ui/select";
 import { PageHeader } from "@/components/common/PageHeader";
 import { EmptyState } from "@/components/common/EmptyState";
 import { api } from "@/lib/api";
@@ -19,6 +13,7 @@ import { formatRelativeTime } from "@/lib/formatters";
 import { useAsyncData } from "@/hooks/useAsyncData";
 import { useTranslation } from "react-i18next";
 import type { DealRoom } from "@/types";
+import { useWorkspaceAccess } from "@/hooks/useWorkspaceAccess";
 
 export type { DealRoom };
 
@@ -30,14 +25,14 @@ export function DealRoomsPage() {
   const navigate = useNavigate();
   const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
   const location = useLocation();
+  const { canWrite } = useWorkspaceAccess(workspaceSlug);
   const [search, setSearch] = useState("");
-  const [selectedTag, setSelectedTag] = useState<string>("all");
   const [page, setPage] = useState(1);
   const searchQuery = search.trim();
 
   useEffect(() => {
     setPage(1);
-  }, [search, selectedTag]);
+  }, [search]);
 
   const { data, loading, error, refetch } = useAsyncData(
     async () => {
@@ -57,23 +52,6 @@ export function DealRoomsPage() {
     1,
     Math.ceil((pagination?.total ?? rooms?.length ?? 0) / (pagination?.page_size ?? PAGE_SIZE)),
   );
-
-  const allTags = useMemo(() => {
-    const tags = new Set<string>();
-    rooms?.forEach((room) => {
-      room.tags?.forEach((tag) => tags.add(tag));
-    });
-    return Array.from(tags).sort();
-  }, [rooms]);
-
-  // Tag filter is client-side on the current page (tags are not a server index yet).
-  const filteredRooms = useMemo(() => {
-    if (!rooms) return [];
-    if (selectedTag === "all") return rooms;
-    return rooms.filter((room) => room.tags?.includes(selectedTag));
-  }, [rooms, selectedTag]);
-  // Hide server pagination while a client-only tag filter is active (totals would lie).
-  const filtering = selectedTag !== "all";
 
   const navigateToRoom = (roomId: string, opts?: { tab?: string }) => {
     const params = new URLSearchParams();
@@ -119,34 +97,11 @@ export function DealRoomsPage() {
               aria-label={t("search.placeholder")}
             />
           </div>
-          <Select value={selectedTag} onValueChange={(value) => setSelectedTag(value ?? "all")}>
-            <SelectTrigger
-              className="w-full gap-1.5 pl-3 sm:w-44"
-              aria-label={t("tags.label")}
-            >
-              <Tag size={16} className="text-muted-foreground" />
-              <span className="line-clamp-1 flex-1 text-left">
-                {selectedTag === "all" ? t("tags.all") : selectedTag}
-              </span>
-            </SelectTrigger>
-            <SelectContent
-              side="bottom"
-              align="start"
-              alignItemWithTrigger={false}
-              collisionAvoidance={{ side: "none", align: "none" }}
-              className="max-h-60"
-            >
-              <SelectItem value="all">{t("tags.all")}</SelectItem>
-              {allTags.map((tag) => (
-                <SelectItem key={tag} value={tag}>
-                  {tag}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
           <Button
             className="w-full shrink-0 gap-1.5 sm:w-auto"
             onClick={() => navigate(`/${workspaceSlug}/deal-rooms/new`)}
+            disabled={!canWrite}
+            title={canWrite ? undefined : tc("error.codes.insufficient_role")}
           >
             <Plus size={16} weight="bold" />
             {t("page.create")}
@@ -168,13 +123,17 @@ export function DealRoomsPage() {
           <Skeleton className="h-64" />
           <Skeleton className="h-64" />
         </div>
-      ) : rooms?.length === 0 && !searchQuery && selectedTag === "all" ? (
+      ) : rooms?.length === 0 && !searchQuery ? (
         <div className="flex min-h-0 flex-1 flex-col">
           <EmptyState
             icon={<Folder size={48} />}
             title={t("empty.title")}
             description={t("empty.description")}
-            action={{ label: t("empty.action"), onClick: () => navigate(`/${workspaceSlug}/deal-rooms/new`) }}
+            action={
+              canWrite
+                ? { label: t("empty.action"), onClick: () => navigate(`/${workspaceSlug}/deal-rooms/new`) }
+                : undefined
+            }
             size="large"
             className="h-full min-h-[20rem] w-full justify-center"
           />
@@ -182,16 +141,16 @@ export function DealRoomsPage() {
       ) : (
         <>
           <div className="min-h-0 flex-1 overflow-y-auto">
-            {filteredRooms.length === 0 ? (
+            {(rooms?.length ?? 0) === 0 ? (
               <div className="flex h-full flex-col items-center justify-center gap-2 rounded-lg border border-border bg-card p-12 text-center">
                 <p className="text-body text-muted-foreground">{t("filter.noResults")}</p>
-                <Button variant="outline" onClick={() => { setSearch(""); setSelectedTag("all"); }}>
+                <Button variant="outline" onClick={() => setSearch("")}>
                   {t("filter.clear")}
                 </Button>
               </div>
             ) : (
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {filteredRooms.map((room) => (
+                {(rooms ?? []).map((room) => (
                   <Card
                     key={room.id}
                     role="link"
@@ -281,7 +240,7 @@ export function DealRoomsPage() {
               ))}
             </div>
           )}
-          {!filtering && pagination && totalPages > 1 && (
+          {pagination && totalPages > 1 && (
             <div className="mt-4 flex items-center justify-between gap-3">
               <p className="text-caption text-muted-foreground">
                 {t("page.pagination.pageOf", {
