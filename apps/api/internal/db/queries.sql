@@ -18,6 +18,28 @@ UPDATE users
 SET email_verified = TRUE
 WHERE id = $1;
 
+-- name: GrantUserTrial :one
+UPDATE users
+SET trial_granted_at = now()
+WHERE id = $1 AND trial_granted_at IS NULL
+RETURNING id, trial_granted_at;
+
+-- name: CountOwnedWorkspacesByUser :one
+SELECT COUNT(*)::bigint AS count
+FROM workspace_members
+WHERE user_id = $1 AND role = 'owner';
+
+-- name: LockUserWriterCap :exec
+SELECT pg_advisory_xact_lock(sqlc.arg('lock_ns')::int, hashtext(sqlc.arg('user_id')::text));
+
+-- name: ListOwnedWorkspaceBillingByUser :many
+SELECT wb.workspace_id, wb.plan_code, wb.period, wb.trial_ends_at, wb.created_at, wb.updated_at,
+       wb.stripe_customer_id, wb.stripe_subscription_id, wb.stripe_price_id,
+       wb.billing_status, wb.current_period_end, wb.past_due_at
+FROM workspace_members wm
+JOIN workspace_billing wb ON wb.workspace_id = wm.workspace_id
+WHERE wm.user_id = $1 AND wm.role = 'owner';
+
 -- name: CreateTenant :one
 INSERT INTO tenants (name, slug)
 VALUES ($1, $2)
@@ -97,6 +119,25 @@ FROM workspace_members wm
 JOIN users u ON u.id = wm.user_id
 WHERE wm.workspace_id = $1
 ORDER BY wm.joined_at DESC;
+
+-- name: CountInternalSeatsByWorkspace :one
+-- Active internal members + unexpired pending invites (guest roles excluded).
+SELECT (
+    (
+        SELECT COUNT(*)::bigint
+        FROM workspace_members wm
+        WHERE wm.workspace_id = sqlc.arg(workspace_id)
+          AND wm.role IN ('owner', 'admin', 'member')
+    )
+  + (
+        SELECT COUNT(*)::bigint
+        FROM workspace_invitations wi
+        WHERE wi.workspace_id = sqlc.arg(workspace_id)
+          AND wi.used_at IS NULL
+          AND wi.expires_at > now()
+          AND wi.role IN ('admin', 'member')
+    )
+)::bigint AS count;
 
 -- name: CreateDocument :one
 INSERT INTO documents (
@@ -230,12 +271,23 @@ UPDATE documents
 SET deleted_at = now(), updated_at = now()
 WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL;
 
--- name: SoftDeleteLinksByDocument :execrows
+-- name: SoftDeleteLinksByDocument :many
 UPDATE links
 SET status = 'deleted', updated_at = now()
-WHERE workspace_id = $1 AND document_id = $2 AND status <> 'deleted';
+WHERE workspace_id = $1 AND document_id = $2 AND status <> 'deleted'
+RETURNING id;
 
--- name: SoftDeleteOrphanScopedLinksForDocument :execrows
+-- name: ArchiveActiveLinksByDocument :many
+-- Library archive is reversible; park live shares as archived so plan link
+-- inventory frees without destroying RenewLink/reactivate paths.
+UPDATE links
+SET status = 'archived', updated_at = now()
+WHERE workspace_id = $1
+  AND document_id = $2
+  AND status = 'active'
+RETURNING id;
+
+-- name: SoftDeleteOrphanScopedLinksForDocument :many
 -- Soft-delete multi-doc links whose only remaining scoped member is this document.
 UPDATE links l
 SET status = 'deleted', updated_at = now()
@@ -247,7 +299,22 @@ WHERE l.workspace_id = $1
   AND NOT EXISTS (
       SELECT 1 FROM link_documents ld2
       WHERE ld2.link_id = l.id AND ld2.document_id <> $2
-  );
+  )
+RETURNING id;
+
+-- name: ArchiveOrphanScopedActiveLinksForDocument :many
+UPDATE links l
+SET status = 'archived', updated_at = now()
+WHERE l.workspace_id = $1
+  AND l.status = 'active'
+  AND EXISTS (
+      SELECT 1 FROM link_documents ld WHERE ld.link_id = l.id AND ld.document_id = $2
+  )
+  AND NOT EXISTS (
+      SELECT 1 FROM link_documents ld2
+      WHERE ld2.link_id = l.id AND ld2.document_id <> $2
+  )
+RETURNING id;
 
 -- name: DeleteDealRoomDocumentsByDocument :exec
 DELETE FROM deal_room_documents
@@ -258,20 +325,24 @@ DELETE FROM link_documents
 WHERE document_id = $1;
 
 -- name: GetDocumentDeleteImpact :one
+-- active_link_count = live visitor shares (same inventory as plan link quota).
+-- Archived/revoked/expired/past-due rows are already non-live and omitted.
 SELECT
     (
         (SELECT COUNT(*)::bigint
          FROM links l1
          WHERE l1.workspace_id = sqlc.arg(workspace_id)
            AND l1.document_id = sqlc.arg(document_id)
-           AND l1.status NOT IN ('deleted', 'disabled'))
+           AND l1.status = 'active'
+           AND (l1.expires_at IS NULL OR l1.expires_at > now()))
         +
         (SELECT COUNT(*)::bigint
          FROM link_documents ld
          JOIN links l2 ON l2.id = ld.link_id
          WHERE ld.document_id = sqlc.arg(document_id)
            AND l2.workspace_id = sqlc.arg(workspace_id)
-           AND l2.status NOT IN ('deleted', 'disabled')
+           AND l2.status = 'active'
+           AND (l2.expires_at IS NULL OR l2.expires_at > now())
            AND (l2.document_id IS NULL OR l2.document_id <> sqlc.arg(document_id)))
     )::bigint AS active_link_count,
     (SELECT COUNT(*)::bigint
@@ -367,11 +438,38 @@ SET access_count = access_count + 1, updated_at = now()
 WHERE id = $1;
 
 -- name: ListLinksByWorkspace :many
--- All non-deleted workspace links (document + deal-room). Used by analytics/billing.
+-- All non-deleted workspace links (document + deal-room). Used by analytics.
 SELECT *
 FROM links
 WHERE workspace_id = $1 AND status NOT IN ('deleted', 'disabled')
 ORDER BY created_at DESC;
+
+-- name: CountLinksByWorkspace :one
+-- Billing inventory: only live active shares consume the plan link quota.
+-- Past-due active rows (expires_at <= now()) and revoked/archived/disabled/deleted/expired
+-- do not. Renew/reactivate must re-check; ExpirePastDue writes status=expired for lifecycle UX.
+SELECT COUNT(*)::bigint AS count
+FROM links
+WHERE workspace_id = $1
+  AND status = 'active'
+  AND (expires_at IS NULL OR expires_at > now());
+
+-- name: ListWorkspaceIDsWithPastDueActiveLinks :many
+SELECT DISTINCT workspace_id
+FROM links
+WHERE status = 'active'
+  AND expires_at IS NOT NULL
+  AND expires_at <= now();
+
+-- name: ExpirePastDueActiveLinksInWorkspace :many
+UPDATE links
+SET status = 'expired',
+    updated_at = now()
+WHERE workspace_id = $1
+  AND status = 'active'
+  AND expires_at IS NOT NULL
+  AND expires_at <= now()
+RETURNING id;
 
 -- name: ListDocumentLinksByWorkspace :many
 -- Document Library share list: document links only (never deal-room shares).
@@ -990,16 +1088,23 @@ ORDER BY views DESC, avg_duration_seconds DESC
 LIMIT 3;
 
 -- name: GetWorkspaceStorageUsage :one
-SELECT (
-    COALESCE((
-        SELECT SUM(d.file_size) FROM documents d
-        WHERE d.workspace_id = $1 AND d.deleted_at IS NULL
-    ), 0) + COALESCE((
-        SELECT SUM(p.file_size) FROM pages p
-        JOIN documents d ON p.document_id = d.id
-        WHERE d.workspace_id = $1 AND d.deleted_at IS NULL
-    ), 0)
-)::bigint AS total_bytes;
+-- Original upload bytes only. Page rasters are derived from the same files
+-- and must not be double-counted toward workspace storage.
+SELECT COALESCE(SUM(d.file_size), 0)::bigint AS total_bytes
+FROM documents d
+WHERE d.workspace_id = $1 AND d.deleted_at IS NULL;
+
+-- name: SumPendingUploadedFileBytesByWorkspace :one
+-- Unapproved file-request objects occupy object storage until review.
+SELECT COALESCE(SUM(file_size), 0)::bigint AS total_bytes
+FROM link_uploaded_files
+WHERE workspace_id = $1 AND status = 'pending_review';
+
+-- name: CountDocumentsByWorkspace :one
+-- Billing inventory: alive documents consume the plan document quota.
+SELECT COUNT(*)::bigint AS count
+FROM documents
+WHERE workspace_id = $1 AND deleted_at IS NULL;
 
 -- name: GetLinkBounceCount :one
 -- Lifetime bounces; exclude workspace-member opens (align 24h policy).
@@ -2175,6 +2280,87 @@ RETURNING workspace_id, hostname, status, cname_target, verified_at, created_at,
 -- name: DeleteWorkspaceViewerDomain :exec
 DELETE FROM workspace_viewer_domains
 WHERE workspace_id = $1;
+
+-- name: GetWorkspaceBilling :one
+SELECT workspace_id, plan_code, period, trial_ends_at, created_at, updated_at,
+       stripe_customer_id, stripe_subscription_id, stripe_price_id,
+       billing_status, current_period_end, past_due_at
+FROM workspace_billing
+WHERE workspace_id = $1;
+
+-- name: GetWorkspaceBillingByStripeCustomer :one
+SELECT workspace_id, plan_code, period, trial_ends_at, created_at, updated_at,
+       stripe_customer_id, stripe_subscription_id, stripe_price_id,
+       billing_status, current_period_end, past_due_at
+FROM workspace_billing
+WHERE stripe_customer_id = $1
+LIMIT 1;
+
+-- name: LockWorkspaceBillingForUpdate :one
+-- Serializes seat-consuming mutations for a workspace (invite/add/promote/accept).
+SELECT workspace_id, plan_code, period, trial_ends_at, created_at, updated_at,
+       stripe_customer_id, stripe_subscription_id, stripe_price_id,
+       billing_status, current_period_end, past_due_at
+FROM workspace_billing
+WHERE workspace_id = $1
+FOR UPDATE;
+
+-- name: InsertWorkspaceBilling :one
+INSERT INTO workspace_billing (workspace_id, plan_code, period, trial_ends_at)
+VALUES ($1, $2, $3, $4)
+RETURNING workspace_id, plan_code, period, trial_ends_at, created_at, updated_at,
+          stripe_customer_id, stripe_subscription_id, stripe_price_id,
+          billing_status, current_period_end, past_due_at;
+
+-- name: UpsertWorkspaceBilling :one
+INSERT INTO workspace_billing (workspace_id, plan_code, period, trial_ends_at)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (workspace_id) DO UPDATE SET
+    plan_code = EXCLUDED.plan_code,
+    period = EXCLUDED.period,
+    trial_ends_at = EXCLUDED.trial_ends_at,
+    updated_at = now()
+RETURNING workspace_id, plan_code, period, trial_ends_at, created_at, updated_at,
+          stripe_customer_id, stripe_subscription_id, stripe_price_id,
+          billing_status, current_period_end, past_due_at;
+
+-- name: SetWorkspaceStripeCustomer :exec
+UPDATE workspace_billing
+SET stripe_customer_id = $2, updated_at = now()
+WHERE workspace_id = $1;
+
+-- name: ApplyStripeWorkspaceBilling :one
+INSERT INTO workspace_billing (
+    workspace_id, plan_code, period, trial_ends_at,
+    stripe_customer_id, stripe_subscription_id, stripe_price_id,
+    billing_status, current_period_end, past_due_at
+) VALUES (
+    $1, $2, $3, NULL,
+    $4, $5, $6, $7, $8, $9
+)
+ON CONFLICT (workspace_id) DO UPDATE SET
+    plan_code = EXCLUDED.plan_code,
+    period = EXCLUDED.period,
+    trial_ends_at = NULL,
+    stripe_customer_id = CASE
+        WHEN EXCLUDED.stripe_customer_id IS NOT NULL AND EXCLUDED.stripe_customer_id <> ''
+        THEN EXCLUDED.stripe_customer_id
+        ELSE workspace_billing.stripe_customer_id
+    END,
+    stripe_subscription_id = NULLIF(EXCLUDED.stripe_subscription_id, ''),
+    stripe_price_id = NULLIF(EXCLUDED.stripe_price_id, ''),
+    billing_status = EXCLUDED.billing_status,
+    current_period_end = EXCLUDED.current_period_end,
+    past_due_at = EXCLUDED.past_due_at,
+    updated_at = now()
+RETURNING workspace_id, plan_code, period, trial_ends_at, created_at, updated_at,
+          stripe_customer_id, stripe_subscription_id, stripe_price_id,
+          billing_status, current_period_end, past_due_at;
+
+-- name: InsertBillingStripeEvent :execrows
+INSERT INTO billing_stripe_events (event_id, event_type)
+VALUES ($1, $2)
+ON CONFLICT (event_id) DO NOTHING;
 
 -- name: ListTenantDomainsExpiringBefore :many
 SELECT id, tenant_id, domain, domain_type, is_primary, ssl_status, ssl_expires_at, verified_at, created_at, updated_at
@@ -4823,6 +5009,13 @@ WHERE link_id = $1
   AND lane = 'ai'
   AND created_at >= date_trunc('month', now() AT TIME ZONE 'UTC');
 
+-- name: CountWorkspaceAskAITurnsThisMonth :one
+SELECT COUNT(*)::int AS count
+FROM link_ask_turns
+WHERE workspace_id = $1
+  AND lane = 'ai'
+  AND created_at >= date_trunc('month', now() AT TIME ZONE 'UTC');
+
 -- name: GetLinkAskTurnSummary :one
 SELECT
   COUNT(*)::bigint AS total_turns,
@@ -5372,6 +5565,17 @@ WHERE id = $3;
 -- name: GetUploadedFileByID :one
 SELECT * FROM link_uploaded_files
 WHERE id = $1;
+
+-- name: ListPendingUploadedFilesOlderThan :many
+SELECT * FROM link_uploaded_files
+WHERE status = 'pending_review' AND created_at < $1
+ORDER BY created_at ASC
+LIMIT $2;
+
+-- name: ClaimPendingUploadedFileStatus :execrows
+UPDATE link_uploaded_files
+SET status = $1, reviewed_by = $2, reviewed_at = now()
+WHERE id = $3 AND status = 'pending_review';
 
 -- name: DeleteAccessLogsBefore :execrows
 DELETE FROM access_logs

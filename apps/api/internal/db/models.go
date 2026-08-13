@@ -40,6 +40,12 @@ type ActionItem struct {
 	Outcome      pgtype.Text
 }
 
+type BillingStripeEvent struct {
+	EventID     string
+	EventType   string
+	ProcessedAt pgtype.Timestamptz
+}
+
 type Chunk struct {
 	ID          pgtype.UUID
 	TenantID    pgtype.UUID
@@ -995,11 +1001,12 @@ type TmpReadingSessionNumbered struct {
 }
 
 type User struct {
-	ID            pgtype.UUID
-	Email         string
-	PasswordHash  string
-	CreatedAt     pgtype.Timestamptz
-	EmailVerified bool
+	ID             pgtype.UUID
+	Email          string
+	PasswordHash   string
+	CreatedAt      pgtype.Timestamptz
+	EmailVerified  bool
+	TrialGrantedAt pgtype.Timestamptz
 }
 
 type Workspace struct {
@@ -1014,6 +1021,21 @@ type Workspace struct {
 	TwoFactorEnabled       bool
 	CrmConfig              []byte
 	WebhookSecret          pgtype.Text
+}
+
+type WorkspaceBilling struct {
+	WorkspaceID          pgtype.UUID
+	PlanCode             string
+	Period               string
+	TrialEndsAt          pgtype.Timestamptz
+	CreatedAt            pgtype.Timestamptz
+	UpdatedAt            pgtype.Timestamptz
+	StripeCustomerID     pgtype.Text
+	StripeSubscriptionID pgtype.Text
+	StripePriceID        pgtype.Text
+	BillingStatus        pgtype.Text
+	CurrentPeriodEnd     pgtype.Timestamptz
+	PastDueAt            pgtype.Timestamptz
 }
 
 type WorkspaceInvitation struct {

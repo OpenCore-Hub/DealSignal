@@ -289,6 +289,113 @@ func (q *Queries) ApplyDealRoomLinkAccessFromPolicy(ctx context.Context, arg App
 	return err
 }
 
+const applyStripeWorkspaceBilling = `-- name: ApplyStripeWorkspaceBilling :one
+INSERT INTO workspace_billing (
+    workspace_id, plan_code, period, trial_ends_at,
+    stripe_customer_id, stripe_subscription_id, stripe_price_id,
+    billing_status, current_period_end, past_due_at
+) VALUES (
+    $1, $2, $3, NULL,
+    $4, $5, $6, $7, $8, $9
+)
+ON CONFLICT (workspace_id) DO UPDATE SET
+    plan_code = EXCLUDED.plan_code,
+    period = EXCLUDED.period,
+    trial_ends_at = NULL,
+    stripe_customer_id = CASE
+        WHEN EXCLUDED.stripe_customer_id IS NOT NULL AND EXCLUDED.stripe_customer_id <> ''
+        THEN EXCLUDED.stripe_customer_id
+        ELSE workspace_billing.stripe_customer_id
+    END,
+    stripe_subscription_id = NULLIF(EXCLUDED.stripe_subscription_id, ''),
+    stripe_price_id = NULLIF(EXCLUDED.stripe_price_id, ''),
+    billing_status = EXCLUDED.billing_status,
+    current_period_end = EXCLUDED.current_period_end,
+    past_due_at = EXCLUDED.past_due_at,
+    updated_at = now()
+RETURNING workspace_id, plan_code, period, trial_ends_at, created_at, updated_at,
+          stripe_customer_id, stripe_subscription_id, stripe_price_id,
+          billing_status, current_period_end, past_due_at
+`
+
+type ApplyStripeWorkspaceBillingParams struct {
+	WorkspaceID          pgtype.UUID
+	PlanCode             string
+	Period               string
+	StripeCustomerID     pgtype.Text
+	StripeSubscriptionID pgtype.Text
+	StripePriceID        pgtype.Text
+	BillingStatus        pgtype.Text
+	CurrentPeriodEnd     pgtype.Timestamptz
+	PastDueAt            pgtype.Timestamptz
+}
+
+func (q *Queries) ApplyStripeWorkspaceBilling(ctx context.Context, arg ApplyStripeWorkspaceBillingParams) (WorkspaceBilling, error) {
+	row := q.db.QueryRow(ctx, applyStripeWorkspaceBilling,
+		arg.WorkspaceID,
+		arg.PlanCode,
+		arg.Period,
+		arg.StripeCustomerID,
+		arg.StripeSubscriptionID,
+		arg.StripePriceID,
+		arg.BillingStatus,
+		arg.CurrentPeriodEnd,
+		arg.PastDueAt,
+	)
+	var i WorkspaceBilling
+	err := row.Scan(
+		&i.WorkspaceID,
+		&i.PlanCode,
+		&i.Period,
+		&i.TrialEndsAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.StripeCustomerID,
+		&i.StripeSubscriptionID,
+		&i.StripePriceID,
+		&i.BillingStatus,
+		&i.CurrentPeriodEnd,
+		&i.PastDueAt,
+	)
+	return i, err
+}
+
+const archiveActiveLinksByDocument = `-- name: ArchiveActiveLinksByDocument :many
+UPDATE links
+SET status = 'archived', updated_at = now()
+WHERE workspace_id = $1
+  AND document_id = $2
+  AND status = 'active'
+RETURNING id
+`
+
+type ArchiveActiveLinksByDocumentParams struct {
+	WorkspaceID pgtype.UUID
+	DocumentID  pgtype.UUID
+}
+
+// Library archive is reversible; park live shares as archived so plan link
+// inventory frees without destroying RenewLink/reactivate paths.
+func (q *Queries) ArchiveActiveLinksByDocument(ctx context.Context, arg ArchiveActiveLinksByDocumentParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, archiveActiveLinksByDocument, arg.WorkspaceID, arg.DocumentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []pgtype.UUID
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const archiveDocument = `-- name: ArchiveDocument :exec
 UPDATE documents
 SET status = 'archived', updated_at = now()
@@ -335,6 +442,46 @@ func (q *Queries) ArchiveNDATemplate(ctx context.Context, arg ArchiveNDATemplate
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const archiveOrphanScopedActiveLinksForDocument = `-- name: ArchiveOrphanScopedActiveLinksForDocument :many
+UPDATE links l
+SET status = 'archived', updated_at = now()
+WHERE l.workspace_id = $1
+  AND l.status = 'active'
+  AND EXISTS (
+      SELECT 1 FROM link_documents ld WHERE ld.link_id = l.id AND ld.document_id = $2
+  )
+  AND NOT EXISTS (
+      SELECT 1 FROM link_documents ld2
+      WHERE ld2.link_id = l.id AND ld2.document_id <> $2
+  )
+RETURNING id
+`
+
+type ArchiveOrphanScopedActiveLinksForDocumentParams struct {
+	WorkspaceID pgtype.UUID
+	DocumentID  pgtype.UUID
+}
+
+func (q *Queries) ArchiveOrphanScopedActiveLinksForDocument(ctx context.Context, arg ArchiveOrphanScopedActiveLinksForDocumentParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, archiveOrphanScopedActiveLinksForDocument, arg.WorkspaceID, arg.DocumentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []pgtype.UUID
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const avgKnowledgeQATurnDurationMsForWorkspaceSince = `-- name: AvgKnowledgeQATurnDurationMsForWorkspaceSince :one
@@ -409,6 +556,26 @@ func (q *Queries) ClaimKnowledgeSyncJob(ctx context.Context, id pgtype.UUID) (Kn
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const claimPendingUploadedFileStatus = `-- name: ClaimPendingUploadedFileStatus :execrows
+UPDATE link_uploaded_files
+SET status = $1, reviewed_by = $2, reviewed_at = now()
+WHERE id = $3 AND status = 'pending_review'
+`
+
+type ClaimPendingUploadedFileStatusParams struct {
+	Status     string
+	ReviewedBy pgtype.UUID
+	ID         pgtype.UUID
+}
+
+func (q *Queries) ClaimPendingUploadedFileStatus(ctx context.Context, arg ClaimPendingUploadedFileStatusParams) (int64, error) {
+	result, err := q.db.Exec(ctx, claimPendingUploadedFileStatus, arg.Status, arg.ReviewedBy, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const closeActiveKnowledgeQASessionsForRoom = `-- name: CloseActiveKnowledgeQASessionsForRoom :exec
@@ -699,6 +866,20 @@ func (q *Queries) CountDocumentPages(ctx context.Context, documentID pgtype.UUID
 	return column_1, err
 }
 
+const countDocumentsByWorkspace = `-- name: CountDocumentsByWorkspace :one
+SELECT COUNT(*)::bigint AS count
+FROM documents
+WHERE workspace_id = $1 AND deleted_at IS NULL
+`
+
+// Billing inventory: alive documents consume the plan document quota.
+func (q *Queries) CountDocumentsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countDocumentsByWorkspace, workspaceID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countDocumentsInFolder = `-- name: CountDocumentsInFolder :one
 SELECT COUNT(*) AS count
 FROM deal_room_documents
@@ -748,6 +929,33 @@ func (q *Queries) CountEmailEventsByLogID(ctx context.Context, emailLogID pgtype
 		return nil, err
 	}
 	return items, nil
+}
+
+const countInternalSeatsByWorkspace = `-- name: CountInternalSeatsByWorkspace :one
+SELECT (
+    (
+        SELECT COUNT(*)::bigint
+        FROM workspace_members wm
+        WHERE wm.workspace_id = $1
+          AND wm.role IN ('owner', 'admin', 'member')
+    )
+  + (
+        SELECT COUNT(*)::bigint
+        FROM workspace_invitations wi
+        WHERE wi.workspace_id = $1
+          AND wi.used_at IS NULL
+          AND wi.expires_at > now()
+          AND wi.role IN ('admin', 'member')
+    )
+)::bigint AS count
+`
+
+// Active internal members + unexpired pending invites (guest roles excluded).
+func (q *Queries) CountInternalSeatsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countInternalSeatsByWorkspace, workspaceID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
 }
 
 const countKnowledgeQAEvalCandidatesByStatusForWorkspace = `-- name: CountKnowledgeQAEvalCandidatesByStatusForWorkspace :many
@@ -1037,6 +1245,24 @@ func (q *Queries) CountLinksByDealRoomFiltered(ctx context.Context, arg CountLin
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
+}
+
+const countLinksByWorkspace = `-- name: CountLinksByWorkspace :one
+SELECT COUNT(*)::bigint AS count
+FROM links
+WHERE workspace_id = $1
+  AND status = 'active'
+  AND (expires_at IS NULL OR expires_at > now())
+`
+
+// Billing inventory: only live active shares consume the plan link quota.
+// Past-due active rows (expires_at <= now()) and revoked/archived/disabled/deleted/expired
+// do not. Renew/reactivate must re-check; ExpirePastDue writes status=expired for lifecycle UX.
+func (q *Queries) CountLinksByWorkspace(ctx context.Context, workspaceID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countLinksByWorkspace, workspaceID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
 }
 
 const countNDATemplateLinks = `-- name: CountNDATemplateLinks :one
@@ -1854,6 +2080,21 @@ func (q *Queries) CountWorkspaceAccessAuditByType(ctx context.Context, arg Count
 	return items, nil
 }
 
+const countWorkspaceAskAITurnsThisMonth = `-- name: CountWorkspaceAskAITurnsThisMonth :one
+SELECT COUNT(*)::int AS count
+FROM link_ask_turns
+WHERE workspace_id = $1
+  AND lane = 'ai'
+  AND created_at >= date_trunc('month', now() AT TIME ZONE 'UTC')
+`
+
+func (q *Queries) CountWorkspaceAskAITurnsThisMonth(ctx context.Context, workspaceID pgtype.UUID) (int32, error) {
+	row := q.db.QueryRow(ctx, countWorkspaceAskAITurnsThisMonth, workspaceID)
+	var count int32
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countWorkspaceForwardSignalsByLinkInRange = `-- name: CountWorkspaceForwardSignalsByLinkInRange :many
 SELECT
     al.link_id,
@@ -1948,6 +2189,19 @@ func (q *Queries) CountWorkspaceLinkOpensInRange(ctx context.Context, arg CountW
 	var opens int64
 	err := row.Scan(&opens)
 	return opens, err
+}
+
+const countOwnedWorkspacesByUser = `-- name: CountOwnedWorkspacesByUser :one
+SELECT COUNT(*)::bigint AS count
+FROM workspace_members
+WHERE user_id = $1 AND role = 'owner'
+`
+
+func (q *Queries) CountOwnedWorkspacesByUser(ctx context.Context, userID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countOwnedWorkspacesByUser, userID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
 }
 
 const createAccessLog = `-- name: CreateAccessLog :exec
@@ -4197,7 +4451,7 @@ func (q *Queries) CreateUploadedFile(ctx context.Context, arg CreateUploadedFile
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (email, password_hash)
 VALUES ($1, $2)
-RETURNING id, email, password_hash, created_at, email_verified
+RETURNING id, email, password_hash, created_at, email_verified, trial_granted_at
 `
 
 type CreateUserParams struct {
@@ -4214,6 +4468,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.PasswordHash,
 		&i.CreatedAt,
 		&i.EmailVerified,
+		&i.TrialGrantedAt,
 	)
 	return i, err
 }
@@ -4837,6 +5092,37 @@ func (q *Queries) ExistsLinkNameInWorkspace(ctx context.Context, arg ExistsLinkN
 	var exists bool
 	err := row.Scan(&exists)
 	return exists, err
+}
+
+const expirePastDueActiveLinksInWorkspace = `-- name: ExpirePastDueActiveLinksInWorkspace :many
+UPDATE links
+SET status = 'expired',
+    updated_at = now()
+WHERE workspace_id = $1
+  AND status = 'active'
+  AND expires_at IS NOT NULL
+  AND expires_at <= now()
+RETURNING id
+`
+
+func (q *Queries) ExpirePastDueActiveLinksInWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, expirePastDueActiveLinksInWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []pgtype.UUID
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const findMergeableNotification = `-- name: FindMergeableNotification :one
@@ -6191,14 +6477,16 @@ SELECT
          FROM links l1
          WHERE l1.workspace_id = $1
            AND l1.document_id = $2
-           AND l1.status NOT IN ('deleted', 'disabled'))
+           AND l1.status = 'active'
+           AND (l1.expires_at IS NULL OR l1.expires_at > now()))
         +
         (SELECT COUNT(*)::bigint
          FROM link_documents ld
          JOIN links l2 ON l2.id = ld.link_id
          WHERE ld.document_id = $2
            AND l2.workspace_id = $1
-           AND l2.status NOT IN ('deleted', 'disabled')
+           AND l2.status = 'active'
+           AND (l2.expires_at IS NULL OR l2.expires_at > now())
            AND (l2.document_id IS NULL OR l2.document_id <> $2))
     )::bigint AS active_link_count,
     (SELECT COUNT(*)::bigint
@@ -6217,6 +6505,8 @@ type GetDocumentDeleteImpactRow struct {
 	DealRoomCount   int64
 }
 
+// active_link_count = live visitor shares (same inventory as plan link quota).
+// Archived/revoked/expired/past-due rows are already non-live and omitted.
 func (q *Queries) GetDocumentDeleteImpact(ctx context.Context, arg GetDocumentDeleteImpactParams) (GetDocumentDeleteImpactRow, error) {
 	row := q.db.QueryRow(ctx, getDocumentDeleteImpact, arg.WorkspaceID, arg.DocumentID)
 	var i GetDocumentDeleteImpactRow
@@ -9924,7 +10214,7 @@ func (q *Queries) GetUploadedFileByID(ctx context.Context, id pgtype.UUID) (Link
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, password_hash, created_at, email_verified
+SELECT id, email, password_hash, created_at, email_verified, trial_granted_at
 FROM users
 WHERE email = $1 LIMIT 1
 `
@@ -9938,12 +10228,13 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.PasswordHash,
 		&i.CreatedAt,
 		&i.EmailVerified,
+		&i.TrialGrantedAt,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, email, password_hash, created_at, email_verified
+SELECT id, email, password_hash, created_at, email_verified, trial_granted_at
 FROM users
 WHERE id = $1 LIMIT 1
 `
@@ -9957,6 +10248,7 @@ func (q *Queries) GetUserByID(ctx context.Context, id pgtype.UUID) (User, error)
 		&i.PasswordHash,
 		&i.CreatedAt,
 		&i.EmailVerified,
+		&i.TrialGrantedAt,
 	)
 	return i, err
 }
@@ -10143,6 +10435,63 @@ func (q *Queries) GetVisitorSummariesByDocumentInRange(ctx context.Context, arg 
 		return nil, err
 	}
 	return items, nil
+}
+
+const getWorkspaceBilling = `-- name: GetWorkspaceBilling :one
+SELECT workspace_id, plan_code, period, trial_ends_at, created_at, updated_at,
+       stripe_customer_id, stripe_subscription_id, stripe_price_id,
+       billing_status, current_period_end, past_due_at
+FROM workspace_billing
+WHERE workspace_id = $1
+`
+
+func (q *Queries) GetWorkspaceBilling(ctx context.Context, workspaceID pgtype.UUID) (WorkspaceBilling, error) {
+	row := q.db.QueryRow(ctx, getWorkspaceBilling, workspaceID)
+	var i WorkspaceBilling
+	err := row.Scan(
+		&i.WorkspaceID,
+		&i.PlanCode,
+		&i.Period,
+		&i.TrialEndsAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.StripeCustomerID,
+		&i.StripeSubscriptionID,
+		&i.StripePriceID,
+		&i.BillingStatus,
+		&i.CurrentPeriodEnd,
+		&i.PastDueAt,
+	)
+	return i, err
+}
+
+const getWorkspaceBillingByStripeCustomer = `-- name: GetWorkspaceBillingByStripeCustomer :one
+SELECT workspace_id, plan_code, period, trial_ends_at, created_at, updated_at,
+       stripe_customer_id, stripe_subscription_id, stripe_price_id,
+       billing_status, current_period_end, past_due_at
+FROM workspace_billing
+WHERE stripe_customer_id = $1
+LIMIT 1
+`
+
+func (q *Queries) GetWorkspaceBillingByStripeCustomer(ctx context.Context, stripeCustomerID pgtype.Text) (WorkspaceBilling, error) {
+	row := q.db.QueryRow(ctx, getWorkspaceBillingByStripeCustomer, stripeCustomerID)
+	var i WorkspaceBilling
+	err := row.Scan(
+		&i.WorkspaceID,
+		&i.PlanCode,
+		&i.Period,
+		&i.TrialEndsAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.StripeCustomerID,
+		&i.StripeSubscriptionID,
+		&i.StripePriceID,
+		&i.BillingStatus,
+		&i.CurrentPeriodEnd,
+		&i.PastDueAt,
+	)
+	return i, err
 }
 
 const getWorkspaceByID = `-- name: GetWorkspaceByID :one
@@ -10647,18 +10996,13 @@ func (q *Queries) GetWorkspaceReadingSessionStatsInRange(ctx context.Context, ar
 }
 
 const getWorkspaceStorageUsage = `-- name: GetWorkspaceStorageUsage :one
-SELECT (
-    COALESCE((
-        SELECT SUM(d.file_size) FROM documents d
-        WHERE d.workspace_id = $1 AND d.deleted_at IS NULL
-    ), 0) + COALESCE((
-        SELECT SUM(p.file_size) FROM pages p
-        JOIN documents d ON p.document_id = d.id
-        WHERE d.workspace_id = $1 AND d.deleted_at IS NULL
-    ), 0)
-)::bigint AS total_bytes
+SELECT COALESCE(SUM(d.file_size), 0)::bigint AS total_bytes
+FROM documents d
+WHERE d.workspace_id = $1 AND d.deleted_at IS NULL
 `
 
+// Original upload bytes only. Page rasters are derived from the same files
+// and must not be double-counted toward workspace storage.
 func (q *Queries) GetWorkspaceStorageUsage(ctx context.Context, workspaceID pgtype.UUID) (int64, error) {
 	row := q.db.QueryRow(ctx, getWorkspaceStorageUsage, workspaceID)
 	var total_bytes int64
@@ -10719,6 +11063,25 @@ func (q *Queries) GetWorkspaceViewerDomainByHostname(ctx context.Context, lower 
 		&i.UpdatedAt,
 		&i.TenantID,
 	)
+	return i, err
+}
+
+const grantUserTrial = `-- name: GrantUserTrial :one
+UPDATE users
+SET trial_granted_at = now()
+WHERE id = $1 AND trial_granted_at IS NULL
+RETURNING id, trial_granted_at
+`
+
+type GrantUserTrialRow struct {
+	ID             pgtype.UUID
+	TrialGrantedAt pgtype.Timestamptz
+}
+
+func (q *Queries) GrantUserTrial(ctx context.Context, id pgtype.UUID) (GrantUserTrialRow, error) {
+	row := q.db.QueryRow(ctx, grantUserTrial, id)
+	var i GrantUserTrialRow
+	err := row.Scan(&i.ID, &i.TrialGrantedAt)
 	return i, err
 }
 
@@ -10825,6 +11188,25 @@ func (q *Queries) IncrementSuggestionOutboxAttempts(ctx context.Context, arg Inc
 	return err
 }
 
+const insertBillingStripeEvent = `-- name: InsertBillingStripeEvent :execrows
+INSERT INTO billing_stripe_events (event_id, event_type)
+VALUES ($1, $2)
+ON CONFLICT (event_id) DO NOTHING
+`
+
+type InsertBillingStripeEventParams struct {
+	EventID   string
+	EventType string
+}
+
+func (q *Queries) InsertBillingStripeEvent(ctx context.Context, arg InsertBillingStripeEventParams) (int64, error) {
+	result, err := q.db.Exec(ctx, insertBillingStripeEvent, arg.EventID, arg.EventType)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const insertLinkAccessRuleRevision = `-- name: InsertLinkAccessRuleRevision :exec
 INSERT INTO link_access_rule_revisions (
     tenant_id, workspace_id, link_id, changed_by, rules_snapshot
@@ -10874,6 +11256,46 @@ func (q *Queries) InsertSuggestionOutbox(ctx context.Context, arg InsertSuggesti
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const insertWorkspaceBilling = `-- name: InsertWorkspaceBilling :one
+INSERT INTO workspace_billing (workspace_id, plan_code, period, trial_ends_at)
+VALUES ($1, $2, $3, $4)
+RETURNING workspace_id, plan_code, period, trial_ends_at, created_at, updated_at,
+          stripe_customer_id, stripe_subscription_id, stripe_price_id,
+          billing_status, current_period_end, past_due_at
+`
+
+type InsertWorkspaceBillingParams struct {
+	WorkspaceID pgtype.UUID
+	PlanCode    string
+	Period      string
+	TrialEndsAt pgtype.Timestamptz
+}
+
+func (q *Queries) InsertWorkspaceBilling(ctx context.Context, arg InsertWorkspaceBillingParams) (WorkspaceBilling, error) {
+	row := q.db.QueryRow(ctx, insertWorkspaceBilling,
+		arg.WorkspaceID,
+		arg.PlanCode,
+		arg.Period,
+		arg.TrialEndsAt,
+	)
+	var i WorkspaceBilling
+	err := row.Scan(
+		&i.WorkspaceID,
+		&i.PlanCode,
+		&i.Period,
+		&i.TrialEndsAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.StripeCustomerID,
+		&i.StripeSubscriptionID,
+		&i.StripePriceID,
+		&i.BillingStatus,
+		&i.CurrentPeriodEnd,
+		&i.PastDueAt,
+	)
+	return i, err
 }
 
 const listAcceptedKnowledgeQAEvalCandidatesForRoom = `-- name: ListAcceptedKnowledgeQAEvalCandidatesForRoom :many
@@ -14693,7 +15115,7 @@ WHERE workspace_id = $1 AND status NOT IN ('deleted', 'disabled')
 ORDER BY created_at DESC
 `
 
-// All non-deleted workspace links (document + deal-room). Used by analytics/billing.
+// All non-deleted workspace links (document + deal-room). Used by analytics.
 func (q *Queries) ListLinksByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]Link, error) {
 	rows, err := q.db.Query(ctx, listLinksByWorkspace, workspaceID)
 	if err != nil {
@@ -14898,6 +15320,48 @@ func (q *Queries) ListNotificationRulesByWorkspace(ctx context.Context, workspac
 			&i.MergeWindowMinutes,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOwnedWorkspaceBillingByUser = `-- name: ListOwnedWorkspaceBillingByUser :many
+SELECT wb.workspace_id, wb.plan_code, wb.period, wb.trial_ends_at, wb.created_at, wb.updated_at,
+       wb.stripe_customer_id, wb.stripe_subscription_id, wb.stripe_price_id,
+       wb.billing_status, wb.current_period_end, wb.past_due_at
+FROM workspace_members wm
+JOIN workspace_billing wb ON wb.workspace_id = wm.workspace_id
+WHERE wm.user_id = $1 AND wm.role = 'owner'
+`
+
+func (q *Queries) ListOwnedWorkspaceBillingByUser(ctx context.Context, userID pgtype.UUID) ([]WorkspaceBilling, error) {
+	rows, err := q.db.Query(ctx, listOwnedWorkspaceBillingByUser, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []WorkspaceBilling
+	for rows.Next() {
+		var i WorkspaceBilling
+		if err := rows.Scan(
+			&i.WorkspaceID,
+			&i.PlanCode,
+			&i.Period,
+			&i.TrialEndsAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.StripeCustomerID,
+			&i.StripeSubscriptionID,
+			&i.StripePriceID,
+			&i.BillingStatus,
+			&i.CurrentPeriodEnd,
+			&i.PastDueAt,
 		); err != nil {
 			return nil, err
 		}
@@ -15808,6 +16272,56 @@ func (q *Queries) ListPendingUploadedFilesByWorkspace(ctx context.Context, works
 			&i.OriginalFilename,
 			&i.LinkID,
 			&i.LinkName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPendingUploadedFilesOlderThan = `-- name: ListPendingUploadedFilesOlderThan :many
+SELECT id, tenant_id, workspace_id, link_id, document_id, original_filename, storage_key, file_size, mime_type, uploader_email, uploader_visitor_id, uploader_ip, uploader_user_agent, status, reviewed_by, reviewed_at, created_at FROM link_uploaded_files
+WHERE status = 'pending_review' AND created_at < $1
+ORDER BY created_at ASC
+LIMIT $2
+`
+
+type ListPendingUploadedFilesOlderThanParams struct {
+	CreatedAt pgtype.Timestamptz
+	Limit     int32
+}
+
+func (q *Queries) ListPendingUploadedFilesOlderThan(ctx context.Context, arg ListPendingUploadedFilesOlderThanParams) ([]LinkUploadedFile, error) {
+	rows, err := q.db.Query(ctx, listPendingUploadedFilesOlderThan, arg.CreatedAt, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []LinkUploadedFile
+	for rows.Next() {
+		var i LinkUploadedFile
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.WorkspaceID,
+			&i.LinkID,
+			&i.DocumentID,
+			&i.OriginalFilename,
+			&i.StorageKey,
+			&i.FileSize,
+			&i.MimeType,
+			&i.UploaderEmail,
+			&i.UploaderVisitorID,
+			&i.UploaderIp,
+			&i.UploaderUserAgent,
+			&i.Status,
+			&i.ReviewedBy,
+			&i.ReviewedAt,
+			&i.CreatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -17914,6 +18428,34 @@ func (q *Queries) ListWorkspaceAccessAuditEvents(ctx context.Context, arg ListWo
 	return items, nil
 }
 
+const listWorkspaceIDsWithPastDueActiveLinks = `-- name: ListWorkspaceIDsWithPastDueActiveLinks :many
+SELECT DISTINCT workspace_id
+FROM links
+WHERE status = 'active'
+  AND expires_at IS NOT NULL
+  AND expires_at <= now()
+`
+
+func (q *Queries) ListWorkspaceIDsWithPastDueActiveLinks(ctx context.Context) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listWorkspaceIDsWithPastDueActiveLinks)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []pgtype.UUID
+	for rows.Next() {
+		var workspace_id pgtype.UUID
+		if err := rows.Scan(&workspace_id); err != nil {
+			return nil, err
+		}
+		items = append(items, workspace_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listWorkspaceKeyPageComplianceByPage = `-- name: ListWorkspaceKeyPageComplianceByPage :many
 SELECT
     COALESCE(pv.document_id, l.document_id) AS document_id,
@@ -18330,6 +18872,50 @@ func (q *Queries) LockKnowledgeQASession(ctx context.Context, id pgtype.UUID) (K
 		&i.UpdatedAt,
 		&i.LastTurnAt,
 		&i.State,
+	)
+	return i, err
+}
+
+const lockUserWriterCap = `-- name: LockUserWriterCap :exec
+SELECT pg_advisory_xact_lock($1::int, hashtext($2::text))
+`
+
+type LockUserWriterCapParams struct {
+	LockNs int32
+	UserID string
+}
+
+func (q *Queries) LockUserWriterCap(ctx context.Context, arg LockUserWriterCapParams) error {
+	_, err := q.db.Exec(ctx, lockUserWriterCap, arg.LockNs, arg.UserID)
+	return err
+}
+
+const lockWorkspaceBillingForUpdate = `-- name: LockWorkspaceBillingForUpdate :one
+SELECT workspace_id, plan_code, period, trial_ends_at, created_at, updated_at,
+       stripe_customer_id, stripe_subscription_id, stripe_price_id,
+       billing_status, current_period_end, past_due_at
+FROM workspace_billing
+WHERE workspace_id = $1
+FOR UPDATE
+`
+
+// Serializes seat-consuming mutations for a workspace (invite/add/promote/accept).
+func (q *Queries) LockWorkspaceBillingForUpdate(ctx context.Context, workspaceID pgtype.UUID) (WorkspaceBilling, error) {
+	row := q.db.QueryRow(ctx, lockWorkspaceBillingForUpdate, workspaceID)
+	var i WorkspaceBilling
+	err := row.Scan(
+		&i.WorkspaceID,
+		&i.PlanCode,
+		&i.Period,
+		&i.TrialEndsAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.StripeCustomerID,
+		&i.StripeSubscriptionID,
+		&i.StripePriceID,
+		&i.BillingStatus,
+		&i.CurrentPeriodEnd,
+		&i.PastDueAt,
 	)
 	return i, err
 }
@@ -19485,6 +20071,22 @@ func (q *Queries) SetLinkNDABinding(ctx context.Context, arg SetLinkNDABindingPa
 	return err
 }
 
+const setWorkspaceStripeCustomer = `-- name: SetWorkspaceStripeCustomer :exec
+UPDATE workspace_billing
+SET stripe_customer_id = $2, updated_at = now()
+WHERE workspace_id = $1
+`
+
+type SetWorkspaceStripeCustomerParams struct {
+	WorkspaceID      pgtype.UUID
+	StripeCustomerID pgtype.Text
+}
+
+func (q *Queries) SetWorkspaceStripeCustomer(ctx context.Context, arg SetWorkspaceStripeCustomerParams) error {
+	_, err := q.db.Exec(ctx, setWorkspaceStripeCustomer, arg.WorkspaceID, arg.StripeCustomerID)
+	return err
+}
+
 const snoozeActionItemBySource = `-- name: SnoozeActionItemBySource :exec
 UPDATE action_items
 SET status = 'snoozed',
@@ -19589,10 +20191,11 @@ func (q *Queries) SoftDeleteDocument(ctx context.Context, arg SoftDeleteDocument
 	return err
 }
 
-const softDeleteLinksByDocument = `-- name: SoftDeleteLinksByDocument :execrows
+const softDeleteLinksByDocument = `-- name: SoftDeleteLinksByDocument :many
 UPDATE links
 SET status = 'deleted', updated_at = now()
 WHERE workspace_id = $1 AND document_id = $2 AND status <> 'deleted'
+RETURNING id
 `
 
 type SoftDeleteLinksByDocumentParams struct {
@@ -19600,15 +20203,27 @@ type SoftDeleteLinksByDocumentParams struct {
 	DocumentID  pgtype.UUID
 }
 
-func (q *Queries) SoftDeleteLinksByDocument(ctx context.Context, arg SoftDeleteLinksByDocumentParams) (int64, error) {
-	result, err := q.db.Exec(ctx, softDeleteLinksByDocument, arg.WorkspaceID, arg.DocumentID)
+func (q *Queries) SoftDeleteLinksByDocument(ctx context.Context, arg SoftDeleteLinksByDocumentParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, softDeleteLinksByDocument, arg.WorkspaceID, arg.DocumentID)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	return result.RowsAffected(), nil
+	defer rows.Close()
+	var items []pgtype.UUID
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
-const softDeleteOrphanScopedLinksForDocument = `-- name: SoftDeleteOrphanScopedLinksForDocument :execrows
+const softDeleteOrphanScopedLinksForDocument = `-- name: SoftDeleteOrphanScopedLinksForDocument :many
 UPDATE links l
 SET status = 'deleted', updated_at = now()
 WHERE l.workspace_id = $1
@@ -19620,6 +20235,7 @@ WHERE l.workspace_id = $1
       SELECT 1 FROM link_documents ld2
       WHERE ld2.link_id = l.id AND ld2.document_id <> $2
   )
+RETURNING id
 `
 
 type SoftDeleteOrphanScopedLinksForDocumentParams struct {
@@ -19628,12 +20244,24 @@ type SoftDeleteOrphanScopedLinksForDocumentParams struct {
 }
 
 // Soft-delete multi-doc links whose only remaining scoped member is this document.
-func (q *Queries) SoftDeleteOrphanScopedLinksForDocument(ctx context.Context, arg SoftDeleteOrphanScopedLinksForDocumentParams) (int64, error) {
-	result, err := q.db.Exec(ctx, softDeleteOrphanScopedLinksForDocument, arg.WorkspaceID, arg.DocumentID)
+func (q *Queries) SoftDeleteOrphanScopedLinksForDocument(ctx context.Context, arg SoftDeleteOrphanScopedLinksForDocumentParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, softDeleteOrphanScopedLinksForDocument, arg.WorkspaceID, arg.DocumentID)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	return result.RowsAffected(), nil
+	defer rows.Close()
+	var items []pgtype.UUID
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const sumKnowledgeQACostUnitsForWorkspaceSince = `-- name: SumKnowledgeQACostUnitsForWorkspaceSince :one
@@ -19660,6 +20288,20 @@ func (q *Queries) SumKnowledgeQACostUnitsForWorkspaceSince(ctx context.Context, 
 	var cost_units int64
 	err := row.Scan(&cost_units)
 	return cost_units, err
+}
+
+const sumPendingUploadedFileBytesByWorkspace = `-- name: SumPendingUploadedFileBytesByWorkspace :one
+SELECT COALESCE(SUM(file_size), 0)::bigint AS total_bytes
+FROM link_uploaded_files
+WHERE workspace_id = $1 AND status = 'pending_review'
+`
+
+// Unapproved file-request objects occupy object storage until review.
+func (q *Queries) SumPendingUploadedFileBytesByWorkspace(ctx context.Context, workspaceID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, sumPendingUploadedFileBytesByWorkspace, workspaceID)
+	var total_bytes int64
+	err := row.Scan(&total_bytes)
+	return total_bytes, err
 }
 
 const touchKnowledgeQASessionAfterTurn = `-- name: TouchKnowledgeQASessionAfterTurn :exec
@@ -21774,6 +22416,51 @@ type UpsertReadingSessionPageParams struct {
 func (q *Queries) UpsertReadingSessionPage(ctx context.Context, arg UpsertReadingSessionPageParams) error {
 	_, err := q.db.Exec(ctx, upsertReadingSessionPage, arg.SessionID, arg.PageNumber, arg.DurationSeconds)
 	return err
+}
+
+const upsertWorkspaceBilling = `-- name: UpsertWorkspaceBilling :one
+INSERT INTO workspace_billing (workspace_id, plan_code, period, trial_ends_at)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (workspace_id) DO UPDATE SET
+    plan_code = EXCLUDED.plan_code,
+    period = EXCLUDED.period,
+    trial_ends_at = EXCLUDED.trial_ends_at,
+    updated_at = now()
+RETURNING workspace_id, plan_code, period, trial_ends_at, created_at, updated_at,
+          stripe_customer_id, stripe_subscription_id, stripe_price_id,
+          billing_status, current_period_end, past_due_at
+`
+
+type UpsertWorkspaceBillingParams struct {
+	WorkspaceID pgtype.UUID
+	PlanCode    string
+	Period      string
+	TrialEndsAt pgtype.Timestamptz
+}
+
+func (q *Queries) UpsertWorkspaceBilling(ctx context.Context, arg UpsertWorkspaceBillingParams) (WorkspaceBilling, error) {
+	row := q.db.QueryRow(ctx, upsertWorkspaceBilling,
+		arg.WorkspaceID,
+		arg.PlanCode,
+		arg.Period,
+		arg.TrialEndsAt,
+	)
+	var i WorkspaceBilling
+	err := row.Scan(
+		&i.WorkspaceID,
+		&i.PlanCode,
+		&i.Period,
+		&i.TrialEndsAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.StripeCustomerID,
+		&i.StripeSubscriptionID,
+		&i.StripePriceID,
+		&i.BillingStatus,
+		&i.CurrentPeriodEnd,
+		&i.PastDueAt,
+	)
+	return i, err
 }
 
 const upsertWorkspaceKeyPageSettings = `-- name: UpsertWorkspaceKeyPageSettings :one

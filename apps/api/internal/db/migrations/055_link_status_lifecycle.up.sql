@@ -7,6 +7,9 @@ ALTER TABLE links
     ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active';
 
 ALTER TABLE links
+    DROP CONSTRAINT IF EXISTS links_status_check;
+
+ALTER TABLE links
     DROP CONSTRAINT IF EXISTS chk_links_status;
 
 ALTER TABLE links
