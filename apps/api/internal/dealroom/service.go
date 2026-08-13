@@ -16,6 +16,7 @@ import (
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/logger"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/plan"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/upload"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -26,17 +27,17 @@ import (
 var (
 	slugRegex = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 
-	ErrRoomNotFound       = errors.New("room not found")
-	ErrInvalidSlug        = errors.New("the data room URL can only contain lowercase letters, numbers, and hyphens")
-	ErrDuplicateSlug      = errors.New("a data room with this URL already exists. please choose a different name")
-	ErrNotRoomAdmin       = errors.New("not a room admin")
-	ErrMemberNotFound     = errors.New("member not found")
-	ErrRequestNotFound    = errors.New("access request not found")
-	ErrNDARequired        = errors.New("nda required")
-	ErrApprovalRequired   = errors.New("access not approved")
-	ErrFolderAccessDenied = errors.New("folder access denied")
-	ErrInvalidEmail       = errors.New("invalid email")
-	ErrFolderNotEmpty     = errors.New("folder is not empty")
+	ErrRoomNotFound        = errors.New("room not found")
+	ErrInvalidSlug         = errors.New("the data room URL can only contain lowercase letters, numbers, and hyphens")
+	ErrDuplicateSlug       = errors.New("a data room with this URL already exists. please choose a different name")
+	ErrNotRoomAdmin        = errors.New("not a room admin")
+	ErrMemberNotFound      = errors.New("member not found")
+	ErrRequestNotFound     = errors.New("access request not found")
+	ErrNDARequired         = errors.New("nda required")
+	ErrApprovalRequired    = errors.New("access not approved")
+	ErrFolderAccessDenied  = errors.New("folder access denied")
+	ErrInvalidEmail        = errors.New("invalid email")
+	ErrFolderNotEmpty      = errors.New("folder is not empty")
 	ErrFolderNotFound      = errors.New("folder not found")
 	ErrFolderExists        = errors.New("folder already exists")
 	ErrResourceLocked      = errors.New("resource is locked")
@@ -48,8 +49,10 @@ var (
 )
 
 const (
-	workspaceRoleOwner = "owner"
-	workspaceRoleAdmin = "admin"
+	workspaceRoleOwner  = "owner"
+	workspaceRoleAdmin  = "admin"
+	workspaceRoleMember = "member"
+	workspaceRoleGuest  = "guest"
 )
 
 // Beginner starts a database transaction.
@@ -71,8 +74,9 @@ type Service struct {
 	rateLimiter       RateLimiter
 	knowledgeEnqueuer KnowledgeEnqueuer
 	// kvCache backs list cards and room analytics (JSON get/set/del).
-	kvCache    ListCache
-	listFlight singleflight.Group
+	kvCache     ListCache
+	listFlight  singleflight.Group
+	planChecker plan.Checker
 }
 
 // ActionSyncer resolves operational action items when room events are handled.
@@ -107,6 +111,11 @@ func WithKnowledgeEnqueuer(k KnowledgeEnqueuer) ServiceOption {
 // WithListCache wires a Redis (or compatible) KV cache for room lists and analytics.
 func WithListCache(c ListCache) ServiceOption {
 	return func(s *Service) { s.kvCache = c }
+}
+
+// WithPlanChecker enforces workspace plan limits on room create. Nil skips checks.
+func WithPlanChecker(c plan.Checker) ServiceOption {
+	return func(s *Service) { s.planChecker = c }
 }
 
 // NewService creates a deal room service.
@@ -214,7 +223,33 @@ func (s *Service) CreateRoom(ctx context.Context, userID, workspaceID string, re
 	if !slugRegex.MatchString(req.Slug) {
 		return db.DealRoom{}, ErrInvalidSlug
 	}
+	if s.planChecker != nil {
+		// Create-path NDA: false→true only (rooms start without NDA when flag is off).
+		if req.RequiresNDA {
+			if err := s.planChecker.AssertCanUseNDA(ctx, workspaceID); err != nil {
+				return db.DealRoom{}, err
+			}
+		}
+	}
 
+	var room db.DealRoom
+	insert := func(ctx context.Context) error {
+		var err error
+		room, err = s.insertDealRoom(ctx, userID, workspaceID, req)
+		return err
+	}
+	if s.planChecker != nil {
+		if err := s.planChecker.WithCreateRoomQuota(ctx, workspaceID, insert); err != nil {
+			return db.DealRoom{}, err
+		}
+	} else if err := insert(ctx); err != nil {
+		return db.DealRoom{}, err
+	}
+	s.invalidateListCache(ctx, workspaceID)
+	return room, nil
+}
+
+func (s *Service) insertDealRoom(ctx context.Context, userID, workspaceID string, req CreateRoomRequest) (db.DealRoom, error) {
 	workspaceUUID := pgUUID(workspaceID)
 	userUUID := pgUUID(userID)
 
@@ -290,7 +325,6 @@ func (s *Service) CreateRoom(ctx context.Context, userID, workspaceID string, re
 		}
 		return db.DealRoom{}, fmt.Errorf("create room: %w", err)
 	}
-	s.invalidateListCache(ctx, workspaceID)
 	return room, nil
 }
 
@@ -568,12 +602,12 @@ type RoomRecentVisitor struct {
 
 // RoomAnalytics is the deal-room analytics snapshot for the Analytics tab.
 type RoomAnalytics struct {
-	TotalViews     int64               `json:"totalViews"`
-	UniqueVisitors int64               `json:"uniqueVisitors"`
-	ActiveLinkCount int64              `json:"activeLinkCount"`
-	DocumentCount  int64               `json:"documentCount"`
-	ViewsOverTime  []RoomDailyView     `json:"viewsOverTime"`
-	RecentVisitors []RoomRecentVisitor `json:"recentVisitors"`
+	TotalViews      int64               `json:"totalViews"`
+	UniqueVisitors  int64               `json:"uniqueVisitors"`
+	ActiveLinkCount int64               `json:"activeLinkCount"`
+	DocumentCount   int64               `json:"documentCount"`
+	ViewsOverTime   []RoomDailyView     `json:"viewsOverTime"`
+	RecentVisitors  []RoomRecentVisitor `json:"recentVisitors"`
 }
 
 const roomAnalyticsCacheTTL = 20 * time.Second
@@ -586,6 +620,11 @@ func (s *Service) GetRoomAnalytics(ctx context.Context, roomID, workspaceID, use
 	}
 	if err := s.requireActiveRoomMember(ctx, room.WorkspaceID, room.ID, userID); err != nil {
 		return RoomAnalytics{}, err
+	}
+	if s.planChecker != nil {
+		if err := s.planChecker.AssertCanUseRoomAnalytics(ctx, workspaceID); err != nil {
+			return RoomAnalytics{}, err
+		}
 	}
 
 	cacheKey := roomAnalyticsCacheKey(workspaceID, roomID)
@@ -2203,9 +2242,10 @@ type roomAccess struct {
 	memberEmail string
 }
 
-// resolveRoomAccess allows workspace owner/admin without a room_members row, or
-// an active room member. Callers that need folder permissions use memberEmail
-// for non-managers (one membership fetch, no re-query).
+// resolveRoomAccess allows workspace owner/admin without a room_members row,
+// an active room member, or any other workspace member (including guest) for
+// read. Callers that need folder permissions use memberEmail for non-managers
+// (one membership fetch, no re-query). Empty memberEmail defaults folders to view.
 func (s *Service) resolveRoomAccess(ctx context.Context, workspaceID, roomID pgtype.UUID, userID string) (roomAccess, error) {
 	if ok, err := s.isWorkspaceManager(ctx, workspaceID, userID); err != nil {
 		return roomAccess{}, err
@@ -2216,16 +2256,28 @@ func (s *Service) resolveRoomAccess(ctx context.Context, workspaceID, roomID pgt
 		RoomID: roomID,
 		UserID: pgUUID(userID),
 	})
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return roomAccess{}, ErrApprovalRequired
-		}
+	if err == nil && member.Status == "active" {
+		return roomAccess{memberEmail: member.Email}, nil
+	}
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return roomAccess{}, err
 	}
-	if member.Status != "active" {
+	wm, werr := s.queries.GetWorkspaceMember(ctx, db.GetWorkspaceMemberParams{
+		WorkspaceID: workspaceID,
+		UserID:      pgUUID(userID),
+	})
+	if werr != nil {
+		if errors.Is(werr, pgx.ErrNoRows) {
+			return roomAccess{}, ErrApprovalRequired
+		}
+		return roomAccess{}, werr
+	}
+	switch wm.Role {
+	case workspaceRoleOwner, workspaceRoleAdmin, workspaceRoleMember, workspaceRoleGuest:
+		return roomAccess{}, nil
+	default:
 		return roomAccess{}, ErrApprovalRequired
 	}
-	return roomAccess{memberEmail: member.Email}, nil
 }
 
 func (s *Service) requireRoomAdmin(ctx context.Context, workspaceID, roomID pgtype.UUID, userID string) error {

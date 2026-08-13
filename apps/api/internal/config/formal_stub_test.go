@@ -24,6 +24,58 @@ func TestEmailQueueEnabledByDefault(t *testing.T) {
 	}
 }
 
+func TestUnpaidPlanChangeRejectedInProductionLoad(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://u:p@localhost/db")
+	t.Setenv("REDIS_URL", "localhost:6379")
+	t.Setenv("JWT_SECRET", "test-secret")
+	t.Setenv("URL_SIGNING_SECRET", "test-url-secret")
+	t.Setenv("S3_BUCKET", "bucket")
+	t.Setenv("S3_ACCESS_KEY", "key")
+	t.Setenv("S3_SECRET_KEY", "secret")
+	t.Setenv("APP_ENV", "production")
+	t.Setenv("BILLING_ALLOW_UNPAID_PLAN_CHANGE", "true")
+	_, err := Load()
+	if err == nil || !strings.Contains(err.Error(), "BILLING_ALLOW_UNPAID_PLAN_CHANGE") {
+		t.Fatalf("expected production unpaid-plan rejection, got %v", err)
+	}
+}
+
+func TestUnpaidPlanChangeOffByDefaultInProduction(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://u:p@localhost/db")
+	t.Setenv("REDIS_URL", "localhost:6379")
+	t.Setenv("JWT_SECRET", "test-secret")
+	t.Setenv("URL_SIGNING_SECRET", "test-url-secret")
+	t.Setenv("S3_BUCKET", "bucket")
+	t.Setenv("S3_ACCESS_KEY", "key")
+	t.Setenv("S3_SECRET_KEY", "secret")
+	t.Setenv("APP_ENV", "production")
+	t.Setenv("BILLING_ALLOW_UNPAID_PLAN_CHANGE", "")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if cfg.AllowUnpaidPlanChange {
+		t.Fatal("production must not allow unpaid plan changes")
+	}
+}
+
+func TestStripeWebhookSecretRequiredInProductionLoad(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://u:p@localhost/db")
+	t.Setenv("REDIS_URL", "localhost:6379")
+	t.Setenv("JWT_SECRET", "test-secret")
+	t.Setenv("URL_SIGNING_SECRET", "test-url-secret")
+	t.Setenv("S3_BUCKET", "bucket")
+	t.Setenv("S3_ACCESS_KEY", "key")
+	t.Setenv("S3_SECRET_KEY", "secret")
+	t.Setenv("APP_ENV", "production")
+	t.Setenv("STRIPE_SECRET_KEY", "sk_test_x")
+	t.Setenv("STRIPE_WEBHOOK_SECRET", "")
+	_, err := Load()
+	if err == nil || !strings.Contains(err.Error(), "STRIPE_WEBHOOK_SECRET") {
+		t.Fatalf("expected production stripe webhook rejection, got %v", err)
+	}
+}
+
 func TestFormalAskEntitlementStubRejectedInProductionLoad(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://u:p@localhost/db")
 	t.Setenv("REDIS_URL", "localhost:6379")

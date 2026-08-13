@@ -8,6 +8,7 @@ import (
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/logger"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/plan"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
@@ -55,11 +56,12 @@ type DigestOverviewSource interface {
 
 // DigestRunner builds and enqueues daily digests for opted-in workspaces.
 type DigestRunner struct {
-	queries   DigestQuerier
-	enqueuer  DigestEnqueuer
-	overview  DigestOverviewSource
-	hourUTC   int
-	now       func() time.Time
+	queries     DigestQuerier
+	enqueuer    DigestEnqueuer
+	overview    DigestOverviewSource
+	hourUTC     int
+	now         func() time.Time
+	planChecker plan.Checker
 }
 
 // NewDigestRunner creates a digest scheduler. hourUTC is the earliest UTC hour
@@ -75,6 +77,14 @@ func NewDigestRunner(q DigestQuerier, enq DigestEnqueuer, overview DigestOvervie
 		hourUTC:  hourUTC,
 		now:      time.Now,
 	}
+}
+
+// WithPlanChecker skips digest emit when the plan does not include Daily Digest.
+func (r *DigestRunner) WithPlanChecker(c plan.Checker) *DigestRunner {
+	if r != nil {
+		r.planChecker = c
+	}
+	return r
 }
 
 // RunOnce enqueues digests that are due and not yet sent for yesterday UTC.
@@ -117,6 +127,11 @@ func (r *DigestRunner) runWorkspace(
 	yStart, yEnd, t7Start, t7End time.Time,
 ) (int, error) {
 	wsID := uuid.UUID(rule.WorkspaceID.Bytes).String()
+	if featureDenied(r.planChecker, ctx, wsID, func(c plan.Checker, ctx context.Context, id string) error {
+		return c.AssertCanUseDailyDigest(ctx, id)
+	}) {
+		return 0, nil
+	}
 
 	opens, err := r.queries.CountWorkspaceLinkOpensInRange(ctx, db.CountWorkspaceLinkOpensInRangeParams{
 		WorkspaceID: rule.WorkspaceID,

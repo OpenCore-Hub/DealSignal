@@ -3,11 +3,14 @@
 package httpx
 
 import (
+	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/logger"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/plan"
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -136,6 +139,7 @@ var clientFallbacks = map[string]string{
 	"workspace_not_found":                "workspace not found",
 	"room_not_found":                     "data room not found",
 	"link_not_found":                     "link not found",
+	"link_not_renewable":                 "only archived or expired links can be renewed",
 	"document_not_found":                 "document not found",
 	"contact_not_found":                  "contact not found",
 	"member_not_found":                   "member not found",
@@ -229,6 +233,34 @@ var clientFallbacks = map[string]string{
 	"cannot_modify_owner":                "cannot modify the workspace owner",
 	"cannot_modify_self":                 "cannot change your own membership here",
 	"cannot_manage_member":               "cannot manage this member",
+	"plan_limit_rooms":                   "data room limit reached for this plan",
+	"plan_limit_links":                   "share link limit reached for this plan",
+	"plan_limit_storage":                 "storage limit reached for this plan",
+	"plan_limit_seats":                   "internal seat limit reached for this plan",
+	"plan_limit_documents":               "document limit reached for this plan",
+	"plan_limit_upload":                  "file exceeds the upload size limit for this plan",
+	"plan_limit_workspaces":              "owned workspace limit reached for this plan",
+	"email_unverified":                   "verify your email before creating another workspace",
+	"plan_feature_custom_domain":         "custom viewer domain is not available on this plan",
+	"plan_feature_watermark":             "watermark and viewer protection features are not available on this plan",
+	"plan_feature_nda":                   "nda requirements are not available on this plan",
+	"plan_feature_visitor_ask_ai":        "visitor ask ai is not available on this plan",
+	"plan_feature_branding":              "workspace branding is not available on this plan",
+	"plan_feature_access_controls":       "email verification and allow/block lists are not available on this plan",
+	"plan_feature_webhooks":              "outbound webhooks are not available on this plan",
+	"plan_feature_hubspot":               "hubspot crm is not available on this plan",
+	"plan_feature_daily_digest":          "the insights daily digest is not available on this plan",
+	"plan_feature_slack_alerts":          "sensitive-page slack alerts are not available on this plan",
+	"plan_feature_room_insights":         "data room insights are not available on this plan",
+	"plan_feature_room_analytics":        "data room analytics are not available on this plan",
+	"plan_feature_formal_ask":            "formal q&a is not available on this plan",
+	"invalid_plan":                       "that plan cannot be selected",
+	"invalid_period":                     "invalid billing period",
+	"plan_payment_required":              "this plan requires checkout before it can be activated",
+	"plan_sales_assisted":                "enterprise plans are provisioned with sales, not self-serve checkout",
+	"plan_manage_via_portal":             "manage this subscription in the billing portal",
+	"plan_no_stripe_customer":            "this workspace has no billing customer yet",
+	"stripe_not_configured":              "checkout is not configured",
 }
 
 // SafeMessage returns a client-safe message for the given API error code.
@@ -243,4 +275,32 @@ func SafeMessage(code string, err error) string {
 		fallback = MsgInternal
 	}
 	return PublicMessage(err, fallback)
+}
+
+// WriteIfPlanLimit writes a 403 plan-limit response. Returns true when err is a quota error.
+func WriteIfPlanLimit(c *gin.Context, err error) bool {
+	status, code, ok := plan.HTTPError(err)
+	if !ok {
+		return false
+	}
+	plan.RecordQuotaDenial(code)
+	attrs := make([]slog.Attr, 0, 4)
+	attrs = append(attrs, logger.Attr("code", code))
+	// workspaceID matches middleware.workspaceIDKey without importing middleware (cycle).
+	if v, exists := c.Get("workspaceID"); exists {
+		if wsID, ok := v.(string); ok && wsID != "" {
+			attrs = append(attrs, logger.Attr("workspace_id", wsID))
+		}
+	}
+	ctx := context.Background()
+	if c.Request != nil {
+		ctx = c.Request.Context()
+		attrs = append(attrs, logger.Attr("method", c.Request.Method))
+		if c.Request.URL != nil {
+			attrs = append(attrs, logger.Attr("path", c.Request.URL.Path))
+		}
+	}
+	logger.InfoCtx(ctx, "plan quota denied", attrs...)
+	c.JSON(status, gin.H{"code": code, "message": SafeMessage(code, err)})
+	return true
 }

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/plan"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/upload"
 )
 
@@ -21,6 +22,8 @@ func TestClassifyLinkUploadError(t *testing.T) {
 		{"empty file upload pkg", upload.ErrEmptyFile, http.StatusBadRequest, "file_empty"},
 		{"too large", ErrLinkUploadTooLarge, http.StatusRequestEntityTooLarge, "file_too_large"},
 		{"unsupported type", ErrLinkUploadUnsupportedType, http.StatusUnsupportedMediaType, "unsupported_type"},
+		{"plan upload cap", plan.ErrLimitUpload, http.StatusForbidden, plan.CodeLimitUpload},
+		{"plan storage cap", plan.ErrLimitStorage, http.StatusForbidden, plan.CodeLimitStorage},
 		{"unknown", errors.New("store upload: boom"), http.StatusInternalServerError, "internal_error"},
 	}
 

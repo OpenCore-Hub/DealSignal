@@ -191,6 +191,9 @@ func (h *Handler) Create(c *gin.Context) {
 
 	room, err := h.service.CreateRoom(c.Request.Context(), middleware.UserIDFrom(c), middleware.WorkspaceIDFrom(c), CreateRoomRequest(req))
 	if err != nil {
+		if httpx.WriteIfPlanLimit(c, err) {
+			return
+		}
 		switch {
 		case errors.Is(err, ErrInvalidSlug):
 			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_slug", "message": httpx.SafeMessage("invalid_slug", err)})
@@ -219,6 +222,9 @@ func (h *Handler) Analytics(c *gin.Context) {
 		}
 		if errors.Is(err, ErrApprovalRequired) {
 			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", err)})
+			return
+		}
+		if httpx.WriteIfPlanLimit(c, err) {
 			return
 		}
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
@@ -855,10 +861,10 @@ func memberResponse(m db.RoomMember) gin.H {
 
 func requestResponse(r db.RoomAccessRequest, isWorkspaceMember bool) gin.H {
 	resp := gin.H{
-		"id":                   uuid.UUID(r.ID.Bytes).String(),
-		"email":                r.Email,
-		"status":               r.Status,
-		"is_workspace_member":  isWorkspaceMember,
+		"id":                  uuid.UUID(r.ID.Bytes).String(),
+		"email":               r.Email,
+		"status":              r.Status,
+		"is_workspace_member": isWorkspaceMember,
 	}
 	if r.Reason.Valid {
 		resp["reason"] = r.Reason.String

@@ -13,22 +13,23 @@ const opsDefaultWindowHours = 24
 
 // OpsAnswersQuota is workspace answer entitlement snapshot for the SLO board.
 type OpsAnswersQuota struct {
-	Used        int `json:"used"`
-	Limit       int `json:"limit"`
-	WindowHours int `json:"windowHours"`
+	Used        int  `json:"used"`
+	Limit       int  `json:"limit"`
+	Included    bool `json:"included"`
+	WindowHours int  `json:"windowHours"`
 }
 
 // OpsSummary is the workspace-scoped knowledge Q&A SLO / cost board.
 type OpsSummary struct {
-	Scope                 string           `json:"scope"` // workspace
-	WindowHours           int              `json:"windowHours"`
-	TurnsTotal            int64            `json:"turnsTotal"`
-	TurnsByStatus         map[string]int64 `json:"turnsByStatus"`
-	AvgDurationMs         float64          `json:"avgDurationMs"`
-	P95DurationMs         float64          `json:"p95DurationMs"`
-	CostUnitsTotal        int64            `json:"costUnitsTotal"`
-	RefusalsByKind        map[string]int64 `json:"refusalsByKind"`
-	JudgmentsByKind       map[string]int64 `json:"judgmentsByKind"`
+	Scope           string           `json:"scope"` // workspace
+	WindowHours     int              `json:"windowHours"`
+	TurnsTotal      int64            `json:"turnsTotal"`
+	TurnsByStatus   map[string]int64 `json:"turnsByStatus"`
+	AvgDurationMs   float64          `json:"avgDurationMs"`
+	P95DurationMs   float64          `json:"p95DurationMs"`
+	CostUnitsTotal  int64            `json:"costUnitsTotal"`
+	RefusalsByKind  map[string]int64 `json:"refusalsByKind"`
+	JudgmentsByKind map[string]int64 `json:"judgmentsByKind"`
 	// EvalCandidatesByStatus is workspace gold-review queue depth (ceiling Phase O).
 	EvalCandidatesByStatus map[string]int64 `json:"evalCandidatesByStatus"`
 	PendingEvalCandidates  int64            `json:"pendingEvalCandidates"`
@@ -162,6 +163,7 @@ func (s *Service) GetOpsSummary(
 	out.AnswersQuota = OpsAnswersQuota{
 		Used:        quota.Used,
 		Limit:       quota.Limit,
+		Included:    quota.Included,
 		WindowHours: windowH,
 	}
 

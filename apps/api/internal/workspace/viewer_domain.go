@@ -164,6 +164,11 @@ func (s *Service) PutViewerDomain(ctx context.Context, workspaceID, hostname str
 		return ViewerDomain{}, err
 	}
 
+	// New registration or hostname change — gated by plan (grandfather same-host early return above).
+	if err := s.AssertCanUseCustomDomain(ctx, workspaceID); err != nil {
+		return ViewerDomain{}, err
+	}
+
 	if _, err := s.queries.GetTenantDomainByDomain(ctx, hostname); err == nil {
 		return ViewerDomain{}, ErrViewerDomainTaken
 	} else if err != nil && !errors.Is(err, pgx.ErrNoRows) {

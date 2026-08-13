@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/plan"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -51,17 +52,22 @@ func IsOutboundWebhookURLError(err error) bool {
 
 // OutboundWebhookPayload is the signed JSON body POSTed to workspace webhooks.
 type OutboundWebhookPayload struct {
-	Event         string            `json:"event"`
-	WorkspaceID   string            `json:"workspace_id"`
-	LinkID        string            `json:"link_id,omitempty"`
-	VisitorID     string            `json:"visitor_id,omitempty"`
-	VisitorEmail  string            `json:"visitor_email,omitempty"`
-	OccurredAt    string            `json:"occurred_at"`
-	Metadata      map[string]string `json:"metadata,omitempty"`
+	Event        string            `json:"event"`
+	WorkspaceID  string            `json:"workspace_id"`
+	LinkID       string            `json:"link_id,omitempty"`
+	VisitorID    string            `json:"visitor_id,omitempty"`
+	VisitorEmail string            `json:"visitor_email,omitempty"`
+	OccurredAt   string            `json:"occurred_at"`
+	Metadata     map[string]string `json:"metadata,omitempty"`
 }
 
 func (e *RuleEngine) enqueueOutboundWebhook(ctx context.Context, ev Event) {
 	if e == nil || e.queries == nil || e.enqueuer == nil {
+		return
+	}
+	if featureDenied(e.planChecker, ctx, ev.WorkspaceID, func(c plan.Checker, ctx context.Context, id string) error {
+		return c.AssertCanUseWebhooks(ctx, id)
+	}) {
 		return
 	}
 	wsUUID, err := uuid.Parse(ev.WorkspaceID)
@@ -114,6 +120,12 @@ func eventTypeAllowed(allowed []string, eventType string) bool {
 }
 
 func (s *Service) sendWebhook(ctx context.Context, n db.Notification) error {
+	if featureDenied(s.planChecker, ctx, workspaceIDString(n.WorkspaceID), func(c plan.Checker, ctx context.Context, id string) error {
+		return c.AssertCanUseWebhooks(ctx, id)
+	}) {
+		// Downgrade must not retry/dead-letter already-queued webhook jobs.
+		return nil
+	}
 	row, err := s.queries.GetWorkspaceOutboundWebhook(ctx, n.WorkspaceID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

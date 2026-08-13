@@ -409,32 +409,33 @@ func langFromContext(c *gin.Context) string {
 
 // CreateRequest is the JSON body for creating a link.
 type CreateRequest struct {
-	DocumentID               string   `json:"document_id,omitempty"`
-	DocumentIDs              []string `json:"document_ids,omitempty"`
-	DealRoomID               string   `json:"deal_room_id,omitempty"`
-	Name                     string   `json:"name,omitempty"`
-	PermissionType           string   `json:"permission_type,omitempty"`
-	RequireEmail             bool     `json:"require_email,omitempty"`
-	RequireEmailVerification bool     `json:"require_email_verification,omitempty"`
-	RequireNDA               bool     `json:"require_nda,omitempty"`
-	NDADocumentID            string   `json:"nda_document_id,omitempty"`
-	NDATemplateID            string   `json:"nda_template_id,omitempty"`
-	RequirePassword          bool     `json:"require_password,omitempty"`
-	Password                 string   `json:"password,omitempty"`
-	AllowedEmails            []string `json:"allowed_emails,omitempty"`
-	ExpiresAt                *string  `json:"expires_at,omitempty"`
-	MaxAccessCount           *int32   `json:"max_access_count,omitempty"`
-	DownloadEnabled          bool     `json:"download_enabled,omitempty"`
-	WatermarkEnabled         bool     `json:"watermark_enabled,omitempty"`
-	ContactIDs               []string `json:"contact_ids,omitempty"`
-	CustomDomain             string   `json:"custom_domain,omitempty"`
-	Tags                     []string `json:"tags,omitempty"`
-	NotifyOnAccess           bool     `json:"notify_on_access,omitempty"`
-	QaEnabled                *bool    `json:"qa_enabled,omitempty"`
-	FileRequestsEnabled      bool     `json:"file_requests_enabled,omitempty"`
-	IndexFileEnabled         bool     `json:"index_file_enabled,omitempty"`
-	LinkType                 string   `json:"link_type,omitempty"`
-	TargetFolderPath         string   `json:"target_folder_path,omitempty"`
+	DocumentID                  string   `json:"document_id,omitempty"`
+	DocumentIDs                 []string `json:"document_ids,omitempty"`
+	DealRoomID                  string   `json:"deal_room_id,omitempty"`
+	Name                        string   `json:"name,omitempty"`
+	PermissionType              string   `json:"permission_type,omitempty"`
+	RequireEmail                bool     `json:"require_email,omitempty"`
+	RequireEmailVerification    bool     `json:"require_email_verification,omitempty"`
+	RequireNDA                  bool     `json:"require_nda,omitempty"`
+	NDADocumentID               string   `json:"nda_document_id,omitempty"`
+	NDATemplateID               string   `json:"nda_template_id,omitempty"`
+	RequirePassword             bool     `json:"require_password,omitempty"`
+	Password                    string   `json:"password,omitempty"`
+	AllowedEmails               []string `json:"allowed_emails,omitempty"`
+	ExpiresAt                   *string  `json:"expires_at,omitempty"`
+	MaxAccessCount              *int32   `json:"max_access_count,omitempty"`
+	DownloadEnabled             bool     `json:"download_enabled,omitempty"`
+	WatermarkEnabled            bool     `json:"watermark_enabled,omitempty"`
+	ScreenshotProtectionEnabled bool     `json:"screenshot_protection_enabled,omitempty"`
+	ContactIDs                  []string `json:"contact_ids,omitempty"`
+	CustomDomain                string   `json:"custom_domain,omitempty"`
+	Tags                        []string `json:"tags,omitempty"`
+	NotifyOnAccess              bool     `json:"notify_on_access,omitempty"`
+	QaEnabled                   *bool    `json:"qa_enabled,omitempty"`
+	FileRequestsEnabled         bool     `json:"file_requests_enabled,omitempty"`
+	IndexFileEnabled            bool     `json:"index_file_enabled,omitempty"`
+	LinkType                    string   `json:"link_type,omitempty"`
+	TargetFolderPath            string   `json:"target_folder_path,omitempty"`
 }
 
 // UpdateRequest is the JSON body for updating a link.
@@ -569,6 +570,9 @@ func (h *Handler) Update(c *gin.Context) {
 	if status != "" {
 		link, err = h.service.UpdateStatus(ctx, linkID, workspaceID, status)
 		if err != nil {
+			if httpx.WriteIfPlanLimit(c, err) {
+				return
+			}
 			if errors.Is(err, ErrNotFoundInWorkspace) {
 				c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": "link not found"})
 				return
@@ -680,6 +684,9 @@ func (h *Handler) UpdateFull(c *gin.Context) {
 		NotifyOnAccess:              req.NotifyOnAccess,
 	})
 	if err != nil {
+		if httpx.WriteIfPlanLimit(c, err) {
+			return
+		}
 		switch {
 		case errors.Is(err, ErrNotFoundInWorkspace):
 			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": "link not found"})
@@ -1239,6 +1246,9 @@ func (h *Handler) CreateDealRoomLink(c *gin.Context) {
 		FolderScopeMode:             req.FolderScopeMode,
 	})
 	if err != nil {
+		if httpx.WriteIfPlanLimit(c, err) {
+			return
+		}
 		switch {
 		case errors.Is(err, ErrDealRoomNotFound):
 			c.JSON(http.StatusNotFound, gin.H{"code": "deal_room_not_found", "message": httpx.SafeMessage("deal_room_not_found", err)})
@@ -1312,6 +1322,9 @@ func (h *Handler) UpsertRoomAccessPolicy(c *gin.Context) {
 			errors.Is(err, ErrInvalidPermission), errors.Is(err, ErrInvalidInput):
 			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
 		default:
+			if httpx.WriteIfPlanLimit(c, err) {
+				return
+			}
 			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		}
 		return
@@ -1587,34 +1600,38 @@ func (h *Handler) Create(c *gin.Context) {
 	workspaceID := middleware.WorkspaceIDFrom(c)
 
 	link, err := h.service.CreateLink(c.Request.Context(), userID, workspaceID, CreateLinkRequest{
-		DocumentID:               req.DocumentID,
-		DocumentIDs:              req.DocumentIDs,
-		DealRoomID:               req.DealRoomID,
-		Name:                     req.Name,
-		PermissionType:           req.PermissionType,
-		RequireEmail:             req.RequireEmail,
-		RequireEmailVerification: req.RequireEmailVerification,
-		RequireNDA:               req.RequireNDA,
-		NDADocumentID:            req.NDADocumentID,
-		NDATemplateID:            req.NDATemplateID,
-		RequirePassword:          req.RequirePassword,
-		Password:                 req.Password,
-		ExpiresAt:                expiresAt,
-		MaxAccessCount:           req.MaxAccessCount,
-		DownloadEnabled:          req.DownloadEnabled,
-		WatermarkEnabled:         req.WatermarkEnabled,
-		QaEnabled:                ResolveQaEnabledFromOptional(strings.TrimSpace(req.DealRoomID) != "", req.QaEnabled),
-		FileRequestsEnabled:      req.FileRequestsEnabled,
-		IndexFileEnabled:         req.IndexFileEnabled,
-		LinkType:                 req.LinkType,
-		TargetFolderPath:         req.TargetFolderPath,
-		ContactIDs:               req.ContactIDs,
-		AllowedEmails:            req.AllowedEmails,
-		CustomDomain:             req.CustomDomain,
-		Tags:                     req.Tags,
-		NotifyOnAccess:           req.NotifyOnAccess,
+		DocumentID:                  req.DocumentID,
+		DocumentIDs:                 req.DocumentIDs,
+		DealRoomID:                  req.DealRoomID,
+		Name:                        req.Name,
+		PermissionType:              req.PermissionType,
+		RequireEmail:                req.RequireEmail,
+		RequireEmailVerification:    req.RequireEmailVerification,
+		RequireNDA:                  req.RequireNDA,
+		NDADocumentID:               req.NDADocumentID,
+		NDATemplateID:               req.NDATemplateID,
+		RequirePassword:             req.RequirePassword,
+		Password:                    req.Password,
+		ExpiresAt:                   expiresAt,
+		MaxAccessCount:              req.MaxAccessCount,
+		DownloadEnabled:             req.DownloadEnabled,
+		WatermarkEnabled:            req.WatermarkEnabled,
+		ScreenshotProtectionEnabled: req.ScreenshotProtectionEnabled,
+		QaEnabled:                   ResolveQaEnabledFromOptional(strings.TrimSpace(req.DealRoomID) != "", req.QaEnabled),
+		FileRequestsEnabled:         req.FileRequestsEnabled,
+		IndexFileEnabled:            req.IndexFileEnabled,
+		LinkType:                    req.LinkType,
+		TargetFolderPath:            req.TargetFolderPath,
+		ContactIDs:                  req.ContactIDs,
+		AllowedEmails:               req.AllowedEmails,
+		CustomDomain:                req.CustomDomain,
+		Tags:                        req.Tags,
+		NotifyOnAccess:              req.NotifyOnAccess,
 	})
 	if err != nil {
+		if httpx.WriteIfPlanLimit(c, err) {
+			return
+		}
 		switch {
 		case errors.Is(err, ErrDocumentNotReady):
 			c.JSON(http.StatusConflict, gin.H{"code": "document_not_ready", "message": httpx.SafeMessage("document_not_ready", err)})
@@ -2927,6 +2944,10 @@ func (h *Handler) ReverseFunnel(c *gin.Context) {
 func (h *Handler) ArchiveLink(c *gin.Context) {
 	wsID, lID := middleware.WorkspaceIDFrom(c), c.Param("id")
 	if _, err := h.service.ArchiveLink(c.Request.Context(), wsID, lID); err != nil {
+		if errors.Is(err, ErrNotFoundInWorkspace) {
+			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": httpx.SafeMessage("link_not_found", err)})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
@@ -2955,7 +2976,19 @@ func (h *Handler) RenewLink(c *gin.Context) {
 	}
 
 	if _, err := h.service.RenewLink(c.Request.Context(), wsID, lID, expiresAt); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+		if httpx.WriteIfPlanLimit(c, err) {
+			return
+		}
+		switch {
+		case errors.Is(err, ErrNotFoundInWorkspace):
+			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": httpx.SafeMessage("link_not_found", err)})
+		case errors.Is(err, ErrLinkNotRenewable):
+			c.JSON(http.StatusBadRequest, gin.H{"code": "link_not_renewable", "message": httpx.SafeMessage("link_not_renewable", err)})
+		case errors.Is(err, ErrExpiryInPast):
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+		}
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "renewed"})
@@ -3355,6 +3388,7 @@ func (h *Handler) linkAskPolicyPayload(ctx context.Context, link db.Link) (gin.H
 		"ask_ai_monthly_quota":  nullableInt32(link.AskAiMonthlyQuota),
 		"ask_ai_monthly_used":   quota.Used,
 		"ask_ai_monthly_limit":  quota.Limit,
+		"ask_ai_included":       quota.Included,
 		"ask_ai_quota_exceeded": askAIQuotaExceededView(quota),
 		"ask_ai_entitled":       h.service.checkAskAIEntitlement(ctx, link) == nil,
 		"formal_entitled":       h.service.isFormalAskEntitled(ctx, link),
@@ -3393,6 +3427,9 @@ func (h *Handler) PatchLinkAskPolicy(c *gin.Context) {
 	}
 	link, err := h.service.UpdateLinkAskPolicy(c.Request.Context(), linkID, workspaceID, UpdateLinkAskPolicyRequest(req))
 	if err != nil {
+		if httpx.WriteIfPlanLimit(c, err) {
+			return
+		}
 		if errors.Is(err, ErrNotFoundInWorkspace) {
 			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": "link not found"})
 			return
@@ -3583,6 +3620,9 @@ func (h *Handler) ApproveUploadedFile(c *gin.Context) {
 	}
 	uID, _ := uuid.Parse(middleware.UserIDFrom(c))
 	if err := h.service.ApproveUploadedFile(c.Request.Context(), pgtype.UUID{Bytes: fID, Valid: true}, pgtype.UUID{Bytes: uID, Valid: true}); err != nil {
+		if httpx.WriteIfPlanLimit(c, err) {
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
@@ -3918,6 +3958,9 @@ func (h *Handler) PublicUploadFile(c *gin.Context) {
 		result.VisitorID, result.Email, c.ClientIP(), c.Request.UserAgent(),
 	)
 	if err != nil {
+		if httpx.WriteIfPlanLimit(c, err) {
+			return
+		}
 		status, code := classifyLinkUploadError(err)
 		if code == "internal_error" {
 			logger.ErrorCtx(c.Request.Context(), "link public upload failed", err)

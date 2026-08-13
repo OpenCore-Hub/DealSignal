@@ -97,6 +97,9 @@ func (s *Service) UploadLogo(ctx context.Context, workspaceID, tenantID string, 
 	if _, err := s.queries.GetWorkspaceByID(ctx, wsUUID); err != nil {
 		return Settings{}, err
 	}
+	if err := s.AssertCanUseBranding(ctx, workspaceID); err != nil {
+		return Settings{}, err
+	}
 
 	_, _ = file.Seek(0, io.SeekStart)
 	key := brandLogoKey(tenantID, workspaceID)

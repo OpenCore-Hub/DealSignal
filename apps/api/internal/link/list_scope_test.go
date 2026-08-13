@@ -72,7 +72,14 @@ func TestDocumentAndDealRoomLinkListSQLScopes(t *testing.T) {
 		t.Fatal("missing ListLinksByWorkspace")
 	}
 	if strings.Contains(all, "deal_room_id IS NULL") {
-		t.Fatal("ListLinksByWorkspace must remain unscoped for analytics/billing")
+		t.Fatal("ListLinksByWorkspace must remain unscoped for analytics")
+	}
+	count := extractNamedQuery(sql, "CountLinksByWorkspace")
+	if count == "" {
+		t.Fatal("missing CountLinksByWorkspace")
+	}
+	if strings.Contains(count, "deal_room_id IS NULL") {
+		t.Fatal("CountLinksByWorkspace must remain unscoped for billing")
 	}
 }
 

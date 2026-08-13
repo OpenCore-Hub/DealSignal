@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/httpx"
@@ -91,6 +92,10 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup) {
 	ws.GET("/security", h.GetSecurity)
 	ws.PUT("/security", h.UpdateSecurity)
 	ws.GET("/billing", h.GetBilling)
+	ws.GET("/billing/plans", h.ListBillingPlans)
+	ws.PUT("/billing/plan", h.ChangePlan)
+	ws.POST("/billing/checkout", h.CreateCheckout)
+	ws.POST("/billing/portal", h.CreatePortal)
 
 	// Public invitation preview (no auth). Accept requires authentication.
 	r.GET("/invitations/:token", h.PreviewInvitation)
@@ -108,6 +113,20 @@ func (h *Handler) Create(c *gin.Context) {
 	userID := middleware.UserIDFrom(c)
 	ws, err := h.service.Create(c.Request.Context(), userID, req.Name, req.Slug, req.BrandColor)
 	if err != nil {
+		if httpx.WriteIfPlanLimit(c, err) {
+			return
+		}
+		if errors.Is(err, ErrEmailUnverified) {
+			c.JSON(http.StatusForbidden, gin.H{"code": "email_unverified", "message": httpx.SafeMessage("email_unverified", err)})
+			return
+		}
+		if errors.Is(err, pgx.ErrNoRows) {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"code":    "unauthorized",
+				"message": "session is no longer valid; please sign in again",
+			})
+			return
+		}
 		switch err {
 		case ErrInvalidSlug:
 			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_slug", "message": httpx.SafeMessage("invalid_slug", err)})
@@ -184,12 +203,15 @@ func (h *Handler) AddMember(c *gin.Context) {
 
 	member, err := h.service.AddMember(c.Request.Context(), actorID, workspaceID, tenantID, req.UserID, req.Role)
 	if err != nil {
-		switch err {
-		case ErrNotMember, ErrNotManager:
+		if httpx.WriteIfPlanLimit(c, err) {
+			return
+		}
+		switch {
+		case errors.Is(err, ErrNotMember), errors.Is(err, ErrNotManager):
 			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", err)})
-		case ErrAlreadyMember:
+		case errors.Is(err, ErrAlreadyMember):
 			c.JSON(http.StatusConflict, gin.H{"code": "already_member", "message": httpx.SafeMessage("already_member", err)})
-		case ErrInvalidRole:
+		case errors.Is(err, ErrInvalidRole):
 			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_role", "message": httpx.SafeMessage("invalid_role", err)})
 		default:
 			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
@@ -222,6 +244,9 @@ func (h *Handler) CreateInvitation(c *gin.Context) {
 }
 
 func writeMemberManageError(c *gin.Context, err error) bool {
+	if httpx.WriteIfPlanLimit(c, err) {
+		return true
+	}
 	switch {
 	case errors.Is(err, ErrNotMember), errors.Is(err, ErrNotManager):
 		c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", err)})
@@ -357,6 +382,9 @@ func (h *Handler) AcceptInvitation(c *gin.Context) {
 
 	result, err := h.service.AcceptInvitation(c.Request.Context(), token, userID)
 	if err != nil {
+		if httpx.WriteIfPlanLimit(c, err) {
+			return
+		}
 		switch {
 		case errors.Is(err, ErrInvitationNotFound):
 			c.JSON(http.StatusNotFound, gin.H{"code": "invitation_not_found", "message": httpx.SafeMessage("invitation_not_found", err)})
@@ -508,6 +536,9 @@ func (h *Handler) DeleteViewerDomain(c *gin.Context) {
 }
 
 func (h *Handler) writeViewerDomainError(c *gin.Context, err error) {
+	if httpx.WriteIfPlanLimit(c, err) {
+		return
+	}
 	switch {
 	case errors.Is(err, ErrInvalidViewerDomain):
 		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_domain", "message": httpx.SafeMessage("invalid_domain", err)})
@@ -552,6 +583,9 @@ func (h *Handler) UpdateSecurity(c *gin.Context) {
 	}
 	settings, err := h.service.UpdateSecurity(c.Request.Context(), workspaceID, SecuritySettings(req))
 	if err != nil {
+		if httpx.WriteIfPlanLimit(c, err) {
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "failed to update security settings"})
 		return
 	}
@@ -567,4 +601,115 @@ func (h *Handler) GetBilling(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, billing)
+}
+
+// ListBillingPlans returns purchasable plan offers aligned with the server catalog.
+func (h *Handler) ListBillingPlans(c *gin.Context) {
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	out, err := h.service.ListBillingPlans(c.Request.Context(), workspaceID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "failed to list billing plans"})
+		return
+	}
+	c.JSON(http.StatusOK, out)
+}
+
+type changePlanRequest struct {
+	PlanCode string `json:"plan_code" binding:"required"`
+	Period   string `json:"period"`
+}
+
+// ChangePlan switches the workspace to a purchasable plan (owner/admin).
+func (h *Handler) ChangePlan(c *gin.Context) {
+	var req changePlanRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
+		return
+	}
+	userID := middleware.UserIDFrom(c)
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	if !h.service.IsManager(c.Request.Context(), userID, workspaceID) {
+		c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": "only owner or admin can change the plan"})
+		return
+	}
+	billing, err := h.service.ChangePlan(c.Request.Context(), workspaceID, req.PlanCode, req.Period)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrInvalidPlanCode):
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_plan", "message": httpx.SafeMessage("invalid_plan", err)})
+		case errors.Is(err, ErrInvalidBillingPeriod):
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_period", "message": httpx.SafeMessage("invalid_period", err)})
+		case errors.Is(err, ErrPlanPaymentRequired):
+			c.JSON(http.StatusPaymentRequired, gin.H{"code": "plan_payment_required", "message": httpx.SafeMessage("plan_payment_required", err)})
+		case errors.Is(err, ErrPlanSalesAssisted):
+			c.JSON(http.StatusForbidden, gin.H{"code": "plan_sales_assisted", "message": httpx.SafeMessage("plan_sales_assisted", err)})
+		case errors.Is(err, ErrPlanManageViaPortal):
+			c.JSON(http.StatusConflict, gin.H{"code": "plan_manage_via_portal", "message": httpx.SafeMessage("plan_manage_via_portal", err)})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "failed to change plan"})
+		}
+		return
+	}
+	c.JSON(http.StatusOK, billing)
+}
+
+type checkoutRequest struct {
+	PlanCode string `json:"plan_code" binding:"required"`
+	Period   string `json:"period"`
+}
+
+// CreateCheckout starts Stripe Checkout for pro/business (owner/admin).
+func (h *Handler) CreateCheckout(c *gin.Context) {
+	var req checkoutRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
+		return
+	}
+	userID := middleware.UserIDFrom(c)
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	if !h.service.IsManager(c.Request.Context(), userID, workspaceID) {
+		c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": "only owner or admin can start checkout"})
+		return
+	}
+	sess, err := h.service.CreateCheckoutSession(c.Request.Context(), workspaceID, userID, c.Param("workspaceSlug"), req.PlanCode, req.Period)
+	if err != nil {
+		writeCheckoutError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, sess)
+}
+
+// CreatePortal starts a Stripe Customer Portal session (owner/admin).
+func (h *Handler) CreatePortal(c *gin.Context) {
+	userID := middleware.UserIDFrom(c)
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	if !h.service.IsManager(c.Request.Context(), userID, workspaceID) {
+		c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": "only owner or admin can manage billing"})
+		return
+	}
+	sess, err := h.service.CreatePortalSession(c.Request.Context(), workspaceID, c.Param("workspaceSlug"))
+	if err != nil {
+		writeCheckoutError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, sess)
+}
+
+func writeCheckoutError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, ErrInvalidPlanCode), errors.Is(err, ErrInvalidCheckoutPlan):
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_plan", "message": httpx.SafeMessage("invalid_plan", err)})
+	case errors.Is(err, ErrInvalidBillingPeriod):
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_period", "message": httpx.SafeMessage("invalid_period", err)})
+	case errors.Is(err, ErrPlanSalesAssisted):
+		c.JSON(http.StatusForbidden, gin.H{"code": "plan_sales_assisted", "message": httpx.SafeMessage("plan_sales_assisted", err)})
+	case errors.Is(err, ErrPlanManageViaPortal):
+		c.JSON(http.StatusConflict, gin.H{"code": "plan_manage_via_portal", "message": httpx.SafeMessage("plan_manage_via_portal", err)})
+	case errors.Is(err, ErrStripeNoCustomer):
+		c.JSON(http.StatusConflict, gin.H{"code": "plan_no_stripe_customer", "message": httpx.SafeMessage("plan_no_stripe_customer", err)})
+	case errors.Is(err, ErrStripeNotConfigured):
+		c.JSON(http.StatusServiceUnavailable, gin.H{"code": "stripe_not_configured", "message": httpx.SafeMessage("stripe_not_configured", err)})
+	default:
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "failed to start billing session"})
+	}
 }

@@ -9,7 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/billing"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/plan"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -41,6 +43,190 @@ func TestCreateWorkspace(t *testing.T) {
 	}
 	if ws.BrandColor != "#ff0000" {
 		t.Fatalf("expected brand color #ff0000, got %s", ws.BrandColor)
+	}
+	if fake.billing.PlanCode != "trial" || fake.billing.Period != "monthly" {
+		t.Fatalf("expected trial billing row, got %+v", fake.billing)
+	}
+	if !fake.billing.TrialEndsAt.Valid {
+		t.Fatal("expected trial_ends_at on new workspace")
+	}
+	if !fake.trialGrantedAt.Valid {
+		t.Fatal("first owned workspace must stamp trial_granted_at")
+	}
+}
+
+func TestCreateSecondWorkspaceHitsFreeCap(t *testing.T) {
+	fake := &fakeDB{t: t, ownedCount: 1}
+	svc := NewService(db.New(fake))
+	if _, err := svc.Create(context.Background(), uuid.NewString(), "Second", "second-ws", ""); !errors.Is(err, plan.ErrLimitWorkspaces) {
+		t.Fatalf("expected ErrLimitWorkspaces, got %v", err)
+	}
+	if fake.billing.PlanCode != "" {
+		t.Fatal("denied create must not insert billing")
+	}
+}
+
+func TestCreateSecondWorkspaceOnProIsFree(t *testing.T) {
+	fake := &fakeDB{
+		t:          t,
+		ownedCount: 1,
+		ownedBilling: []db.WorkspaceBilling{{
+			PlanCode: plan.CodePro,
+			Period:   plan.PeriodMonthly,
+		}},
+	}
+	svc := NewService(db.New(fake))
+	if _, err := svc.Create(context.Background(), uuid.NewString(), "Second", "second-pro-ws", ""); err != nil {
+		t.Fatalf("pro second workspace: %v", err)
+	}
+	if fake.billing.PlanCode != plan.CodeFree {
+		t.Fatalf("extra owned workspace must be free, got %+v", fake.billing)
+	}
+	if fake.billing.TrialEndsAt.Valid {
+		t.Fatal("extra workspace must not receive a trial clock")
+	}
+}
+
+func TestCreateSecondWorkspaceOnProUnverified(t *testing.T) {
+	fake := &fakeDB{
+		t:               t,
+		ownedCount:      1,
+		unverifiedEmail: true,
+		ownedBilling: []db.WorkspaceBilling{{
+			PlanCode: plan.CodePro,
+			Period:   plan.PeriodMonthly,
+		}},
+	}
+	svc := NewService(db.New(fake))
+	if _, err := svc.Create(context.Background(), uuid.NewString(), "Second", "second-unverified", ""); !errors.Is(err, ErrEmailUnverified) {
+		t.Fatalf("expected ErrEmailUnverified, got %v", err)
+	}
+}
+
+func TestCreateAfterTrialGrantedIsFree(t *testing.T) {
+	fake := &fakeDB{
+		t:              t,
+		trialGrantedAt: pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
+	}
+	svc := NewService(db.New(fake))
+	if _, err := svc.Create(context.Background(), uuid.NewString(), "Remint", "remint-ws", ""); err != nil {
+		t.Fatalf("create after trial grant: %v", err)
+	}
+	if fake.billing.PlanCode != plan.CodeFree {
+		t.Fatalf("remint after leave must be free, got %+v", fake.billing)
+	}
+	if fake.billing.TrialEndsAt.Valid {
+		t.Fatal("remint after leave must not receive a trial clock")
+	}
+}
+
+func TestCreateFirstOwnedIgnoresMembershipElsewhere(t *testing.T) {
+	// Invite-join as member/admin must not consume OwnedWorkspaces; first owned still trials.
+	fake := &fakeDB{t: t, ownedCount: 0}
+	svc := NewService(db.New(fake))
+	if _, err := svc.Create(context.Background(), uuid.NewString(), "Own", "own-ws", ""); err != nil {
+		t.Fatalf("first owned after invite-join must succeed: %v", err)
+	}
+	if fake.billing.PlanCode != plan.CodeTrial {
+		t.Fatalf("first owned after invite-join must be trial, got %+v", fake.billing)
+	}
+}
+
+func TestAddMemberDoesNotConsumeInviteeOwnedCap(t *testing.T) {
+	actorID := uuid.NewString()
+	fake := &fakeDB{
+		t:           t,
+		memberRole:  RoleOwner,
+		actorUserID: actorID,
+		ownedCount:  1,
+		billing:     db.WorkspaceBilling{PlanCode: plan.CodePro, Period: plan.PeriodMonthly},
+	}
+	svc := NewService(db.New(fake))
+	if _, err := svc.AddMember(context.Background(), actorID, uuid.NewString(), "", uuid.NewString(), RoleMember); err != nil {
+		t.Fatalf("AddMember must use inviter seats, not invitee owned cap: %v", err)
+	}
+	if _, err := svc.AddMember(context.Background(), actorID, uuid.NewString(), "", uuid.NewString(), RoleGuest); err != nil {
+		t.Fatalf("guest must stay unlimited: %v", err)
+	}
+}
+
+func TestUpdateMemberRolePromoteDoesNotConsumeOwnedCap(t *testing.T) {
+	actorID := uuid.NewString()
+	targetID := uuid.NewString()
+	fake := &fakeDB{
+		t:            t,
+		memberRole:   RoleOwner,
+		actorUserID:  actorID,
+		targetUserID: targetID,
+		targetRole:   RoleGuest,
+		ownedCount:   1,
+		billing:      db.WorkspaceBilling{PlanCode: plan.CodePro, Period: plan.PeriodMonthly},
+	}
+	svc := NewService(db.New(fake))
+	if _, err := svc.UpdateMemberRole(context.Background(), actorID, uuid.NewString(), "", targetID, RoleMember); err != nil {
+		t.Fatalf("promote guest to member must use workspace seats, not invitee owned cap: %v", err)
+	}
+}
+
+func TestCreateInvitationDoesNotConsumeInviteeOwnedCap(t *testing.T) {
+	actorID := uuid.NewString()
+	fake := &fakeDB{
+		t:            t,
+		memberRole:   RoleOwner,
+		actorUserID:  actorID,
+		ownedCount:   1,
+		inviteeEmail: "taken@example.test",
+		billing:      db.WorkspaceBilling{PlanCode: plan.CodePro, Period: plan.PeriodMonthly},
+	}
+	svc := NewService(db.New(fake))
+	if _, err := svc.CreateInvitation(context.Background(), actorID, uuid.NewString(), "", "taken@example.test", RoleMember, 7); err != nil {
+		t.Fatalf("invite existing owner as member must succeed: %v", err)
+	}
+	if _, err := svc.CreateInvitation(context.Background(), actorID, uuid.NewString(), "", "guest@example.test", RoleGuest, 7); err != nil {
+		t.Fatalf("guest invite must stay unlimited: %v", err)
+	}
+}
+
+func TestCreateAtProOwnedCap(t *testing.T) {
+	fake := &fakeDB{
+		t:          t,
+		ownedCount: 3,
+		ownedBilling: []db.WorkspaceBilling{{
+			PlanCode: plan.CodePro,
+			Period:   plan.PeriodMonthly,
+		}},
+	}
+	svc := NewService(db.New(fake))
+	if _, err := svc.Create(context.Background(), uuid.NewString(), "Fourth", "fourth-ws", ""); !errors.Is(err, plan.ErrLimitWorkspaces) {
+		t.Fatalf("expected ErrLimitWorkspaces at pro cap, got %v", err)
+	}
+}
+
+func TestChangePlanGates(t *testing.T) {
+	svc := NewService(db.New(&fakeDB{t: t}))
+	_, err := svc.ChangePlan(context.Background(), uuid.NewString(), plan.CodePro, plan.PeriodMonthly)
+	if !errors.Is(err, ErrPlanPaymentRequired) {
+		t.Fatalf("unpaid pro: %v", err)
+	}
+	_, err = svc.ChangePlan(context.Background(), uuid.NewString(), plan.CodeEnterprise, plan.PeriodMonthly)
+	if !errors.Is(err, ErrPlanSalesAssisted) {
+		t.Fatalf("enterprise: %v", err)
+	}
+	_, err = svc.ChangePlan(context.Background(), uuid.NewString(), plan.CodeTrial, plan.PeriodMonthly)
+	if !errors.Is(err, ErrInvalidPlanCode) {
+		t.Fatalf("trial select: %v", err)
+	}
+
+	paid := NewService(db.New(&fakeDB{t: t, billing: db.WorkspaceBilling{
+		WorkspaceID:          newPGUUID(),
+		PlanCode:             plan.CodePro,
+		Period:               plan.PeriodMonthly,
+		StripeSubscriptionID: pgtype.Text{String: "sub_live", Valid: true},
+		BillingStatus:        pgtype.Text{String: billing.StatusActive, Valid: true},
+	}}))
+	_, err = paid.ChangePlan(context.Background(), uuid.NewString(), plan.CodeFree, plan.PeriodMonthly)
+	if !errors.Is(err, ErrPlanManageViaPortal) {
+		t.Fatalf("active stripe free: %v", err)
 	}
 }
 
@@ -128,14 +314,25 @@ type fakeDB struct {
 	targetRole      string
 	listRows        []db.ListWorkspacesByUserRow
 
-	tenant       db.Tenant
-	workspace    db.Workspace
-	member       db.WorkspaceMember
-	invitation   db.WorkspaceInvitation
-	viewerDomain db.WorkspaceViewerDomain
-	storageUsage int64
-	linksCount   int
-	roomsCount   int
+	tenant           db.Tenant
+	workspace        db.Workspace
+	member           db.WorkspaceMember
+	invitation       db.WorkspaceInvitation
+	viewerDomain     db.WorkspaceViewerDomain
+	billing          db.WorkspaceBilling
+	billingLookupErr error
+	storageUsage     int64
+	linksCount       int
+	roomsCount       int
+	seatsCount       int
+	docsCount        int64
+	askTurns         int32
+	knowledgeAnswers int64
+	ownedCount       int64
+	ownedBilling     []db.WorkspaceBilling
+	unverifiedEmail  bool
+	trialGrantedAt   pgtype.Timestamptz
+	inviteeEmail     string
 }
 
 func (f *fakeDB) Exec(ctx context.Context, sql string, arguments ...interface{}) (pgconn.CommandTag, error) {
@@ -173,6 +370,14 @@ func (f *fakeDB) Query(ctx context.Context, sql string, args ...interface{}) (pg
 		rows := make([][]interface{}, f.roomsCount)
 		for i := range rows {
 			rows[i] = row
+		}
+		return &fakeRows{rows: rows}, nil
+	}
+
+	if strings.Contains(sqlLower, "from workspace_members wm") && strings.Contains(sqlLower, "workspace_billing") {
+		rows := make([][]interface{}, len(f.ownedBilling))
+		for i, r := range f.ownedBilling {
+			rows[i] = billingScanValues(r)
 		}
 		return &fakeRows{rows: rows}, nil
 	}
@@ -271,6 +476,32 @@ func (f *fakeDB) QueryRow(ctx context.Context, sql string, args ...interface{}) 
 		}
 		return fakeRow{values: []interface{}{f.workspace.ID, f.workspace.TenantID, f.workspace.Name, f.workspace.Slug, f.workspace.BrandColor, f.workspace.CreatedAt, f.workspace.ForceEmailVerification, f.workspace.WatermarkDownloads, f.workspace.TwoFactorEnabled, f.workspace.CrmConfig, f.workspace.WebhookSecret}}
 
+	case strings.Contains(sqlLower, "insert into workspace_billing"):
+		f.billing = db.WorkspaceBilling{
+			WorkspaceID: argUUID(args, 0),
+			PlanCode:    argString(args, 1),
+			Period:      argString(args, 2),
+			TrialEndsAt: argTimestamptz(args, 3),
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		}
+		return fakeRow{values: billingScanValues(f.billing)}
+
+	case strings.Contains(sqlLower, "from workspace_billing"):
+		if f.billingLookupErr != nil {
+			return fakeRow{err: f.billingLookupErr}
+		}
+		if f.billing.PlanCode == "" {
+			return fakeRow{err: pgx.ErrNoRows}
+		}
+		return fakeRow{values: billingScanValues(f.billing)}
+
+	case strings.Contains(sqlLower, "from workspace_members") && strings.Contains(sqlLower, "role = 'owner'") && strings.Contains(sqlLower, "count(") && !strings.Contains(sqlLower, "workspace_invitations"):
+		return fakeRow{values: []interface{}{f.ownedCount}}
+
+	case strings.Contains(sqlLower, "from workspace_members wm") && strings.Contains(sqlLower, "from workspace_invitations wi"):
+		return fakeRow{values: []interface{}{int64(f.seatsCount)}}
+
 	case strings.Contains(sqlLower, "insert into workspace_members"):
 		f.member = db.WorkspaceMember{
 			WorkspaceID: argUUID(args, 0),
@@ -330,6 +561,15 @@ func (f *fakeDB) QueryRow(ctx context.Context, sql string, args ...interface{}) 
 	case strings.Contains(sqlLower, "from workspaces") && strings.Contains(sqlLower, "where id = $1 limit"):
 		return fakeRow{values: []interface{}{f.workspace.ID, f.workspace.TenantID, f.workspace.Name, f.workspace.Slug, f.workspace.BrandColor, f.workspace.CreatedAt, f.workspace.ForceEmailVerification, f.workspace.WatermarkDownloads, f.workspace.TwoFactorEnabled, f.workspace.CrmConfig, f.workspace.WebhookSecret}}
 
+	case strings.Contains(sqlLower, "update workspaces") && strings.Contains(sqlLower, "watermark_downloads"):
+		f.workspace.ForceEmailVerification = argBool(args, 0)
+		f.workspace.WatermarkDownloads = argBool(args, 1)
+		f.workspace.TwoFactorEnabled = argBool(args, 2)
+		if !f.workspace.ID.Valid {
+			f.workspace.ID = argUUID(args, 3)
+		}
+		return fakeRow{values: []interface{}{f.workspace.ID, f.workspace.TenantID, f.workspace.Name, f.workspace.Slug, f.workspace.BrandColor, f.workspace.CreatedAt, f.workspace.ForceEmailVerification, f.workspace.WatermarkDownloads, f.workspace.TwoFactorEnabled, f.workspace.CrmConfig, f.workspace.WebhookSecret}}
+
 	case strings.Contains(sqlLower, "from workspaces") && strings.Contains(sqlLower, "where id = $1 and tenant_id"):
 		return fakeRow{values: []interface{}{f.workspace.ID, f.workspace.TenantID, f.workspace.Name, f.workspace.Slug, f.workspace.BrandColor, f.workspace.CreatedAt, f.workspace.ForceEmailVerification, f.workspace.WatermarkDownloads, f.workspace.TwoFactorEnabled, f.workspace.CrmConfig, f.workspace.WebhookSecret}}
 
@@ -375,8 +615,44 @@ func (f *fakeDB) QueryRow(ctx context.Context, sql string, args ...interface{}) 
 		}
 		return fakeRow{err: pgx.ErrNoRows}
 
+	case strings.Contains(sqlLower, "count(*)") && strings.Contains(sqlLower, "from links"):
+		return fakeRow{values: []interface{}{int64(f.linksCount)}}
+
+	case strings.Contains(sqlLower, "count(*)") && strings.Contains(sqlLower, "from deal_rooms"):
+		return fakeRow{values: []interface{}{int64(f.roomsCount)}}
+
+	case strings.Contains(sqlLower, "count(*)") && strings.Contains(sqlLower, "from documents"):
+		return fakeRow{values: []interface{}{f.docsCount}}
+
+	case strings.Contains(sqlLower, "from link_ask_turns"):
+		return fakeRow{values: []interface{}{f.askTurns}}
+
+	case strings.Contains(sqlLower, "from knowledge_qa_turns"):
+		return fakeRow{values: []interface{}{f.knowledgeAnswers}}
+
 	case strings.Contains(sqlLower, "sum(d.file_size)"):
 		return fakeRow{values: []interface{}{f.storageUsage}}
+
+	case strings.Contains(sqlLower, "update users") && strings.Contains(sqlLower, "trial_granted_at"):
+		if f.trialGrantedAt.Valid {
+			return fakeRow{err: pgx.ErrNoRows}
+		}
+		f.trialGrantedAt = now
+		return fakeRow{values: []interface{}{argUUID(args, 0), f.trialGrantedAt}}
+
+	case strings.Contains(sqlLower, "from users") && strings.Contains(sqlLower, "where email"):
+		email := argString(args, 0)
+		if f.inviteeEmail == "" || !strings.EqualFold(f.inviteeEmail, email) {
+			return fakeRow{err: pgx.ErrNoRows}
+		}
+		return fakeRow{values: []interface{}{
+			newPGUUID(),
+			email,
+			"",
+			now,
+			true,
+			pgtype.Timestamptz{},
+		}}
 
 	case strings.Contains(sqlLower, "from users") && strings.Contains(sqlLower, "where id = $1 limit"):
 		email := f.actorEmail
@@ -390,11 +666,20 @@ func (f *fakeDB) QueryRow(ctx context.Context, sql string, args ...interface{}) 
 			email,
 			"",
 			now,
-			true,
+			!f.unverifiedEmail,
+			f.trialGrantedAt,
 		}}
 	}
 
 	return fakeRow{err: errors.New("unexpected query")}
+}
+
+func billingScanValues(row db.WorkspaceBilling) []interface{} {
+	return []interface{}{
+		row.WorkspaceID, row.PlanCode, row.Period, row.TrialEndsAt, row.CreatedAt, row.UpdatedAt,
+		row.StripeCustomerID, row.StripeSubscriptionID, row.StripePriceID,
+		row.BillingStatus, row.CurrentPeriodEnd, row.PastDueAt,
+	}
 }
 
 type fakeRow struct {
@@ -499,6 +784,16 @@ func argString(args []interface{}, i int) string {
 	return ""
 }
 
+func argBool(args []interface{}, i int) bool {
+	if i >= len(args) {
+		return false
+	}
+	if b, ok := args[i].(bool); ok {
+		return b
+	}
+	return false
+}
+
 func argUUID(args []interface{}, i int) pgtype.UUID {
 	if i >= len(args) {
 		return pgtype.UUID{}
@@ -525,6 +820,14 @@ func pgUUIDFromString(s string) pgtype.UUID {
 		return pgtype.UUID{}
 	}
 	return pgtype.UUID{Bytes: parsed, Valid: true}
+}
+
+func activeTrialBilling() db.WorkspaceBilling {
+	return db.WorkspaceBilling{
+		PlanCode:    plan.CodeTrial,
+		Period:      plan.PeriodMonthly,
+		TrialEndsAt: pgtype.Timestamptz{Time: time.Now().UTC().Add(24 * time.Hour), Valid: true},
+	}
 }
 
 func bytesEqual(a, b [16]byte) bool {
@@ -713,6 +1016,54 @@ func TestRevokeInvitation(t *testing.T) {
 	}
 	if fake.invitation.Token.Valid {
 		t.Fatal("expected invitation to be deleted")
+	}
+}
+
+func TestRevokeMemberInvitationUnderSeatLock(t *testing.T) {
+	actorID := uuid.NewString()
+	fake := &fakeDB{
+		t:           t,
+		memberRole:  RoleOwner,
+		actorUserID: actorID,
+		seatsCount:  1,
+		billing:     db.WorkspaceBilling{PlanCode: "pro", Period: "monthly"},
+	}
+	svc := NewService(db.New(fake), WithDBPool(fake))
+	wsID := uuid.NewString()
+
+	inv, err := svc.CreateInvitation(context.Background(), actorID, wsID, "", "member@example.test", RoleMember, 7)
+	if err != nil {
+		t.Fatalf("create member invitation: %v", err)
+	}
+	if err := svc.RevokeInvitation(context.Background(), actorID, wsID, "", inv.Token); err != nil {
+		t.Fatalf("revoke member invitation under seat lock: %v", err)
+	}
+	if fake.invitation.Token.Valid {
+		t.Fatal("expected member invitation to be deleted")
+	}
+}
+
+func TestUpdateMemberRoleDemoteUnderSeatLock(t *testing.T) {
+	actorID := uuid.NewString()
+	targetID := uuid.NewString()
+	fake := &fakeDB{
+		t:            t,
+		memberRole:   RoleOwner,
+		actorUserID:  actorID,
+		targetUserID: targetID,
+		targetRole:   RoleMember,
+		seatsCount:   2,
+		billing:      db.WorkspaceBilling{PlanCode: "pro", Period: "monthly"},
+	}
+	svc := NewService(db.New(fake), WithDBPool(fake))
+	wsID := uuid.NewString()
+
+	member, err := svc.UpdateMemberRole(context.Background(), actorID, wsID, "", targetID, RoleGuest)
+	if err != nil {
+		t.Fatalf("demote member→guest under seat lock: %v", err)
+	}
+	if member.Role != RoleGuest {
+		t.Fatalf("role=%q want guest", member.Role)
 	}
 }
 
@@ -996,6 +1347,10 @@ func TestGetBillingUsesRealStorageUsage(t *testing.T) {
 		memberRole:   RoleOwner,
 		actorUserID:  actorID,
 		storageUsage: 5 * 1024 * 1024,
+		linksCount:   3,
+		roomsCount:   2,
+		seatsCount:   1,
+		billing:      activeTrialBilling(),
 	}
 	svc := NewService(db.New(fake))
 
@@ -1003,7 +1358,101 @@ func TestGetBillingUsesRealStorageUsage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get billing: %v", err)
 	}
+	if billing.Plan != "trial" || billing.Period != "monthly" {
+		t.Fatalf("unexpected plan %q %q", billing.Plan, billing.Period)
+	}
+	if billing.TrialExpired {
+		t.Fatal("active trial must not report trial_expired")
+	}
 	if billing.StorageUsed != fake.storageUsage {
 		t.Fatalf("expected storage used %d, got %d", fake.storageUsage, billing.StorageUsed)
+	}
+	trialLimits := plan.Lookup(plan.CodeTrial)
+	if billing.StorageLimit != trialLimits.StorageBytes || billing.LinksLimit != trialLimits.Links ||
+		billing.RoomsLimit != trialLimits.Rooms || billing.SeatsLimit != trialLimits.InternalSeats {
+		t.Fatalf("trial caps mismatch, got %+v want %+v", billing, trialLimits)
+	}
+	if !billing.CustomDomainEnabled {
+		t.Fatal("trial must enable custom domain")
+	}
+	if !billing.WatermarkEnabled {
+		t.Fatal("trial must enable watermark")
+	}
+	if !billing.NDAEnabled {
+		t.Fatal("trial must enable NDA")
+	}
+	if !billing.VisitorAskAIEnabled {
+		t.Fatal("trial must enable visitor ask AI")
+	}
+	if !billing.BrandingEnabled || !billing.AccessControlsEnabled {
+		t.Fatal("trial must enable branding and access controls")
+	}
+	if !billing.KnowledgeDeskEnabled || !billing.WebhooksEnabled || !billing.HubSpotEnabled ||
+		!billing.DailyDigestEnabled || !billing.SlackAlertsEnabled || !billing.RoomAnalyticsEnabled ||
+		!billing.RoomInsightsEnabled || !billing.FormalAskEnabled {
+		t.Fatalf("trial must include business+formal entitlements: %+v", billing)
+	}
+	if billing.KnowledgeAnswersLimit != trialLimits.KnowledgeAnswersMonthly {
+		t.Fatalf("trial knowledge cap=%d want %d", billing.KnowledgeAnswersLimit, trialLimits.KnowledgeAnswersMonthly)
+	}
+	if billing.DocumentsLimit != trialLimits.Documents || billing.AskAILimit != trialLimits.VisitorAskAIMonthly {
+		t.Fatalf("trial document/ask caps %+v want docs=%d ask=%d", billing, trialLimits.Documents, trialLimits.VisitorAskAIMonthly)
+	}
+	if billing.LinksUsed != 3 || billing.RoomsUsed != 2 || billing.SeatsUsed != 1 {
+		t.Fatalf("unexpected usage %+v", billing)
+	}
+}
+
+func TestGetBillingUsesPersistedFreePlan(t *testing.T) {
+	fake := &fakeDB{
+		t:            t,
+		storageUsage: 1024,
+		linksCount:   4,
+		roomsCount:   1,
+		seatsCount:   1,
+		billing: db.WorkspaceBilling{
+			WorkspaceID: newPGUUID(),
+			PlanCode:    "free",
+			Period:      "monthly",
+		},
+	}
+	svc := NewService(db.New(fake))
+
+	billing, err := svc.GetBilling(context.Background(), uuid.NewString())
+	if err != nil {
+		t.Fatalf("get billing: %v", err)
+	}
+	if billing.Plan != "free" {
+		t.Fatalf("expected free, got %q", billing.Plan)
+	}
+	if billing.StorageLimit != 2<<30 || billing.LinksLimit != 20 || billing.RoomsLimit != 1 || billing.SeatsLimit != 1 ||
+		billing.DocumentsLimit != 50 {
+		t.Fatalf("unexpected free limits %+v", billing)
+	}
+	if billing.BrandingEnabled || billing.AccessControlsEnabled {
+		t.Fatal("free must disable branding and access controls")
+	}
+	if billing.AskAILimit != 0 {
+		t.Fatalf("free ask limit must be 0 (feature off), got %d", billing.AskAILimit)
+	}
+	if billing.CustomDomainEnabled {
+		t.Fatal("free must disable custom domain")
+	}
+	if billing.WatermarkEnabled {
+		t.Fatal("free must disable watermark")
+	}
+	if billing.NDAEnabled {
+		t.Fatal("free must disable NDA")
+	}
+	if billing.VisitorAskAIEnabled {
+		t.Fatal("free must disable visitor ask AI")
+	}
+	if billing.KnowledgeDeskEnabled || billing.WebhooksEnabled || billing.HubSpotEnabled ||
+		billing.DailyDigestEnabled || billing.SlackAlertsEnabled || billing.RoomAnalyticsEnabled ||
+		billing.RoomInsightsEnabled || billing.FormalAskEnabled {
+		t.Fatalf("free must disable paid entitlements: %+v", billing)
+	}
+	if billing.StorageUsed != 1024 || billing.LinksUsed != 4 || billing.RoomsUsed != 1 || billing.SeatsUsed != 1 {
+		t.Fatalf("unexpected usage %+v", billing)
 	}
 }

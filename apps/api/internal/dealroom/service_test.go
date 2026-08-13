@@ -1044,6 +1044,62 @@ func TestWorkspaceManagerCanAccessRoomWithoutRoomMembership(t *testing.T) {
 	}
 }
 
+func TestWorkspaceGuestCanViewRoomWithoutRoomMembership(t *testing.T) {
+	fake := newFakeDB(t)
+	svc := NewService(db.New(fake), nil, testCfg())
+	ownerID := uuid.NewString()
+	guestID := uuid.NewString()
+	outsiderID := uuid.NewString()
+	wsID := uuid.NewString()
+	wsUUID := pgUUID(wsID)
+	fake.workspace = db.Workspace{
+		ID:       wsUUID,
+		TenantID: pgUUID(uuid.NewString()),
+		Name:     "Test Workspace",
+		Slug:     "test-workspace",
+	}
+	fake.workspaceMembers = []db.WorkspaceMember{
+		{WorkspaceID: wsUUID, UserID: pgUUID(ownerID), Role: "owner", JoinedAt: nowTs()},
+		{WorkspaceID: wsUUID, UserID: pgUUID(guestID), Role: "guest", JoinedAt: nowTs()},
+	}
+
+	room, err := svc.CreateRoom(context.Background(), ownerID, wsID, CreateRoomRequest{
+		Slug: "guest-view-room",
+		Name: "Guest View Room",
+	})
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	roomID := uuid.UUID(room.ID.Bytes).String()
+
+	folders, err := svc.ListFoldersForMember(context.Background(), roomID, wsID, guestID)
+	if err != nil {
+		t.Fatalf("guest list folders: %v", err)
+	}
+	if len(folders) == 0 {
+		t.Fatal("expected folders for workspace guest")
+	}
+
+	detail, err := svc.GetRoomDetail(context.Background(), roomID, wsID, guestID)
+	if err != nil {
+		t.Fatalf("guest get detail: %v", err)
+	}
+	if detail.IsAdmin {
+		t.Fatal("workspace guest must not be room admin")
+	}
+	if len(detail.Members) != 0 {
+		t.Fatal("workspace guest must not receive admin member list")
+	}
+
+	if _, err := svc.CreateFolder(context.Background(), roomID, wsID, guestID, "secret", "/"); !errors.Is(err, ErrNotRoomAdmin) {
+		t.Fatalf("guest create folder: %v", err)
+	}
+
+	if _, err := svc.ListFoldersForMember(context.Background(), roomID, wsID, outsiderID); !errors.Is(err, ErrApprovalRequired) {
+		t.Fatalf("expected ErrApprovalRequired for outsider, got %v", err)
+	}
+}
+
 func TestRecordNDARequiresMemberAndActivates(t *testing.T) {
 	fake := newFakeDB(t)
 	svc := NewService(db.New(fake), nil, testCfg())

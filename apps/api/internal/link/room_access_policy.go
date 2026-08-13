@@ -186,13 +186,31 @@ func (s *Service) UpsertRoomAccessPolicy(
 	}
 
 	previousBlocked := []string{}
+	ndaAlreadyRequired := false
+	verifyAlreadyRequired := false
+	hadBlocked := false
 	if existing, existingErr := s.queries.GetDealRoomAccessPolicy(ctx, db.GetDealRoomAccessPolicyParams{
 		DealRoomID:  room.ID,
 		WorkspaceID: room.WorkspaceID,
 	}); existingErr == nil {
 		previousBlocked = existing.BlockedEmails
+		ndaAlreadyRequired = existing.RequireNda
+		verifyAlreadyRequired = existing.RequireEmailVerification
+		hadBlocked = len(existing.BlockedEmails) > 0
 	} else if !errors.Is(existingErr, pgx.ErrNoRows) {
 		return RoomAccessPolicy{}, fmt.Errorf("get room access policy: %w", existingErr)
+	}
+
+	// Grandfather: already-on NDA floor stays; only false→true is gated.
+	if req.RequireNdaFloor && !ndaAlreadyRequired {
+		if err := s.assertCanEnableNDA(ctx, workspaceID); err != nil {
+			return RoomAccessPolicy{}, err
+		}
+	}
+	if (req.RequireEmailVerificationFloor && !verifyAlreadyRequired) || (len(blocked) > 0 && !hadBlocked) {
+		if err := s.assertCanEnableAccessControls(ctx, workspaceID); err != nil {
+			return RoomAccessPolicy{}, err
+		}
 	}
 
 	row, err := s.queries.UpsertDealRoomAccessPolicy(ctx, db.UpsertDealRoomAccessPolicyParams{

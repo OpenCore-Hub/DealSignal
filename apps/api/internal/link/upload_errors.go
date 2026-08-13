@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/plan"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/upload"
 )
 
@@ -16,6 +17,9 @@ var (
 
 // classifyLinkUploadError maps link file-request upload failures to HTTP status/code.
 func classifyLinkUploadError(err error) (status int, code string) {
+	if status, code, ok := plan.HTTPError(err); ok {
+		return status, code
+	}
 	switch {
 	case errors.Is(err, ErrNotFileRequestLink):
 		return http.StatusForbidden, "not_file_request_link"

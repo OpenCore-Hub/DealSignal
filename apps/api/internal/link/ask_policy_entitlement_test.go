@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/plan"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
@@ -53,6 +54,47 @@ func TestFormalAskEntitlementFailsClosedWithoutQueries(t *testing.T) {
 	s := &Service{formalAskEntitlement: stubFormalAskEntitlement{ok: true}}
 	if s.isFormalAskEntitled(t.Context(), db.Link{}) {
 		t.Fatal("expected fail-closed when queries are unset")
+	}
+}
+
+func TestFormalAskEntitlementDeniedByWorkspacePlan(t *testing.T) {
+	ws := uuid.New()
+	link := db.Link{WorkspaceID: pgtype.UUID{Bytes: ws, Valid: true}}
+	s := &Service{
+		formalAskEntitlement: stubFormalAskEntitlement{ok: true},
+		planChecker:          stubPlanChecker{formalAskErr: plan.ErrFeatureFormalAsk},
+	}
+	if s.isFormalAskEntitled(t.Context(), link) {
+		t.Fatal("workspace plan deny must win even when Docling stub allows")
+	}
+}
+
+func TestFormalAskEntitlementNilPlanCheckerStillRequiresQueries(t *testing.T) {
+	ws := uuid.New()
+	s := &Service{formalAskEntitlement: stubFormalAskEntitlement{ok: true}}
+	if s.isFormalAskEntitled(t.Context(), db.Link{WorkspaceID: pgtype.UUID{Bytes: ws, Valid: true}}) {
+		t.Fatal("nil plan checker must still fail closed without queries")
+	}
+}
+
+func TestFormalAskEntitlementUnrestrictedPlanStillRequiresQueries(t *testing.T) {
+	ws := uuid.New()
+	s := &Service{
+		formalAskEntitlement: stubFormalAskEntitlement{ok: true},
+		planChecker:          plan.Unrestricted{},
+	}
+	if s.isFormalAskEntitled(t.Context(), db.Link{WorkspaceID: pgtype.UUID{Bytes: ws, Valid: true}}) {
+		t.Fatal("allowed workspace plan must still fail closed without queries")
+	}
+}
+
+func TestFormalAskEntitlementInvalidWorkspaceIDFailsClosed(t *testing.T) {
+	s := &Service{
+		formalAskEntitlement: stubFormalAskEntitlement{ok: true},
+		planChecker:          plan.Unrestricted{},
+	}
+	if s.isFormalAskEntitled(t.Context(), db.Link{}) {
+		t.Fatal("invalid workspace id with plan checker must fail closed")
 	}
 }
 

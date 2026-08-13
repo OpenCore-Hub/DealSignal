@@ -13,6 +13,7 @@ import (
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/heat"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/plan"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/radar"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -131,6 +132,7 @@ type Service struct {
 	signalSyncer        SignalSyncer
 	cache               Cache
 	roomListInvalidator RoomListInvalidator
+	planChecker         plan.Checker
 }
 
 // WithCache enables a cache for DashboardStats.
@@ -141,6 +143,14 @@ func (s *Service) WithCache(c Cache) {
 // WithRoomListInvalidator wires soft invalidation of deal-room list caches.
 func (s *Service) WithRoomListInvalidator(v RoomListInvalidator) {
 	s.roomListInvalidator = v
+}
+
+// WithPlanChecker gates Insights overview. Nil is a no-op.
+func (s *Service) WithPlanChecker(c plan.Checker) *Service {
+	if s != nil {
+		s.planChecker = c
+	}
+	return s
 }
 
 func (s *Service) softInvalidateRoomList(ctx context.Context, workspaceID pgtype.UUID) {
@@ -865,28 +875,28 @@ type InsightsOverview struct {
 	// EventRetentionDays is access_logs partition retention (config); UI discloses it.
 	EventRetentionDays int
 	// PageViewRetentionDays is page_views partition retention (config).
-	PageViewRetentionDays           int
-	DailyVisits                     []DailyVisitPoint
-	PeriodOpens                     int64
-	PreviousPeriodOpens             int64
-	PeriodUniqueVisitors            int64
-	PreviousPeriodUniqueVisitors    int64
-	PeriodMedianDurationSeconds          float64
-	PreviousPeriodMedianDurationSeconds  float64
-	PeriodAvgDurationSeconds             float64
-	PeriodPageViewCount                  int64
-	PeriodSessionCount                   int64
-	PeriodMeasurableSessions             int64
-	PeriodCompletedSessions              int64
-	PeriodCompletionRate                 float64
-	PreviousPeriodSessionCount           int64
-	PreviousPeriodCompletedSessions      int64
-	PreviousPeriodCompletionRate         float64
-	OpenSignalCount                      int
-	TopDocuments                         []DocumentScore
-	TopLinks                             []LinkScore
-	TopContacts                          []ContactScore // digest enrichment only; not surfaced as radar CTA
-	ScenarioPack                         *ScenarioPackInsights
+	PageViewRetentionDays               int
+	DailyVisits                         []DailyVisitPoint
+	PeriodOpens                         int64
+	PreviousPeriodOpens                 int64
+	PeriodUniqueVisitors                int64
+	PreviousPeriodUniqueVisitors        int64
+	PeriodMedianDurationSeconds         float64
+	PreviousPeriodMedianDurationSeconds float64
+	PeriodAvgDurationSeconds            float64
+	PeriodPageViewCount                 int64
+	PeriodSessionCount                  int64
+	PeriodMeasurableSessions            int64
+	PeriodCompletedSessions             int64
+	PeriodCompletionRate                float64
+	PreviousPeriodSessionCount          int64
+	PreviousPeriodCompletedSessions     int64
+	PreviousPeriodCompletionRate        float64
+	OpenSignalCount                     int
+	TopDocuments                        []DocumentScore
+	TopLinks                            []LinkScore
+	TopContacts                         []ContactScore // digest enrichment only; not surfaced as radar CTA
+	ScenarioPack                        *ScenarioPackInsights
 }
 
 const insightsTrendDaysDefault = 7
@@ -910,6 +920,11 @@ func (s *Service) InsightsOverview(ctx context.Context, workspaceID string, days
 // InsightsOverviewQuery aggregates discovery-oriented analytics for a preset
 // or custom UTC calendar range. Tops remain lifetime heat rankings.
 func (s *Service) InsightsOverviewQuery(ctx context.Context, workspaceID string, q InsightsRangeQuery) (InsightsOverview, error) {
+	if s.planChecker != nil {
+		if err := s.planChecker.AssertCanUseRoomInsights(ctx, workspaceID); err != nil {
+			return InsightsOverview{}, err
+		}
+	}
 	now := time.Now().UTC()
 	rng, err := resolveInsightsRange(q, now)
 	if err != nil {

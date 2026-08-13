@@ -6,20 +6,31 @@ import (
 	"time"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/plan"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // RuleEngine evaluates notification rules and creates or merges notifications.
 type RuleEngine struct {
-	queries  *db.Queries
-	enqueuer func(ctx context.Context, workspaceID, userID, channel, subject, body string, opts ...EnqueueOption) error
+	queries     *db.Queries
+	enqueuer    func(ctx context.Context, workspaceID, userID, channel, subject, body string, opts ...EnqueueOption) error
+	planChecker plan.Checker
 }
 
 // NewRuleEngine creates a RuleEngine. The enqueuer should be the notification
 // Service.Enqueue method or an equivalent that sends/persists the notification.
 func NewRuleEngine(q *db.Queries, enqueuer func(ctx context.Context, workspaceID, userID, channel, subject, body string, opts ...EnqueueOption) error) *RuleEngine {
 	return &RuleEngine{queries: q, enqueuer: enqueuer}
+}
+
+// WithPlanChecker skips outbound webhook enqueue and Slack-channel emit
+// when the plan does not include those features.
+func (e *RuleEngine) WithPlanChecker(c plan.Checker) *RuleEngine {
+	if e != nil {
+		e.planChecker = c
+	}
+	return e
 }
 
 // Event describes an activity that may trigger notification rules.
@@ -162,6 +173,11 @@ func (e *RuleEngine) fireRule(ctx context.Context, rule db.NotificationRule, wsU
 
 	for _, channel := range channels {
 		channel := channel
+		if channel == "slack" && featureDenied(e.planChecker, ctx, ev.WorkspaceID, func(c plan.Checker, ctx context.Context, id string) error {
+			return c.AssertCanUseSlackAlerts(ctx, id)
+		}) {
+			continue
+		}
 		// Try to merge into an existing pending notification for the same link.
 		existing, err := e.queries.FindMergeableNotification(ctx, db.FindMergeableNotificationParams{
 			WorkspaceID: wsu,

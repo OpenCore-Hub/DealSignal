@@ -27,6 +27,7 @@ import (
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/mailer"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/nda"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/notification"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/plan"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/redis"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/upload"
 	"github.com/google/uuid"
@@ -82,6 +83,8 @@ type Service struct {
 	askSecurity          AskSecurityRecorder
 	formalAskEntitlement FormalAskEntitlement
 	formalAskInsights    FormalAskInsights
+	planChecker          plan.Checker
+	objectDeleter        ObjectDeleter
 	// accessCodeEpoch tracks the latest code-rotation generation per
 	// publicToken+email so async sends can detect superseded codes without
 	// touching the DB (safe under the integration-test shared-tx fixture).
@@ -132,6 +135,66 @@ func WithFormalAskInsights(b FormalAskInsights) ServiceOption {
 // WithNDAService wires One-Click NDA sealing and notifications.
 func WithNDAService(n *nda.Service) ServiceOption {
 	return func(s *Service) { s.ndaSvc = n }
+}
+
+// WithPlanChecker enforces workspace plan limits on link create. Nil skips checks.
+func WithPlanChecker(c plan.Checker) ServiceOption {
+	return func(s *Service) { s.planChecker = c }
+}
+
+// WithObjectDeleter deletes MinIO/S3 objects when a pending file-request upload
+// is rejected or expired. Nil skips object delete (tests without storage).
+func WithObjectDeleter(d ObjectDeleter) ServiceOption {
+	return func(s *Service) { s.objectDeleter = d }
+}
+
+// SetObjectDeleter attaches object storage after construction.
+func (s *Service) SetObjectDeleter(d ObjectDeleter) {
+	if s != nil {
+		s.objectDeleter = d
+	}
+}
+
+func (s *Service) assertCanEnableNDA(ctx context.Context, workspaceID string) error {
+	if s.planChecker == nil {
+		return nil
+	}
+	return s.planChecker.AssertCanUseNDA(ctx, workspaceID)
+}
+
+func (s *Service) assertCanEnableWatermark(ctx context.Context, workspaceID string) error {
+	if s.planChecker == nil {
+		return nil
+	}
+	return s.planChecker.AssertCanUseWatermark(ctx, workspaceID)
+}
+
+func (s *Service) assertCanEnableVisitorAskAI(ctx context.Context, workspaceID string) error {
+	if s.planChecker == nil {
+		return nil
+	}
+	return s.planChecker.AssertCanUseVisitorAskAI(ctx, workspaceID)
+}
+
+func (s *Service) assertCanEnableAccessControls(ctx context.Context, workspaceID string) error {
+	if s.planChecker == nil {
+		return nil
+	}
+	return s.planChecker.AssertCanUseAccessControls(ctx, workspaceID)
+}
+
+func (s *Service) assertCanShareMultipleDocuments(ctx context.Context, workspaceID string, n int) error {
+	if n <= 1 || s.planChecker == nil {
+		return nil
+	}
+	return s.planChecker.AssertCanUseBranding(ctx, workspaceID)
+}
+
+func (s *Service) assertCanAddStorage(ctx context.Context, workspaceID string, additionalBytes int64) error {
+	if s.planChecker == nil {
+		return nil
+	}
+	return s.planChecker.AssertCanAddStorage(ctx, workspaceID, additionalBytes)
 }
 
 // WithRoomListInvalidator wires soft invalidation of deal-room list caches.
@@ -187,6 +250,8 @@ var (
 	ErrRequiresEmailCode    = errors.New("email verification code required")
 	ErrInvalidEmailCode     = errors.New("invalid email verification code")
 	ErrNotFoundInWorkspace  = errors.New("link not found in workspace")
+	ErrLinkNotRenewable     = errors.New("only archived or expired links can be renewed")
+	ErrExpiryInPast         = errors.New("expiry date must be in the future")
 
 	// Deal-room sharing / access-rule errors.
 	ErrDealRoomNotFound = errors.New("data room not found")
@@ -467,6 +532,28 @@ func (s *Service) CreateLink(ctx context.Context, userID, workspaceID string, re
 	if err != nil {
 		return db.Link{}, err
 	}
+	if requireNDA {
+		if err := s.assertCanEnableNDA(ctx, workspaceID); err != nil {
+			return db.Link{}, err
+		}
+	}
+	if req.WatermarkEnabled || req.ScreenshotProtectionEnabled {
+		if err := s.assertCanEnableWatermark(ctx, workspaceID); err != nil {
+			return db.Link{}, err
+		}
+	}
+	if requireEmailVerification || len(req.AllowedEmails) > 0 || len(req.BlockedEmails) > 0 {
+		if err := s.assertCanEnableAccessControls(ctx, workspaceID); err != nil {
+			return db.Link{}, err
+		}
+	}
+	docCount := len(req.DocumentIDs)
+	if docCount == 0 && req.DocumentID != "" {
+		docCount = 1
+	}
+	if err := s.assertCanShareMultipleDocuments(ctx, workspaceID, docCount); err != nil {
+		return db.Link{}, err
+	}
 
 	// Email verification for document links needs at least one pre-defined contact
 	// so the access code has a destination. Deal-room links skip this requirement;
@@ -493,6 +580,34 @@ func (s *Service) CreateLink(ctx context.Context, userID, workspaceID string, re
 		return db.Link{}, err
 	}
 
+	run := func(ctx context.Context) (db.Link, error) {
+		return s.createLinkAfterPlanQuota(ctx, userID, workspaceID, workspaceUUID, userUUID, req, hasDocuments, hasDealRoom, linkType, targetFolderPath, requireEmail, requireEmailVerification, requireNDA, perm, passwordHash)
+	}
+	if s.planChecker != nil {
+		var out db.Link
+		err := s.planChecker.WithCreateLinkQuota(ctx, workspaceID, func(ctx context.Context) error {
+			var err error
+			out, err = run(ctx)
+			return err
+		})
+		return out, err
+	}
+	return run(ctx)
+}
+
+// createLinkAfterPlanQuota performs the durable CreateLink insert path.
+// Callers must already hold plan link quota (WithCreateLinkQuota) when capped.
+func (s *Service) createLinkAfterPlanQuota(
+	ctx context.Context,
+	userID, workspaceID string,
+	workspaceUUID, userUUID pgtype.UUID,
+	req CreateLinkRequest,
+	hasDocuments, hasDealRoom bool,
+	linkType, targetFolderPath string,
+	requireEmail, requireEmailVerification, requireNDA bool,
+	perm string,
+	passwordHash pgtype.Text,
+) (db.Link, error) {
 	token, err := generateToken()
 	if err != nil {
 		return db.Link{}, fmt.Errorf("generate token: %w", err)
@@ -857,6 +972,26 @@ func (s *Service) UpdateLink(ctx context.Context, linkID, workspaceID string, re
 
 	requireEmail, requireEmailVerification, requireNDA, perm, err := normalizeSecurityConfig(createReq)
 	if err != nil {
+		return db.Link{}, err
+	}
+	// Grandfather: already-on NDA links can stay; only false→true is gated.
+	if requireNDA && !existing.RequireNda {
+		if err := s.assertCanEnableNDA(ctx, workspaceID); err != nil {
+			return db.Link{}, err
+		}
+	}
+	if (req.WatermarkEnabled && !existing.WatermarkEnabled) ||
+		(req.ScreenshotProtectionEnabled && !existing.ScreenshotProtectionEnabled) {
+		if err := s.assertCanEnableWatermark(ctx, workspaceID); err != nil {
+			return db.Link{}, err
+		}
+	}
+	if requireEmailVerification && !existing.RequireEmailVerification {
+		if err := s.assertCanEnableAccessControls(ctx, workspaceID); err != nil {
+			return db.Link{}, err
+		}
+	}
+	if err := s.assertCanShareMultipleDocuments(ctx, workspaceID, len(req.DocumentIDs)); err != nil {
 		return db.Link{}, err
 	}
 
@@ -1268,6 +1403,28 @@ func (s *Service) CreateDealRoomLink(ctx context.Context, userID, workspaceID, d
 		req.FolderScopeMode = FolderScopeModeAllowlist
 	} else if normalizeFolderScopeMode(req.FolderScopeMode) == "" {
 		req.FolderScopeMode = FolderScopeModeFull
+	}
+
+	// Fail before CreateLink so a plan denial cannot leave an orphan share link.
+	if req.AskAiEnabled {
+		if err := s.assertCanEnableVisitorAskAI(ctx, workspaceID); err != nil {
+			return db.Link{}, err
+		}
+	}
+	if req.WatermarkEnabled || req.ScreenshotProtectionEnabled {
+		if err := s.assertCanEnableWatermark(ctx, workspaceID); err != nil {
+			return db.Link{}, err
+		}
+	}
+	if req.RequireNDA {
+		if err := s.assertCanEnableNDA(ctx, workspaceID); err != nil {
+			return db.Link{}, err
+		}
+	}
+	if req.RequireEmailVerification || len(req.AllowedEmails) > 0 || len(req.BlockedEmails) > 0 {
+		if err := s.assertCanEnableAccessControls(ctx, workspaceID); err != nil {
+			return db.Link{}, err
+		}
 	}
 
 	link, err := s.CreateLink(ctx, userID, workspaceID, CreateLinkRequest{
@@ -1763,6 +1920,18 @@ func (s *Service) UpdateAccessRules(ctx context.Context, userID, workspaceID, li
 
 	if err := validateAccessRules(rules); err != nil {
 		return err
+	}
+
+	if len(rules) > 0 {
+		existingRules, listErr := s.queries.ListLinkAccessRulesByLink(ctx, pgtype.UUID{Bytes: linkUUID, Valid: true})
+		if listErr != nil {
+			return fmt.Errorf("list access rules: %w", listErr)
+		}
+		if len(existingRules) == 0 {
+			if err := s.assertCanEnableAccessControls(ctx, workspaceID); err != nil {
+				return err
+			}
+		}
 	}
 
 	// If any allow rule exists, an email identity is required so the rule can be
@@ -3979,18 +4148,50 @@ func (s *Service) UpdateStatus(ctx context.Context, linkID, workspaceID, status 
 	if status != "active" && status != "revoked" {
 		return db.Link{}, errors.New("invalid status")
 	}
-	link, err := s.queries.UpdateLinkStatus(ctx, db.UpdateLinkStatusParams{
-		Status:      status,
-		ID:          pgtype.UUID{Bytes: id, Valid: true},
-		WorkspaceID: pgUUID(workspaceID),
-	})
+	existing, err := s.GetByID(ctx, linkID, workspaceID)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return db.Link{}, ErrNotFoundInWorkspace
+		return db.Link{}, err
+	}
+	if existing.Status == status {
+		return existing, nil
+	}
+
+	var link db.Link
+	run := func(ctx context.Context) error {
+		row, updErr := s.queries.UpdateLinkStatus(ctx, db.UpdateLinkStatusParams{
+			Status:      status,
+			ID:          pgtype.UUID{Bytes: id, Valid: true},
+			WorkspaceID: pgUUID(workspaceID),
+		})
+		if updErr != nil {
+			if errors.Is(updErr, pgx.ErrNoRows) {
+				return ErrNotFoundInWorkspace
+			}
+			return fmt.Errorf("update link status: %w", updErr)
 		}
-		return db.Link{}, fmt.Errorf("update link status: %w", err)
+		link = row
+		return nil
+	}
+
+	wasCounted := linkStatusCountsTowardQuota(existing.Status)
+	willCount := linkStatusCountsTowardQuota(status)
+	switch {
+	case willCount && !wasCounted && s.planChecker != nil:
+		err = s.planChecker.WithCreateLinkQuota(ctx, workspaceID, run)
+	case wasCounted && !willCount && s.planChecker != nil:
+		err = s.planChecker.WithBillingLock(ctx, workspaceID, run)
+	default:
+		err = run(ctx)
+	}
+	if err != nil {
+		return db.Link{}, err
 	}
 	return link, nil
+}
+
+// linkStatusCountsTowardQuota reports whether a link status consumes plan link inventory.
+func linkStatusCountsTowardQuota(status string) bool {
+	return status == "active"
 }
 
 // UpdateDownloadEnabled toggles whether visitors may download files on the link.
@@ -4026,12 +4227,23 @@ func (s *Service) ArchiveLink(ctx context.Context, workspaceID, linkID string) (
 	if link.Status == "archived" {
 		return link, nil // idempotent
 	}
-	if _, err := s.queries.UpdateLinkStatus(ctx, db.UpdateLinkStatusParams{
-		ID:          link.ID,
-		WorkspaceID: link.WorkspaceID,
-		Status:      "archived",
-	}); err != nil {
-		return db.Link{}, fmt.Errorf("archive link: %w", err)
+	run := func(ctx context.Context) error {
+		_, err := s.queries.UpdateLinkStatus(ctx, db.UpdateLinkStatusParams{
+			ID:          link.ID,
+			WorkspaceID: link.WorkspaceID,
+			Status:      "archived",
+		})
+		if err != nil {
+			return fmt.Errorf("archive link: %w", err)
+		}
+		return nil
+	}
+	if linkStatusCountsTowardQuota(link.Status) && s.planChecker != nil {
+		if err := s.planChecker.WithBillingLock(ctx, workspaceID, run); err != nil {
+			return db.Link{}, err
+		}
+	} else if err := run(ctx); err != nil {
+		return db.Link{}, err
 	}
 	s.recordSecurityEvent(ctx, link, "", "", "link_archived", "")
 	s.resolveExpiringLink(workspaceID, linkID)
@@ -4048,57 +4260,73 @@ func (s *Service) RenewLink(ctx context.Context, workspaceID, linkID string, new
 		return db.Link{}, ErrNotFoundInWorkspace
 	}
 	if link.Status != "archived" && link.Status != "expired" {
-		return db.Link{}, errors.New("only archived or expired links can be renewed")
+		return db.Link{}, ErrLinkNotRenewable
 	}
 	// Validate new expiry date is in the future.
 	if newExpiresAt != nil && newExpiresAt.Before(time.Now()) {
-		return db.Link{}, errors.New("expiry date must be in the future")
+		return db.Link{}, ErrExpiryInPast
 	}
 	expiresAt := link.ExpiresAt
-	if newExpiresAt != nil {
+	now := time.Now().UTC()
+	switch {
+	case newExpiresAt != nil:
 		expiresAt = pgtype.Timestamptz{Time: *newExpiresAt, Valid: true}
+	case link.ExpiresAt.Valid && !link.ExpiresAt.Time.After(now):
+		// Body omitted expires_at and the prior window already elapsed — apply
+		// the documented default renewal window so renew re-enters live inventory.
+		expiresAt = pgtype.Timestamptz{Time: now.Add(30 * 24 * time.Hour), Valid: true}
 	}
 	// Bump security_version so any stale sessions are invalidated.
 	newVersion := link.SecurityVersion + 1
-	if _, err := s.queries.UpdateLinkFull(ctx, db.UpdateLinkFullParams{
-		Name:                        link.Name,
-		DocumentID:                  link.DocumentID,
-		DealRoomID:                  link.DealRoomID,
-		PermissionType:              link.PermissionType,
-		ExpiresAt:                   expiresAt,
-		MaxAccessCount:              link.MaxAccessCount,
-		DownloadEnabled:             link.DownloadEnabled,
-		WatermarkEnabled:            link.WatermarkEnabled,
-		RequireEmail:                link.RequireEmail,
-		RequireEmailVerification:    link.RequireEmailVerification,
-		RequireNda:                  link.RequireNda,
-		RequirePassword:             link.RequirePassword,
-		PasswordHash:                link.PasswordHash,
-		CustomDomain:                link.CustomDomain,
-		Tags:                        link.Tags,
-		NotifyOnAccess:              link.NotifyOnAccess,
-		QaEnabled:                   link.QaEnabled,
-		FileRequestsEnabled:         link.FileRequestsEnabled,
-		IndexFileEnabled:            link.IndexFileEnabled,
-		ScreenshotProtectionEnabled: link.ScreenshotProtectionEnabled,
-		LinkType:                    link.LinkType,
-		TargetFolderPath:            link.TargetFolderPath,
-		SecurityVersion:             newVersion,
-		HasDocumentScope:            link.HasDocumentScope,
-		FolderScopePaths:            link.FolderScopePaths,
-		FolderScopeMode:             link.FolderScopeMode,
-		ID:                          link.ID,
-		WorkspaceID:                 link.WorkspaceID,
-	}); err != nil {
-		return db.Link{}, fmt.Errorf("renew link: %w", err)
+	run := func(ctx context.Context) error {
+		if _, err := s.queries.UpdateLinkFull(ctx, db.UpdateLinkFullParams{
+			Name:                        link.Name,
+			DocumentID:                  link.DocumentID,
+			DealRoomID:                  link.DealRoomID,
+			PermissionType:              link.PermissionType,
+			ExpiresAt:                   expiresAt,
+			MaxAccessCount:              link.MaxAccessCount,
+			DownloadEnabled:             link.DownloadEnabled,
+			WatermarkEnabled:            link.WatermarkEnabled,
+			RequireEmail:                link.RequireEmail,
+			RequireEmailVerification:    link.RequireEmailVerification,
+			RequireNda:                  link.RequireNda,
+			RequirePassword:             link.RequirePassword,
+			PasswordHash:                link.PasswordHash,
+			CustomDomain:                link.CustomDomain,
+			Tags:                        link.Tags,
+			NotifyOnAccess:              link.NotifyOnAccess,
+			QaEnabled:                   link.QaEnabled,
+			FileRequestsEnabled:         link.FileRequestsEnabled,
+			IndexFileEnabled:            link.IndexFileEnabled,
+			ScreenshotProtectionEnabled: link.ScreenshotProtectionEnabled,
+			LinkType:                    link.LinkType,
+			TargetFolderPath:            link.TargetFolderPath,
+			SecurityVersion:             newVersion,
+			HasDocumentScope:            link.HasDocumentScope,
+			FolderScopePaths:            link.FolderScopePaths,
+			FolderScopeMode:             link.FolderScopeMode,
+			ID:                          link.ID,
+			WorkspaceID:                 link.WorkspaceID,
+		}); err != nil {
+			return fmt.Errorf("renew link: %w", err)
+		}
+		if _, err := s.queries.UpdateLinkStatus(ctx, db.UpdateLinkStatusParams{
+			ID:          link.ID,
+			WorkspaceID: link.WorkspaceID,
+			Status:      "active",
+		}); err != nil {
+			return fmt.Errorf("reactivate link: %w", err)
+		}
+		return nil
 	}
-	// Reset status to active.
-	if _, err := s.queries.UpdateLinkStatus(ctx, db.UpdateLinkStatusParams{
-		ID:          link.ID,
-		WorkspaceID: link.WorkspaceID,
-		Status:      "active",
-	}); err != nil {
-		return db.Link{}, fmt.Errorf("reactivate link: %w", err)
+	// Archived/expired do not consume quota; renewing re-enters active inventory.
+	if s.planChecker != nil {
+		if err := s.planChecker.WithCreateLinkQuota(ctx, workspaceID, run); err != nil {
+			return db.Link{}, err
+		}
+	} else if err := run(ctx); err != nil {
+		return db.Link{}, err
 	}
 	s.recordSecurityEvent(ctx, link, "", "", "link_renewed", "")
 	s.resolveExpiringLink(workspaceID, linkID)
@@ -4115,33 +4343,46 @@ func (s *Service) Delete(ctx context.Context, linkID, workspaceID string) error 
 	if err != nil {
 		return errors.New("invalid link id")
 	}
+	existing, err := s.GetByID(ctx, linkID, workspaceID)
+	if err != nil {
+		return err
+	}
 	params := db.DeleteLinkParams{
 		ID:          pgtype.UUID{Bytes: id, Valid: true},
 		WorkspaceID: pgUUID(workspaceID),
 	}
 
-	// 1. Preferred: soft-delete (set status = 'deleted').
-	rows, err := s.queries.DeleteLink(ctx, params)
-	if err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23514" {
-			// 2. 'deleted' not in CHECK constraint (migration 025 not applied).
-			//    Fall back to 'disabled' — list queries filter it just like 'deleted'.
-			_, fallbackErr := s.queries.UpdateLinkStatus(ctx, db.UpdateLinkStatusParams{
-				Status:      "disabled",
-				ID:          params.ID,
-				WorkspaceID: params.WorkspaceID,
-			})
-			if fallbackErr != nil {
-				return fmt.Errorf("delete link: %w", fallbackErr)
+	run := func(ctx context.Context) error {
+		// 1. Preferred: soft-delete (set status = 'deleted').
+		rows, delErr := s.queries.DeleteLink(ctx, params)
+		if delErr != nil {
+			var pgErr *pgconn.PgError
+			if errors.As(delErr, &pgErr) && pgErr.Code == "23514" {
+				// 2. 'deleted' not in CHECK constraint (migration 025 not applied).
+				//    Fall back to 'disabled' — list queries filter it just like 'deleted'.
+				_, fallbackErr := s.queries.UpdateLinkStatus(ctx, db.UpdateLinkStatusParams{
+					Status:      "disabled",
+					ID:          params.ID,
+					WorkspaceID: params.WorkspaceID,
+				})
+				if fallbackErr != nil {
+					return fmt.Errorf("delete link: %w", fallbackErr)
+				}
+				return nil
 			}
-			s.resolveExpiringLink(workspaceID, linkID)
-			return nil
+			return fmt.Errorf("delete link: %w", delErr)
 		}
-		return fmt.Errorf("delete link: %w", err)
+		if rows == 0 {
+			return ErrNotFoundInWorkspace
+		}
+		return nil
 	}
-	if rows == 0 {
-		return ErrNotFoundInWorkspace
+	if linkStatusCountsTowardQuota(existing.Status) && s.planChecker != nil {
+		if err := s.planChecker.WithBillingLock(ctx, workspaceID, run); err != nil {
+			return err
+		}
+	} else if err := run(ctx); err != nil {
+		return err
 	}
 	s.resolveExpiringLink(workspaceID, linkID)
 	return nil
@@ -5391,12 +5632,45 @@ type FileUploader interface {
 	PutObject(ctx context.Context, key string, body io.Reader, size int64, contentType string) error
 }
 
+// ObjectDeleter removes stored objects. Missing keys must be treated as success.
+type ObjectDeleter interface {
+	DeleteObject(ctx context.Context, key string) error
+}
+
 var allowedUploadMimeTypes = map[string]bool{
 	"application/pdf": true,
 	"application/vnd.openxmlformats-officedocument.wordprocessingml.document":   true,
 	"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":         true,
 	"application/vnd.openxmlformats-officedocument.presentationml.presentation": true,
 	"application/zip": true,
+}
+
+func deleteUploadedObject(ctx context.Context, storage FileUploader, fallback ObjectDeleter, key string) {
+	if d, ok := storage.(ObjectDeleter); ok {
+		_ = d.DeleteObject(ctx, key)
+		return
+	}
+	if fallback != nil {
+		_ = fallback.DeleteObject(ctx, key)
+	}
+}
+
+func (s *Service) assertFileRequestUploadQuota(ctx context.Context, workspaceID string, wsUUID pgtype.UUID, size int64) error {
+	if s.planChecker == nil {
+		return nil
+	}
+	if err := s.planChecker.AssertCanUploadFile(ctx, workspaceID, size); err != nil {
+		return err
+	}
+	pending := int64(0)
+	if s.queries != nil {
+		n, err := s.queries.SumPendingUploadedFileBytesByWorkspace(ctx, wsUUID)
+		if err != nil {
+			return fmt.Errorf("count pending uploads: %w", err)
+		}
+		pending = n
+	}
+	return s.planChecker.AssertCanAddStorage(ctx, workspaceID, pending+size)
 }
 
 // UploadFileForLink stores a file uploaded through a file-request link.
@@ -5410,12 +5684,21 @@ func (s *Service) UploadFileForLink(ctx context.Context, storage FileUploader, l
 	if !allowedUploadMimeTypes[mimeType] {
 		return db.LinkUploadedFile{}, fmt.Errorf("%w: %s", ErrLinkUploadUnsupportedType, mimeType)
 	}
-	const maxSize = 50 * 1024 * 1024
-	if size > maxSize {
-		return db.LinkUploadedFile{}, ErrLinkUploadTooLarge
-	}
 	if size <= 0 {
 		return db.LinkUploadedFile{}, ErrLinkUploadEmpty
+	}
+	if size > upload.MaxFileSize {
+		return db.LinkUploadedFile{}, ErrLinkUploadTooLarge
+	}
+
+	wsID := ""
+	if link.WorkspaceID.Valid {
+		wsID = uuid.UUID(link.WorkspaceID.Bytes).String()
+	}
+
+	// Fail-fast before PutObject so a capped workspace never writes an orphan.
+	if err := s.assertFileRequestUploadQuota(ctx, wsID, link.WorkspaceID, size); err != nil {
+		return db.LinkUploadedFile{}, err
 	}
 
 	storageKey := fmt.Sprintf("uploads/%s/%s/%s", uuid.New().String(), link.PublicToken, filename)
@@ -5423,19 +5706,41 @@ func (s *Service) UploadFileForLink(ctx context.Context, storage FileUploader, l
 		return db.LinkUploadedFile{}, fmt.Errorf("store upload: %w", err)
 	}
 
-	return s.queries.CreateUploadedFile(ctx, db.CreateUploadedFileParams{
-		TenantID:          link.TenantID,
-		WorkspaceID:       link.WorkspaceID,
-		LinkID:            link.ID,
-		OriginalFilename:  filename,
-		StorageKey:        storageKey,
-		FileSize:          size,
-		MimeType:          mimeType,
-		UploaderEmail:     pgtype.Text{String: visitorEmail, Valid: visitorEmail != ""},
-		UploaderVisitorID: pgtype.Text{String: visitorID, Valid: visitorID != ""},
-		UploaderIp:        hashIPText(s.cfg.IPHashKey, ip),
-		UploaderUserAgent: pgtype.Text{String: ua, Valid: ua != ""},
-	})
+	var created db.LinkUploadedFile
+	persist := func(ctx context.Context) error {
+		if err := s.assertFileRequestUploadQuota(ctx, wsID, link.WorkspaceID, size); err != nil {
+			return err
+		}
+		row, err := s.queries.CreateUploadedFile(ctx, db.CreateUploadedFileParams{
+			TenantID:          link.TenantID,
+			WorkspaceID:       link.WorkspaceID,
+			LinkID:            link.ID,
+			OriginalFilename:  filename,
+			StorageKey:        storageKey,
+			FileSize:          size,
+			MimeType:          mimeType,
+			UploaderEmail:     pgtype.Text{String: visitorEmail, Valid: visitorEmail != ""},
+			UploaderVisitorID: pgtype.Text{String: visitorID, Valid: visitorID != ""},
+			UploaderIp:        hashIPText(s.cfg.IPHashKey, ip),
+			UploaderUserAgent: pgtype.Text{String: ua, Valid: ua != ""},
+		})
+		if err != nil {
+			return err
+		}
+		created = row
+		return nil
+	}
+	var err error
+	if s.planChecker != nil && wsID != "" {
+		err = s.planChecker.WithBillingLock(ctx, wsID, persist)
+	} else {
+		err = persist(ctx)
+	}
+	if err != nil {
+		deleteUploadedObject(ctx, storage, s.objectDeleter, storageKey)
+		return db.LinkUploadedFile{}, err
+	}
+	return created, nil
 }
 
 // ListUploadedFiles returns all uploaded files for a link.
@@ -5474,6 +5779,62 @@ func (s *Service) ApproveUploadedFile(ctx context.Context, fileID pgtype.UUID, r
 		return fmt.Errorf("unsupported mime type for document ingestion: %s", file.MimeType)
 	}
 
+	workspaceID := uuid.UUID(file.WorkspaceID.Bytes).String()
+	// Pre-lock delta from committed state; re-checked inside the promote tx if title state changes.
+	existingPeek, peekErr := s.queries.GetDocumentByTitleInWorkspace(ctx, db.GetDocumentByTitleInWorkspaceParams{
+		WorkspaceID: file.WorkspaceID,
+		Title:       file.OriginalFilename,
+	})
+	additionalBytes := file.FileSize
+	switch {
+	case peekErr == nil:
+		oldSize := int64(0)
+		if existingPeek.FileSize.Valid {
+			oldSize = existingPeek.FileSize.Int64
+		}
+		additionalBytes = file.FileSize - oldSize
+	case errors.Is(peekErr, pgx.ErrNoRows):
+		// new library document — charge full size
+	default:
+		return fmt.Errorf("lookup existing document: %w", peekErr)
+	}
+
+	run := func(ctx context.Context) error {
+		return s.approveUploadedFileTx(ctx, file, link, fileID, reviewerID, sourceType, workspaceID, additionalBytes)
+	}
+	if s.planChecker != nil {
+		if err := s.planChecker.WithAddStorageQuota(ctx, workspaceID, additionalBytes, run); err != nil {
+			return err
+		}
+	} else if err := run(ctx); err != nil {
+		return err
+	}
+
+	// Notify the uploader asynchronously; failures are logged but do not fail
+	// the approval transaction.
+	if file.UploaderEmail.Valid && file.UploaderEmail.String != "" && s.notifier != nil {
+		_, _ = s.notifier.Enqueue(ctx,
+			workspaceID,
+			uuid.UUID(link.CreatedBy.Bytes).String(),
+			"email",
+			fmt.Sprintf("Your uploaded file has been approved: %s", file.OriginalFilename),
+			fmt.Sprintf("The file '%s' you uploaded to the data room has been approved and is now available.", file.OriginalFilename),
+			notification.WithRecipient(file.UploaderEmail.String),
+		)
+	}
+
+	s.resolveUploadedFile(workspaceID, uuid.UUID(fileID.Bytes).String())
+	return nil
+}
+
+func (s *Service) approveUploadedFileTx(
+	ctx context.Context,
+	file db.LinkUploadedFile,
+	link db.Link,
+	fileID, reviewerID pgtype.UUID,
+	sourceType, workspaceID string,
+	reservedBytes int64,
+) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
@@ -5491,6 +5852,27 @@ func (s *Service) ApproveUploadedFile(ctx context.Context, fileID pgtype.UUID, r
 		WorkspaceID: link.WorkspaceID,
 		Title:       file.OriginalFilename,
 	})
+	delta := file.FileSize
+	switch {
+	case lookupErr == nil:
+		oldSize := int64(0)
+		if existing.FileSize.Valid {
+			oldSize = existing.FileSize.Int64
+		}
+		delta = file.FileSize - oldSize
+	case errors.Is(lookupErr, pgx.ErrNoRows):
+		// new library document — charge full size
+	default:
+		return fmt.Errorf("lookup existing document: %w", lookupErr)
+	}
+	// Pending visitor uploads are not billed until approval promotes them into documents.
+	// WithAddStorageQuota already reserved reservedBytes; re-assert only if the
+	// in-tx delta grew (title race) or when running without a plan checker.
+	if s.planChecker == nil || delta > reservedBytes {
+		if err := s.assertCanAddStorage(ctx, workspaceID, delta); err != nil {
+			return err
+		}
+	}
 	switch {
 	case lookupErr == nil:
 		// Owner approved a file that collides with an existing library title —
@@ -5512,8 +5894,13 @@ func (s *Service) ApproveUploadedFile(ctx context.Context, fileID pgtype.UUID, r
 			return fmt.Errorf("replace existing document: %w", rebindErr)
 		}
 		docID = rebinding.ID
-	case errors.Is(lookupErr, pgx.ErrNoRows):
+	default:
 		docID = pgtype.UUID{Bytes: uuid.New(), Valid: true}
+		if s.planChecker != nil {
+			if err := s.planChecker.AssertCanCreateDocument(ctx, workspaceID); err != nil {
+				return err
+			}
+		}
 		if _, createErr := qtx.CreateDocument(ctx, db.CreateDocumentParams{
 			ID:          docID,
 			TenantID:    link.TenantID,
@@ -5536,8 +5923,6 @@ func (s *Service) ApproveUploadedFile(ctx context.Context, fileID pgtype.UUID, r
 		}); jobErr != nil {
 			return fmt.Errorf("create ingestion job: %w", jobErr)
 		}
-	default:
-		return fmt.Errorf("lookup existing document: %w", lookupErr)
 	}
 
 	membership, memErr := qtx.GetDealRoomDocumentByDocumentID(ctx, db.GetDealRoomDocumentByDocumentIDParams{
@@ -5579,25 +5964,11 @@ func (s *Service) ApproveUploadedFile(ctx context.Context, fileID pgtype.UUID, r
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit approval: %w", err)
 	}
-
-	// Notify the uploader asynchronously; failures are logged but do not fail
-	// the approval transaction.
-	if file.UploaderEmail.Valid && file.UploaderEmail.String != "" && s.notifier != nil {
-		_, _ = s.notifier.Enqueue(ctx,
-			uuid.UUID(link.WorkspaceID.Bytes).String(),
-			uuid.UUID(link.CreatedBy.Bytes).String(),
-			"email",
-			fmt.Sprintf("Your uploaded file has been approved: %s", file.OriginalFilename),
-			fmt.Sprintf("The file '%s' you uploaded to the data room has been approved and is now available.", file.OriginalFilename),
-			notification.WithRecipient(file.UploaderEmail.String),
-		)
-	}
-
-	s.resolveUploadedFile(uuid.UUID(file.WorkspaceID.Bytes).String(), uuid.UUID(fileID.Bytes).String())
 	return nil
 }
 
-// RejectUploadedFile rejects a pending uploaded file.
+// RejectUploadedFile rejects a pending uploaded file, deleting the object first
+// so pending bytes stop occupying the bucket. Status stays rejected (human).
 func (s *Service) RejectUploadedFile(ctx context.Context, fileID pgtype.UUID, reviewerID pgtype.UUID) error {
 	file, err := s.queries.GetUploadedFileByID(ctx, fileID)
 	if err != nil {
@@ -5616,14 +5987,86 @@ func (s *Service) RejectUploadedFile(ctx context.Context, fileID pgtype.UUID, re
 	if uuid.UUID(link.CreatedBy.Bytes) != uuid.UUID(reviewerID.Bytes) {
 		return fmt.Errorf("only the link creator can reject uploads")
 	}
-	if err := s.queries.UpdateUploadedFileStatus(ctx, db.UpdateUploadedFileStatusParams{
-		Status:     "rejected",
-		ReviewedBy: reviewerID,
-		ID:         fileID,
-	}); err != nil {
+	return s.releasePendingUploadedFile(ctx, file, "rejected", reviewerID)
+}
+
+const (
+	defaultFileRequestPendingTTL     = 168 * time.Hour
+	defaultFileRequestExpireBatch    = 100
+	defaultFileRequestExpireInterval = 15 * time.Minute
+)
+
+// ExpirePendingUploadedFiles deletes MinIO objects for pending_review rows older
+// than the TTL, then CAS-sets status=expired. Does not notify or auto-approve.
+func (s *Service) ExpirePendingUploadedFiles(ctx context.Context) (int, error) {
+	if s == nil || s.queries == nil {
+		return 0, nil
+	}
+	ttl := defaultFileRequestPendingTTL
+	batch := int32(defaultFileRequestExpireBatch)
+	if s.cfg != nil {
+		if s.cfg.FileRequestPendingTTL > 0 {
+			ttl = s.cfg.FileRequestPendingTTL
+		}
+		if s.cfg.FileRequestExpireBatchSize > 0 {
+			batch = int32(s.cfg.FileRequestExpireBatchSize)
+		}
+	}
+	cutoff := time.Now().UTC().Add(-ttl)
+	rows, err := s.queries.ListPendingUploadedFilesOlderThan(ctx, db.ListPendingUploadedFilesOlderThanParams{
+		CreatedAt: pgtype.Timestamptz{Time: cutoff, Valid: true},
+		Limit:     batch,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("list expired pending uploads: %w", err)
+	}
+	expired := 0
+	for _, file := range rows {
+		if err := ctx.Err(); err != nil {
+			return expired, err
+		}
+		if err := s.releasePendingUploadedFile(ctx, file, "expired", pgtype.UUID{}); err != nil {
+			logger.ErrorCtx(ctx, "expire pending uploaded file failed", err,
+				logger.Attr("file_id", uuid.UUID(file.ID.Bytes).String()),
+			)
+			continue
+		}
+		expired++
+	}
+	return expired, nil
+}
+
+// releasePendingUploadedFile deletes the object first, then CAS-updates status
+// from pending_review. A lost race after a successful delete is not an error.
+func (s *Service) releasePendingUploadedFile(ctx context.Context, file db.LinkUploadedFile, status string, reviewerID pgtype.UUID) error {
+	if err := s.deleteUploadedObject(ctx, file.StorageKey); err != nil {
 		return err
 	}
-	s.resolveUploadedFile(uuid.UUID(file.WorkspaceID.Bytes).String(), uuid.UUID(fileID.Bytes).String())
+	n, err := s.queries.ClaimPendingUploadedFileStatus(ctx, db.ClaimPendingUploadedFileStatusParams{
+		Status:     status,
+		ReviewedBy: reviewerID,
+		ID:         file.ID,
+	})
+	if err != nil {
+		return fmt.Errorf("claim uploaded file status: %w", err)
+	}
+	if n == 0 {
+		return nil
+	}
+	if file.WorkspaceID.Valid {
+		s.resolveUploadedFile(uuid.UUID(file.WorkspaceID.Bytes).String(), uuid.UUID(file.ID.Bytes).String())
+	}
+	return nil
+}
+
+func (s *Service) deleteUploadedObject(ctx context.Context, key string) error {
+	key = strings.TrimSpace(key)
+	if key == "" || s == nil || s.objectDeleter == nil {
+		return nil
+	}
+	if err := s.objectDeleter.DeleteObject(ctx, key); err != nil {
+		return fmt.Errorf("delete uploaded object: %w", err)
+	}
 	return nil
 }
 
@@ -5700,6 +6143,51 @@ func (s *Service) resolveLinkQuestion(workspaceID, questionID string) {
 				logger.Attr("workspace_id", workspaceID),
 			)
 		}
+	}
+}
+
+// ExpirePastDueLinks marks active links whose expires_at has passed as expired.
+// Each workspace update runs under the billing lock so inventory free serializes
+// with create/reactivate/renew. CountLinksByWorkspace already excludes past-due
+// rows; this persists status=expired for RenewLink and listing UX, and resolves
+// expiring-link host actions for each transitioned row.
+func (s *Service) ExpirePastDueLinks(ctx context.Context) (int64, error) {
+	workspaces, err := s.queries.ListWorkspaceIDsWithPastDueActiveLinks(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("list past-due link workspaces: %w", err)
+	}
+	var total int64
+	for _, ws := range workspaces {
+		wsID := uuid.UUID(ws.Bytes).String()
+		var expiredIDs []pgtype.UUID
+		run := func(ctx context.Context) error {
+			ids, err := s.queries.ExpirePastDueActiveLinksInWorkspace(ctx, ws)
+			if err != nil {
+				return fmt.Errorf("expire past-due links: %w", err)
+			}
+			expiredIDs = ids
+			return nil
+		}
+		if s.planChecker != nil {
+			if err := s.planChecker.WithBillingLock(ctx, wsID, run); err != nil {
+				return total, err
+			}
+		} else if err := run(ctx); err != nil {
+			return total, err
+		}
+		for _, id := range expiredIDs {
+			s.resolveExpiringLink(wsID, uuid.UUID(id.Bytes).String())
+		}
+		total += int64(len(expiredIDs))
+	}
+	return total, nil
+}
+
+// OnLinksParked implements upload.ParkedLinkResolver so library archive/delete
+// clears expiring-link host actions for each parked share.
+func (s *Service) OnLinksParked(_ context.Context, workspaceID string, linkIDs []string) {
+	for _, id := range linkIDs {
+		s.resolveExpiringLink(workspaceID, id)
 	}
 }
 

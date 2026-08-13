@@ -50,15 +50,6 @@ func (s *Service) WithVisitorAskKnowledge(k VisitorAskKnowledge) {
 	}
 }
 
-func (s *Service) askAIQuotaExceeded(ctx context.Context, link db.Link) bool {
-	limit := effectiveAskAIQuota(link, s.defaultAskAIQuota())
-	count, err := s.queries.CountLinkAskAITurnsThisMonth(ctx, link.ID)
-	if err != nil {
-		return true
-	}
-	return int32(count) >= limit
-}
-
 func (s *Service) resolvePublicAskRoute(ctx context.Context, link db.Link, escalate bool) string {
 	policy := loadAskPolicy(link)
 	reason := resolveAskRouteReason(policy, escalate)

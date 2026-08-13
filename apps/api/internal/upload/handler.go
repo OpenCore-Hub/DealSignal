@@ -21,6 +21,7 @@ import (
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/httpx"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/logger"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/middleware"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/plan"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/storage"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/watermark"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/workspace"
@@ -51,6 +52,7 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup) {
 	g := r.Group("/documents")
 	g.POST("", h.Create)
 	g.GET("", h.List)
+	g.GET("/exists", h.CheckExists)
 	g.GET("/:id", h.Get)
 	g.GET("/:id/status", h.GetStatus)
 	g.DELETE("/:id", h.Delete)
@@ -80,6 +82,9 @@ func (h *Handler) Create(c *gin.Context) {
 	replace := parseTruthyForm(c.PostForm("replace"))
 	doc, err := h.uploadService.CreateDocument(c.Request.Context(), userID, tenantID, workspaceID, category, fileHeader, replace)
 	if err != nil {
+		if httpx.WriteIfPlanLimit(c, err) {
+			return
+		}
 		status, code, existsErr := classifyCreateDocumentError(err)
 		if code == "internal_error" {
 			logger.ErrorCtx(c.Request.Context(), "document upload failed", err,
@@ -127,6 +132,27 @@ func (h *Handler) Create(c *gin.Context) {
 		CreatedAt:  dbDoc.CreatedAt,
 		UpdatedAt:  dbDoc.UpdatedAt,
 	}, job))
+}
+
+// CheckExists reports whether a live library document already uses this filename.
+// Clients should call this before posting file bytes so replace/cancel does not
+// pay a full multipart transfer.
+func (h *Handler) CheckExists(c *gin.Context) {
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	exists, id, title, err := h.uploadService.LookupLiveByTitle(c.Request.Context(), workspaceID, c.Query("filename"))
+	if err != nil {
+		if errors.Is(err, ErrUnsupportedUpload) {
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_file", "message": httpx.SafeMessage("invalid_file", err)})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+		return
+	}
+	body := gin.H{"exists": exists}
+	if exists {
+		body["document"] = gin.H{"id": id, "title": title}
+	}
+	c.JSON(http.StatusOK, body)
 }
 
 // Get returns document details.
@@ -383,12 +409,8 @@ func (h *Handler) Archive(c *gin.Context) {
 	}
 
 	ctx := c.Request.Context()
-	if err := h.uploadService.queries.ArchiveDocument(ctx, db.ArchiveDocumentParams{
-		ID:          doc.ID,
-		WorkspaceID: pgUUID(workspaceID),
-		TenantID:    pgUUID(tenantID),
-	}); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+	if err := h.uploadService.ArchiveDocument(ctx, workspaceID, tenantID, uuid.UUID(doc.ID.Bytes).String()); err != nil {
+		h.handleDocError(c, err)
 		return
 	}
 
@@ -417,12 +439,8 @@ func (h *Handler) Unarchive(c *gin.Context) {
 	}
 
 	ctx := c.Request.Context()
-	if err := h.uploadService.queries.UnarchiveDocument(ctx, db.UnarchiveDocumentParams{
-		ID:          doc.ID,
-		WorkspaceID: pgUUID(workspaceID),
-		TenantID:    pgUUID(tenantID),
-	}); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+	if err := h.uploadService.UnarchiveDocument(ctx, workspaceID, tenantID, uuid.UUID(doc.ID.Bytes).String()); err != nil {
+		h.handleDocError(c, err)
 		return
 	}
 
@@ -959,6 +977,9 @@ func classifyCreateDocumentError(err error) (status int, code string, exists *Ex
 	case errors.Is(err, ErrInvalidFileType), errors.Is(err, ErrInvalidFileContent):
 		return http.StatusUnsupportedMediaType, "unsupported_media_type", nil
 	default:
+		if status, code, ok := plan.HTTPError(err); ok {
+			return status, code, nil
+		}
 		return http.StatusInternalServerError, "internal_error", nil
 	}
 }

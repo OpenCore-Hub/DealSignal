@@ -129,6 +129,13 @@ type Service struct {
 	retentionDays    int  // hot retention window surfaced on ops board
 	tableLaneEnabled bool // merge local table_row chunks into Query (Phase I2)
 	multiHopEnabled  bool // deterministic clause→definition→attachment hop (Phase I3)
+	answersPlan      AnswersPlanLimiter
+}
+
+// AnswersPlanLimiter is the workspace Knowledge Desk calendar-month cap.
+// Limit 0 is unlimited only when included is true.
+type AnswersPlanLimiter interface {
+	KnowledgeAnswersQuota(ctx context.Context, workspaceID string) (limit int32, included bool, err error)
 }
 
 // NewService constructs a knowledge service. client may be nil/disabled.
@@ -178,6 +185,14 @@ func (s *Service) WithTableLane(enabled bool) *Service {
 func (s *Service) WithMultiHop(enabled bool) *Service {
 	if s != nil {
 		s.multiHopEnabled = enabled
+	}
+	return s
+}
+
+// WithAnswersPlanLimiter binds Knowledge Desk monthly caps to workspace billing.
+func (s *Service) WithAnswersPlanLimiter(l AnswersPlanLimiter) *Service {
+	if s != nil {
+		s.answersPlan = l
 	}
 	return s
 }
@@ -328,7 +343,7 @@ func (s *Service) loadCorpusQuota(ctx context.Context, workspaceID pgtype.UUID, 
 			q.PlanCode = ent.PlanCode
 			q.KnowledgeBases.Limit = int(ent.Entitlements.MaxKBs)
 			q.Documents.Limit = int(ent.Entitlements.MaxDocs)
-			// Answers limit/used already resolved in answersQuotaSnapshot (same entitlements).
+			// Answers stay on the workspace plan. Partner DailyAnswers is infra only.
 			q.Answers.Limit = answers.Limit
 			q.Answers.Used = answers.Used
 		}

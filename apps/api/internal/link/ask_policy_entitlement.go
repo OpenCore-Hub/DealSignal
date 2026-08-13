@@ -7,6 +7,8 @@ import (
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/logger"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/plan"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -35,8 +37,9 @@ func (s *Service) dealRoomAskAIReady(ctx context.Context, link db.Link) bool {
 }
 
 // FormalAskEntitlement reports whether a workspace tenant may use the Formal
-// Q&A workflow. It is wired from the control plane in production and fails
-// closed: an absent checker or an entitlement error denies Formal mode.
+// Q&A workflow. It is wired from the Docling control plane in production and
+// fails closed: an absent checker or an entitlement error denies Formal mode.
+// When planChecker is set, workspace billing FormalAsk must also pass (AND).
 type FormalAskEntitlement interface {
 	IsFormalAskEntitled(ctx context.Context, tenantSlug string) (bool, error)
 }
@@ -51,6 +54,23 @@ func (s *Service) SetFormalAskEntitlement(e FormalAskEntitlement) {
 func (s *Service) isFormalAskEntitled(ctx context.Context, link db.Link) bool {
 	if s == nil || s.formalAskEntitlement == nil {
 		return false
+	}
+	// Workspace billing is an AND gate when a plan checker is wired (production).
+	// Nil checker keeps existing Formal ITs on the Docling/stub path only.
+	if s.planChecker != nil {
+		if !link.WorkspaceID.Valid {
+			return false
+		}
+		wsID := uuid.UUID(link.WorkspaceID.Bytes).String()
+		if err := s.planChecker.AssertCanUseFormalAsk(ctx, wsID); err != nil {
+			if !errors.Is(err, plan.ErrFeatureFormalAsk) {
+				logger.ErrorCtx(ctx, "formal ask workspace plan check failed",
+					err,
+					logger.Attr("workspace_id", wsID),
+				)
+			}
+			return false
+		}
 	}
 	if s.queries == nil {
 		return false

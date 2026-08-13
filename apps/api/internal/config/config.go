@@ -119,7 +119,9 @@ type Config struct {
 	// VisitorAskUnifiedEnabled gates the unified visitor Ask UI (Phase A rollout).
 	// Set VISITOR_ASK_UNIFIED=1 to enable; API dual-write remains active regardless.
 	VisitorAskUnifiedEnabled bool
-	// DefaultAskAIMonthlyQuota applies when links.ask_ai_monthly_quota IS NULL (Pro plan default).
+	// DefaultAskAIMonthlyQuota is unused for plan SKUs. Visitor Ask monthly
+	// caps come from workspace plan_code (see plan.Limits.VisitorAskAIMonthly).
+	// Per-link links.ask_ai_monthly_quota remains an optional tighter cap.
 	DefaultAskAIMonthlyQuota int32
 	// VisitorAskAIRPM caps AI lane requests per visitor+link per minute (abuse guard).
 	VisitorAskAIRPM int
@@ -144,11 +146,32 @@ type Config struct {
 	FormalPublishInterval time.Duration
 	// FormalPublishBatchSize caps turns published per worker tick (0 → 50).
 	FormalPublishBatchSize int
+	// FileRequestPendingTTL is how long a pending visitor upload may occupy
+	// object storage before the expire worker deletes it (0 → 168h).
+	FileRequestPendingTTL time.Duration
+	// FileRequestExpireInterval is how often the pending-upload expire worker ticks (0 → 15m).
+	FileRequestExpireInterval time.Duration
+	// FileRequestExpireBatchSize caps pending uploads expired per worker tick (0 → 100).
+	FileRequestExpireBatchSize int
 	// FormalAskEntitledPlanCodes controls which control-plane plan codes may use Formal Q&A.
 	FormalAskEntitledPlanCodes []string
 	// FormalAskEntitlementStubPlan is a non-production escape hatch when docling-rag
 	// is unset or unreachable (CI / local). Must be empty in production.
 	FormalAskEntitlementStubPlan string
+	// AllowUnpaidPlanChange lets PUT /billing/plan persist pro/business without
+	// checkout. Forced false in production (Load rejects an explicit true).
+	AllowUnpaidPlanChange bool
+	// StripeSecretKey is the Stripe API secret (sk_...). Empty disables checkout.
+	StripeSecretKey string
+	// StripeWebhookSecret verifies POST /stripe/webhook. Required in production
+	// when StripeSecretKey is set.
+	StripeWebhookSecret string
+	// StripeAPIBase overrides the Stripe API host (tests / proxies).
+	StripeAPIBase              string
+	StripePriceProMonthly      string
+	StripePriceProYearly       string
+	StripePriceBusinessMonthly string
+	StripePriceBusinessYearly  string
 
 	EventsEnabled       bool
 	EventsStreamName    string
@@ -261,15 +284,26 @@ func Load() (*Config, error) {
 
 		SignalRulesPath: getEnv("SIGNAL_RULES_PATH", "config/signal_rules.yaml"),
 
-		FeatureWorkerEnabled:       strings.ToLower(getEnv("FEATURE_WORKER_ENABLED", "true")) == "true",
-		FeatureWorkerInterval:      time.Duration(getEnvInt("FEATURE_WORKER_INTERVAL_MINUTES", 5)) * time.Minute,
-		HeatScoreRefreshInterval:   time.Duration(getEnvInt("HEAT_SCORE_REFRESH_INTERVAL_SECONDS", 120)) * time.Second,
-		InsightsDigestHourUTC:      getEnvInt("INSIGHTS_DIGEST_HOUR_UTC", 8),
-		InsightsDigestInterval:     time.Duration(getEnvInt("INSIGHTS_DIGEST_INTERVAL_MINUTES", 15)) * time.Minute,
-		FormalPublishInterval:      time.Duration(getEnvInt("FORMAL_PUBLISH_INTERVAL_SECONDS", 15)) * time.Second,
-		FormalPublishBatchSize:     getEnvInt("FORMAL_PUBLISH_BATCH_SIZE", 50),
+		FeatureWorkerEnabled:         strings.ToLower(getEnv("FEATURE_WORKER_ENABLED", "true")) == "true",
+		FeatureWorkerInterval:        time.Duration(getEnvInt("FEATURE_WORKER_INTERVAL_MINUTES", 5)) * time.Minute,
+		HeatScoreRefreshInterval:     time.Duration(getEnvInt("HEAT_SCORE_REFRESH_INTERVAL_SECONDS", 120)) * time.Second,
+		InsightsDigestHourUTC:        getEnvInt("INSIGHTS_DIGEST_HOUR_UTC", 8),
+		InsightsDigestInterval:       time.Duration(getEnvInt("INSIGHTS_DIGEST_INTERVAL_MINUTES", 15)) * time.Minute,
+		FormalPublishInterval:        time.Duration(getEnvInt("FORMAL_PUBLISH_INTERVAL_SECONDS", 15)) * time.Second,
+		FormalPublishBatchSize:       getEnvInt("FORMAL_PUBLISH_BATCH_SIZE", 50),
+		FileRequestPendingTTL:        time.Duration(getEnvInt("FILE_REQUEST_PENDING_TTL_HOURS", 168)) * time.Hour,
+		FileRequestExpireInterval:    time.Duration(getEnvInt("FILE_REQUEST_EXPIRE_INTERVAL_MINUTES", 15)) * time.Minute,
+		FileRequestExpireBatchSize:   getEnvInt("FILE_REQUEST_EXPIRE_BATCH_SIZE", 100),
 		FormalAskEntitledPlanCodes:   parseDelimitedList(getEnv("FORMAL_ASK_ENTITLED_PLAN_CODES", "enterprise trial")),
 		FormalAskEntitlementStubPlan: strings.TrimSpace(getEnv("FORMAL_ASK_ENTITLEMENT_STUB_PLAN", "")),
+
+		StripeSecretKey:            strings.TrimSpace(getEnv("STRIPE_SECRET_KEY", "")),
+		StripeWebhookSecret:        strings.TrimSpace(getEnv("STRIPE_WEBHOOK_SECRET", "")),
+		StripeAPIBase:              strings.TrimSpace(getEnv("STRIPE_API_BASE", "")),
+		StripePriceProMonthly:      strings.TrimSpace(getEnv("STRIPE_PRICE_PRO_MONTHLY", "")),
+		StripePriceProYearly:       strings.TrimSpace(getEnv("STRIPE_PRICE_PRO_YEARLY", "")),
+		StripePriceBusinessMonthly: strings.TrimSpace(getEnv("STRIPE_PRICE_BUSINESS_MONTHLY", "")),
+		StripePriceBusinessYearly:  strings.TrimSpace(getEnv("STRIPE_PRICE_BUSINESS_YEARLY", "")),
 
 		EventsEnabled:       strings.ToLower(getEnv("EVENTS_ENABLED", "true")) == "true",
 		EventsStreamName:    getEnv("EVENTS_STREAM_NAME", "events:signal"),
@@ -347,6 +381,20 @@ func Load() (*Config, error) {
 	}
 	if cfg.FormalAskEntitlementStubPlan != "" && strings.ToLower(cfg.AppEnv) == "production" {
 		return nil, fmt.Errorf("FORMAL_ASK_ENTITLEMENT_STUB_PLAN must be empty in production")
+	}
+	unpaidFlag := strings.TrimSpace(os.Getenv("BILLING_ALLOW_UNPAID_PLAN_CHANGE"))
+	if strings.ToLower(cfg.AppEnv) == "production" {
+		if unpaidFlag == "1" || strings.EqualFold(unpaidFlag, "true") {
+			return nil, fmt.Errorf("BILLING_ALLOW_UNPAID_PLAN_CHANGE must not be enabled in production")
+		}
+		cfg.AllowUnpaidPlanChange = false
+	} else if unpaidFlag == "" {
+		cfg.AllowUnpaidPlanChange = true
+	} else {
+		cfg.AllowUnpaidPlanChange = unpaidFlag == "1" || strings.EqualFold(unpaidFlag, "true")
+	}
+	if strings.ToLower(cfg.AppEnv) == "production" && cfg.StripeSecretKey != "" && cfg.StripeWebhookSecret == "" {
+		return nil, fmt.Errorf("STRIPE_WEBHOOK_SECRET is required when STRIPE_SECRET_KEY is set in production")
 	}
 	if cfg.EmailQueueEnabled {
 		if cfg.RedisURL == "" {

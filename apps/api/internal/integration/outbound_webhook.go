@@ -9,18 +9,19 @@ import (
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/notification"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/plan"
 	"github.com/jackc/pgx/v5"
 )
 
 // OutboundWebhookView is the public webhook configuration (secret never echoed unless rotated).
 type OutboundWebhookView struct {
-	Configured  bool     `json:"configured"`
-	Enabled     bool     `json:"enabled"`
-	URL         string   `json:"url,omitempty"`
-	EventTypes  []string `json:"event_types,omitempty"`
-	SecretHint  string   `json:"secret_hint,omitempty"`
-	Secret      string   `json:"secret,omitempty"` // only on create / rotate
-	UpdatedAt   string   `json:"updated_at,omitempty"`
+	Configured bool     `json:"configured"`
+	Enabled    bool     `json:"enabled"`
+	URL        string   `json:"url,omitempty"`
+	EventTypes []string `json:"event_types,omitempty"`
+	SecretHint string   `json:"secret_hint,omitempty"`
+	Secret     string   `json:"secret,omitempty"` // only on create / rotate
+	UpdatedAt  string   `json:"updated_at,omitempty"`
 }
 
 // SaveOutboundWebhookRequest updates the workspace outbound webhook.
@@ -51,6 +52,11 @@ func (s *Service) GetOutboundWebhook(ctx context.Context, workspaceID string) (O
 func (s *Service) SaveOutboundWebhook(ctx context.Context, workspaceID string, req SaveOutboundWebhookRequest) (OutboundWebhookView, error) {
 	wsUUID, err := pgUUID(workspaceID)
 	if err != nil {
+		return OutboundWebhookView{}, err
+	}
+	if err := s.requireFeature(ctx, workspaceID, func(c plan.Checker, ctx context.Context, id string) error {
+		return c.AssertCanUseWebhooks(ctx, id)
+	}); err != nil {
 		return OutboundWebhookView{}, err
 	}
 	url := strings.TrimSpace(req.URL)

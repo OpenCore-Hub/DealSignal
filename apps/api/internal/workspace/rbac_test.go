@@ -93,15 +93,27 @@ func TestRBACMiddlewareMemberCannotManageSettings(t *testing.T) {
 	}
 }
 
-func TestRBACMiddlewareGuestCanReadContent(t *testing.T) {
+func TestRBACMiddlewareGuestCanReadDealRooms(t *testing.T) {
 	r := withRole(RoleGuest, func(r *gin.Engine) {
-		r.GET("/api/workspaces/demo/links", func(c *gin.Context) { c.Status(http.StatusOK) })
+		r.GET("/api/workspaces/demo/deal-rooms", func(c *gin.Context) { c.Status(http.StatusOK) })
 	})
-	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/demo/links", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/demo/deal-rooms", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", w.Code)
+		t.Fatalf("GET deal-rooms expected 200 for guest, got %d", w.Code)
+	}
+}
+
+func TestRBACMiddlewareGuestCannotWriteDealRooms(t *testing.T) {
+	r := withRole(RoleGuest, func(r *gin.Engine) {
+		r.POST("/api/workspaces/demo/deal-rooms", func(c *gin.Context) { c.Status(http.StatusCreated) })
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/demo/deal-rooms", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("POST deal-rooms expected 403 for guest, got %d", w.Code)
 	}
 }
 

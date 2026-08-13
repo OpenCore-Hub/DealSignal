@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/plan"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -221,6 +222,41 @@ func TestDigestRunnerSkipsBeforeHourAndQuietDays(t *testing.T) {
 	}
 }
 
+func TestDigestRunnerSkipsWhenPlanBlocks(t *testing.T) {
+	wsID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	q := &mockDigestQuerier{
+		rules: []db.NotificationRule{{
+			WorkspaceID: pgtype.UUID{Bytes: wsID, Valid: true},
+			RuleType:    "daily_digest",
+			Enabled:     true,
+			Channels:    []string{"email"},
+		}},
+		workspace: db.Workspace{
+			ID:   pgtype.UUID{Bytes: wsID, Valid: true},
+			Name: "Acme",
+		},
+		owners:         []pgtype.UUID{{Bytes: uuid.MustParse("22222222-2222-2222-2222-222222222222"), Valid: true}},
+		yesterdayOpens: 3,
+		yesterdayUV:    1,
+	}
+	enq := &mockDigestEnqueuer{}
+	runner := NewDigestRunner(q, enq, nil, 8).WithPlanChecker(denyDigestChecker{})
+	runner.now = func() time.Time { return time.Date(2026, 8, 8, 9, 0, 0, 0, time.UTC) }
+	n, err := runner.RunOnce(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 || len(enq.calls) != 0 {
+		t.Fatalf("plan-blocked digest must not enqueue, got n=%d calls=%d", n, len(enq.calls))
+	}
+}
+
+type denyDigestChecker struct{ plan.Unrestricted }
+
+func (denyDigestChecker) AssertCanUseDailyDigest(context.Context, string) error {
+	return plan.ErrFeatureDailyDigest
+}
+
 type mockDigestQuerier struct {
 	rules          []db.NotificationRule
 	workspace      db.Workspace
@@ -279,4 +315,3 @@ func (m *mockDigestEnqueuer) Enqueue(_ context.Context, _, _, channel, _, body s
 	}{channel: channel, body: body, metadata: o.metadata})
 	return Notification{}, nil
 }
-

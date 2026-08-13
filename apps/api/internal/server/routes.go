@@ -12,6 +12,7 @@ import (
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/action"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/analytics"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/auth"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/billing"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/compliance"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/contact"
@@ -142,14 +143,34 @@ func (s *Server) registerRoutes() error {
 		authHandler := auth.NewHandler(authSvc, s.cfg)
 		authHandler.RegisterRoutes(api)
 
+		stripePrices, err := billing.NewPrices(
+			s.cfg.StripePriceProMonthly,
+			s.cfg.StripePriceProYearly,
+			s.cfg.StripePriceBusinessMonthly,
+			s.cfg.StripePriceBusinessYearly,
+		)
+		if err != nil {
+			return fmt.Errorf("stripe price config: %w", err)
+		}
+		var stripeGW billing.Gateway
+		if s.cfg.StripeSecretKey != "" {
+			stripeGW = billing.NewStripeHTTP(s.cfg.StripeSecretKey, s.cfg.StripeAPIBase)
+		}
 		workspaceSvc := workspace.NewService(queries,
 			workspace.WithDBPool(s.dbPool),
 			workspace.WithMailer(appMailer),
 			workspace.WithFrontendURL(s.cfg.FrontendURL),
 			workspace.WithViewerDomain(s.cfg.CNAMETarget),
+			workspace.WithAllowUnpaidPlanChange(s.cfg.AllowUnpaidPlanChange),
+			workspace.WithStripe(stripeGW, stripePrices),
 		)
 		workspaceHandler := workspace.NewHandler(workspaceSvc, authSvc)
 		workspaceHandler.RegisterRoutes(api)
+
+		if s.cfg.StripeWebhookSecret != "" {
+			applier := billing.NewApplier(queries, s.dbPool, stripePrices)
+			billing.NewWebhookHandler(applier, s.cfg.StripeWebhookSecret).RegisterRoutes(api)
+		}
 
 		domainSvc := domain.NewService(queries, certProvider(s.cfg.CertProvider), s.cfg.CNAMETarget)
 		domainHandler := domain.NewHandler(domainSvc, workspaceSvc, authSvc)
@@ -192,18 +213,18 @@ func (s *Server) registerRoutes() error {
 					MaxRowsPerSheet: s.cfg.TableIngest.MaxRowsPerSheet,
 					MaxRowsPerFile:  s.cfg.TableIngest.MaxRowsPerFile,
 				})
-			uploadSvc := upload.NewService(queries, storageClient, s.dbPool)
+			uploadSvc := upload.NewService(queries, storageClient, s.dbPool, upload.WithPlanChecker(workspaceSvc))
 			uploadHandler := upload.NewHandler(uploadSvc, storageClient, workspaceSvc, s.cfg.AppBaseURL)
 
 			ingestionWorker := ingestion.NewWorker(ingestionSvc, 1*time.Second)
 			s.registerWorker(ingestionWorker)
 			ingestionWorker.Start(s.shutdownCtx)
 
-			notificationSvc := notification.NewService(s.dbPool, queries, appMailer, s.cfg)
+			notificationSvc := notification.NewService(s.dbPool, queries, appMailer, s.cfg).WithPlanChecker(workspaceSvc)
 			notificationSvc.SetRuleEngine(notification.NewRuleEngine(queries, func(ctx context.Context, wsID, userID, channel, subject, body string, opts ...notification.EnqueueOption) error {
 				_, err := notificationSvc.Enqueue(ctx, wsID, userID, channel, subject, body, opts...)
 				return err
-			}))
+			}).WithPlanChecker(workspaceSvc))
 
 			var suggestionEnricher suggestions.Enricher
 			if llmClient != nil {
@@ -242,7 +263,10 @@ func (s *Server) registerRoutes() error {
 				link.WithActionSyncer(actionSyncer),
 				link.WithNDAService(ndaSvc),
 				link.WithFormalAskInsights(link.FormalAskInsightsAdapter{Suggestions: suggestionSvc}),
+				link.WithPlanChecker(workspaceSvc),
+				link.WithObjectDeleter(storageClient),
 			)
+			uploadSvc.SetParkedLinkResolver(linkSvc)
 			ndaHandler := nda.NewHandler(ndaSvc)
 			var dedupChecker analytics.DedupChecker
 			if s.redisClient != nil && s.cfg.DedupRedisEnabled {
@@ -260,13 +284,14 @@ func (s *Server) registerRoutes() error {
 			}
 
 			signalSyncer := &analyticsSignalSyncer{svc: signalSvc}
-			analyticsSvc := analytics.NewService(queries, dedupChecker, s.cfg, signalSyncer)
+			analyticsSvc := analytics.NewService(queries, dedupChecker, s.cfg, signalSyncer).WithPlanChecker(workspaceSvc)
 			if s.redisClient != nil {
 				analyticsSvc.WithCache(analytics.NewRedisCache(s.redisClient))
 			}
 			linkSvc.SetAskSecurityRecorder(link.AnalyticsSecurityRecorder{Svc: analyticsSvc})
 			linkHandler := link.NewHandler(linkSvc, analyticsSvc, suggestionSvc, storageClient, s.cfg)
 			expiryReminder := link.NewExpiryReminder(queries, notificationSvc, 6*time.Hour)
+			expiryReminder.SetPastDueExpirer(linkSvc.ExpirePastDueLinks)
 			s.registerWorker(expiryReminder)
 			expiryReminder.Start(s.shutdownCtx)
 
@@ -289,6 +314,10 @@ func (s *Server) registerRoutes() error {
 			)
 			s.registerWorker(formalPublishWorker)
 			formalPublishWorker.Start(s.shutdownCtx)
+
+			uploadedFileExpireWorker := link.NewUploadedFileExpireWorker(linkSvc, s.cfg.FileRequestExpireInterval)
+			s.registerWorker(uploadedFileExpireWorker)
+			uploadedFileExpireWorker.Start(s.shutdownCtx)
 
 			// SSE realtime push
 			sseHub := sse.NewHub(s.redisClient.GoRedis())
@@ -324,7 +353,8 @@ func (s *Server) registerRoutes() error {
 				storageClient,
 				s.cfg.URLSigningSecret,
 			).WithDBPool(s.dbPool).WithPreviewPDFConverter(converter).
-				WithRetentionDays(s.cfg.KnowledgeQARetentionDays)
+				WithRetentionDays(s.cfg.KnowledgeQARetentionDays).
+				WithAnswersPlanLimiter(workspaceSvc)
 			if llmClient != nil {
 				knowledgeSvc = knowledgeSvc.WithFollowUpLLM(llmClient)
 			}
@@ -372,6 +402,7 @@ func (s *Server) registerRoutes() error {
 				dealroom.WithActionSyncer(actionSyncer),
 				dealroom.WithRateLimiter(s.redisClient),
 				dealroom.WithKnowledgeEnqueuer(knowledgeSvc),
+				dealroom.WithPlanChecker(workspaceSvc),
 			}
 			if s.redisClient != nil {
 				dealroomOpts = append(dealroomOpts, dealroom.WithListCache(dealroom.NewRedisListCache(s.redisClient)))
@@ -472,7 +503,7 @@ func (s *Server) registerRoutes() error {
 					return out, nil
 				}),
 				s.cfg.InsightsDigestHourUTC,
-			)
+			).WithPlanChecker(workspaceSvc)
 			digestWorker := notification.NewDigestWorker(digestRunner, s.cfg.InsightsDigestInterval)
 			s.registerWorker(digestWorker)
 			digestWorker.Start(s.shutdownCtx)
@@ -481,7 +512,7 @@ func (s *Server) registerRoutes() error {
 			s.registerWorker(renewalWorker)
 			renewalWorker.Start(s.shutdownCtx)
 
-			integrationSvc := integration.NewService(queries, s.cfg)
+			integrationSvc := integration.NewService(queries, s.cfg).WithPlanChecker(workspaceSvc)
 			integrationHandler := integration.NewHandler(integrationSvc)
 			integrationHandler.RegisterRoutes(ws)
 

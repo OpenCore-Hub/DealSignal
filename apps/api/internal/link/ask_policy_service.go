@@ -45,6 +45,14 @@ func (s *Service) syncDealRoomAskPolicy(
 	if link.AskAiEnabled == askAIEnabled && askModeOrDefault(link.AskMode) == mode {
 		return nil
 	}
+	// Grandfather: already-on AI stays; only false→true is plan-gated.
+	// Formal entitlement remains a separate control-plane check below.
+	if askAIEnabled && !link.AskAiEnabled {
+		wsID := uuid.UUID(link.WorkspaceID.Bytes).String()
+		if err := s.assertCanEnableVisitorAskAI(ctx, wsID); err != nil {
+			return err
+		}
+	}
 	if mode == AskModeFormal && !s.isFormalAskEntitled(ctx, link) {
 		return ErrAskFormalNotEntitled
 	}
@@ -116,6 +124,12 @@ func (s *Service) UpdateLinkAskPolicy(
 			return db.Link{}, fmt.Errorf("%w: ask_ai_monthly_quota must be >= 0", ErrInvalidInput)
 		}
 		quota = pgtype.Int4{Int32: *req.AskAIMonthlyQuota, Valid: true}
+	}
+	// Grandfather: already-on AI stays; only false→true is plan-gated.
+	if aiEnabled && !existing.AskAiEnabled {
+		if err := s.assertCanEnableVisitorAskAI(ctx, workspaceID); err != nil {
+			return db.Link{}, err
+		}
 	}
 	if mode == AskModeFormal && !s.isFormalAskEntitled(ctx, existing) {
 		return db.Link{}, ErrAskFormalNotEntitled

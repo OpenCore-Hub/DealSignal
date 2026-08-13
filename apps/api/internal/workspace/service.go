@@ -9,9 +9,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/billing"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/locale"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/mailer"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/plan"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/storage"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -38,6 +40,14 @@ var (
 	ErrLogoStorageUnavailable  = errors.New("logo storage is not configured")
 	ErrInvalidLogoType         = errors.New("unsupported logo image type")
 	ErrLogoTooLarge            = errors.New("logo must be smaller than 5 MB")
+	ErrInvalidPlanCode         = errors.New("invalid plan code")
+	ErrInvalidBillingPeriod    = errors.New("invalid billing period")
+	ErrPlanPaymentRequired     = errors.New("plan change requires payment")
+	ErrPlanSalesAssisted       = errors.New("enterprise plan requires sales")
+	ErrEmailUnverified         = errors.New("verify your email before creating another workspace")
+	ErrPlanManageViaPortal     = errors.New("manage this subscription in the billing portal")
+	ErrStripeNoCustomer        = errors.New("no stripe customer for this workspace")
+	ErrInvalidCheckoutPlan     = errors.New("that plan cannot be purchased at checkout")
 	slugRegex                  = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 	emailRegex                 = regexp.MustCompile(`^[^\s@]+@[^\s@]+\.[^\s@]+$`)
 )
@@ -47,6 +57,10 @@ const (
 	RoleAdmin  = "admin"
 	RoleMember = "member"
 	RoleGuest  = "guest"
+
+	// trialGrantLockNamespace is int4 key1 for pg_advisory_xact_lock when
+	// granting the first-owner 14-day trial. key2 is hashtext(userID).
+	trialGrantLockNamespace int32 = 881726
 )
 
 func validMemberRole(role string) bool {
@@ -121,13 +135,20 @@ type Beginner interface {
 
 // Service handles workspace operations.
 type Service struct {
-	queries     *db.Queries
-	dbPool      Beginner
-	mailer      mailer.Mailer
-	frontendURL string
-	storage     *storage.Client
-	cnameTarget string
-	cnameLookup CNAMELookup
+	queries               *db.Queries
+	dbPool                Beginner
+	mailer                mailer.Mailer
+	frontendURL           string
+	storage               *storage.Client
+	cnameTarget           string
+	cnameLookup           CNAMELookup
+	allowUnpaidPlanChange bool
+	stripe                *stripeRuntime
+}
+
+type stripeRuntime struct {
+	gateway billing.Gateway
+	prices  billing.Prices
 }
 
 // ServiceOption configures the workspace service.
@@ -136,6 +157,22 @@ type ServiceOption func(*Service)
 // WithDBPool enables transactional operations like AcceptInvitation.
 func WithDBPool(pool Beginner) ServiceOption {
 	return func(s *Service) { s.dbPool = pool }
+}
+
+// WithAllowUnpaidPlanChange lets ChangePlan persist pro/business without checkout.
+// Production must leave this false. Tests and local/dev set it true.
+func WithAllowUnpaidPlanChange(allow bool) ServiceOption {
+	return func(s *Service) { s.allowUnpaidPlanChange = allow }
+}
+
+// WithStripe attaches Checkout/Portal. The webhook is the only paid plan writer.
+func WithStripe(gateway billing.Gateway, prices billing.Prices) ServiceOption {
+	return func(s *Service) {
+		if gateway == nil {
+			return
+		}
+		s.stripe = &stripeRuntime{gateway: gateway, prices: prices}
+	}
 }
 
 // WithMailer sets the transactional mailer used for invitation emails.
@@ -227,6 +264,24 @@ func (s *Service) Create(ctx context.Context, userID, name, slug, brandColor str
 	}
 
 	create := func(q *db.Queries) (Workspace, error) {
+		if err := q.LockUserWriterCap(ctx, db.LockUserWriterCapParams{
+			LockNs: trialGrantLockNamespace,
+			UserID: userID,
+		}); err != nil {
+			return Workspace{}, fmt.Errorf("lock owned workspace cap: %w", err)
+		}
+		user, err := q.GetUserByID(ctx, uid)
+		if err != nil {
+			return Workspace{}, err
+		}
+		if err := s.assertCanAddOwnedWorkspace(ctx, q, uid, true); err != nil {
+			return Workspace{}, err
+		}
+		ownedCount, err := q.CountOwnedWorkspacesByUser(ctx, uid)
+		if err != nil {
+			return Workspace{}, fmt.Errorf("count owned workspaces: %w", err)
+		}
+
 		tenant, err := q.CreateTenant(ctx, db.CreateTenantParams{Name: name, Slug: pgtype.Text{String: slug, Valid: true}})
 		if err != nil {
 			if isUniqueViolation(err) {
@@ -262,6 +317,29 @@ func (s *Service) Create(ctx context.Context, userID, name, slug, brandColor str
 			return Workspace{}, err
 		}
 
+		planCode := plan.CodeFree
+		trialEnds := pgtype.Timestamptz{}
+		if ownedCount == 0 && !user.TrialGrantedAt.Valid {
+			if _, grantErr := q.GrantUserTrial(ctx, uid); grantErr != nil {
+				if !errors.Is(grantErr, pgx.ErrNoRows) {
+					return Workspace{}, fmt.Errorf("grant trial: %w", grantErr)
+				}
+			} else {
+				planCode = plan.CodeTrial
+				trialEnds = pgtype.Timestamptz{Time: time.Now().UTC().Add(plan.TrialDuration), Valid: true}
+			}
+		}
+
+		_, err = q.InsertWorkspaceBilling(ctx, db.InsertWorkspaceBillingParams{
+			WorkspaceID: wsUUID,
+			PlanCode:    planCode,
+			Period:      plan.PeriodMonthly,
+			TrialEndsAt: trialEnds,
+		})
+		if err != nil {
+			return Workspace{}, fmt.Errorf("insert workspace billing: %w", err)
+		}
+
 		return workspaceFromRow(ws), nil
 	}
 
@@ -275,6 +353,8 @@ func (s *Service) Create(ctx context.Context, userID, name, slug, brandColor str
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	// Serialize owned-workspace grant per user so parallel Create cannot
+	// slip under the cap or mint two 14-day trials.
 	ws, err := create(s.queries.WithTx(tx))
 	if err != nil {
 		return Workspace{}, err
@@ -481,16 +561,34 @@ func (s *Service) CreateInvitation(ctx context.Context, actorID, workspaceID, te
 	})
 	switch {
 	case err == nil && !existing.UsedAt.Valid:
-		i, resendErr := s.queries.ResendPendingWorkspaceInvitation(ctx, db.ResendPendingWorkspaceInvitationParams{
-			WorkspaceID: wsUUID,
-			Email:       email,
-			Role:        role,
-			ExpiresAt:   expiresAt,
-		})
-		if resendErr != nil {
-			return Invitation{}, resendErr
+		// Resend: only consume a seat when promoting a guest pending invite to an internal role.
+		consumesSeat := isInternalSeatRole(role) && !isInternalSeatRole(existing.Role)
+		var inv Invitation
+		run := func(q *db.Queries) error {
+			if consumesSeat {
+				if seatErr := s.assertCanAddInternalSeatQ(ctx, q, workspaceID); seatErr != nil {
+					return seatErr
+				}
+			}
+			i, resendErr := q.ResendPendingWorkspaceInvitation(ctx, db.ResendPendingWorkspaceInvitationParams{
+				WorkspaceID: wsUUID,
+				Email:       email,
+				Role:        role,
+				ExpiresAt:   expiresAt,
+			})
+			if resendErr != nil {
+				return resendErr
+			}
+			inv = invitationFromDB(i)
+			return nil
 		}
-		inv := invitationFromDB(i)
+		if consumesSeat {
+			if seatErr := s.withSeatMutation(ctx, workspaceID, run); seatErr != nil {
+				return Invitation{}, seatErr
+			}
+		} else if runErr := run(s.queries); runErr != nil {
+			return Invitation{}, runErr
+		}
 		s.sendInvitationEmail(ctx, inv, actorID, expiresDays)
 		return inv, nil
 	case err == nil && existing.UsedAt.Valid:
@@ -506,17 +604,33 @@ func (s *Service) CreateInvitation(ctx context.Context, actorID, workspaceID, te
 		return Invitation{}, err
 	}
 
-	i, err := s.queries.CreateInvitation(ctx, db.CreateInvitationParams{
-		WorkspaceID: wsUUID,
-		Email:       email,
-		Role:        role,
-		ExpiresAt:   expiresAt,
-	})
-	if err != nil {
-		return Invitation{}, err
+	var inv Invitation
+	create := func(q *db.Queries) error {
+		if isInternalSeatRole(role) {
+			if seatErr := s.assertCanAddInternalSeatQ(ctx, q, workspaceID); seatErr != nil {
+				return seatErr
+			}
+		}
+		i, createErr := q.CreateInvitation(ctx, db.CreateInvitationParams{
+			WorkspaceID: wsUUID,
+			Email:       email,
+			Role:        role,
+			ExpiresAt:   expiresAt,
+		})
+		if createErr != nil {
+			return createErr
+		}
+		inv = invitationFromDB(i)
+		return nil
+	}
+	if isInternalSeatRole(role) {
+		if seatErr := s.withSeatMutation(ctx, workspaceID, create); seatErr != nil {
+			return Invitation{}, seatErr
+		}
+	} else if createErr := create(s.queries); createErr != nil {
+		return Invitation{}, createErr
 	}
 
-	inv := invitationFromDB(i)
 	s.sendInvitationEmail(ctx, inv, actorID, expiresDays)
 	return inv, nil
 }
@@ -708,6 +822,19 @@ func (s *Service) AcceptInvitation(ctx context.Context, token, userID string) (A
 		return AcceptInvitationResult{}, ErrInvitationUsed
 	}
 
+	// Serialize with CreateInvitation/AddMember so MarkInvitationUsed cannot
+	// briefly drop the reserved seat count and let another invite squeeze in.
+	if err := s.lockWorkspaceBillingSeatQuota(ctx, qtx, wsUUID); err != nil {
+		return AcceptInvitationResult{}, err
+	}
+
+	// Pending internal invites already reserve a seat (counted in SeatsUsed).
+	// Accept is net-zero when under/at cap; oversubscribed workspaces (e.g. after
+	// downgrade) must free seats before the invitee can join as internal.
+	if err := s.assertReservedInternalSeatAcceptable(ctx, qtx, workspaceID, inv.Role); err != nil {
+		return AcceptInvitationResult{}, err
+	}
+
 	m, err := qtx.AddWorkspaceMember(ctx, db.AddWorkspaceMemberParams{
 		WorkspaceID: wsUUID,
 		UserID:      uUUID,
@@ -774,13 +901,30 @@ func (s *Service) AddMember(ctx context.Context, actorID, workspaceID, tenantID,
 		return Member{}, ErrAlreadyMember
 	}
 
-	m, err := s.queries.AddWorkspaceMember(ctx, db.AddWorkspaceMemberParams{
-		WorkspaceID: wsUUID,
-		UserID:      uUUID,
-		Role:        role,
-	})
-	if err != nil {
-		return Member{}, err
+	var m db.WorkspaceMember
+	add := func(q *db.Queries) error {
+		if isInternalSeatRole(role) {
+			if seatErr := s.assertCanAddInternalSeatQ(ctx, q, workspaceID); seatErr != nil {
+				return seatErr
+			}
+		}
+		row, addErr := q.AddWorkspaceMember(ctx, db.AddWorkspaceMemberParams{
+			WorkspaceID: wsUUID,
+			UserID:      uUUID,
+			Role:        role,
+		})
+		if addErr != nil {
+			return addErr
+		}
+		m = row
+		return nil
+	}
+	if isInternalSeatRole(role) {
+		if seatErr := s.withSeatMutation(ctx, workspaceID, add); seatErr != nil {
+			return Member{}, seatErr
+		}
+	} else if addErr := add(s.queries); addErr != nil {
+		return Member{}, addErr
 	}
 	return memberFromDB(m), nil
 }
@@ -823,14 +967,32 @@ func (s *Service) UpdateMemberRole(ctx context.Context, actorID, workspaceID, te
 	if err := canManageTargetRole(actor.Role, role); err != nil {
 		return Member{}, err
 	}
-
-	m, err := s.queries.UpdateWorkspaceMemberRole(ctx, db.UpdateWorkspaceMemberRoleParams{
-		WorkspaceID: wsUUID,
-		UserID:      uUUID,
-		Role:        role,
-	})
-	if err != nil {
-		return Member{}, err
+	consumesSeat := isInternalSeatRole(role) && !isInternalSeatRole(target.Role)
+	freesSeat := !isInternalSeatRole(role) && isInternalSeatRole(target.Role)
+	var m db.WorkspaceMember
+	update := func(q *db.Queries) error {
+		if consumesSeat {
+			if seatErr := s.assertCanAddInternalSeatQ(ctx, q, workspaceID); seatErr != nil {
+				return seatErr
+			}
+		}
+		row, updErr := q.UpdateWorkspaceMemberRole(ctx, db.UpdateWorkspaceMemberRoleParams{
+			WorkspaceID: wsUUID,
+			UserID:      uUUID,
+			Role:        role,
+		})
+		if updErr != nil {
+			return updErr
+		}
+		m = row
+		return nil
+	}
+	if consumesSeat || freesSeat {
+		if seatErr := s.withSeatMutation(ctx, workspaceID, update); seatErr != nil {
+			return Member{}, seatErr
+		}
+	} else if updErr := update(s.queries); updErr != nil {
+		return Member{}, updErr
 	}
 	return memberFromDB(m), nil
 }
@@ -868,10 +1030,18 @@ func (s *Service) RemoveMember(ctx context.Context, actorID, workspaceID, tenant
 		return err
 	}
 
-	return s.queries.DeleteWorkspaceMember(ctx, db.DeleteWorkspaceMemberParams{
-		WorkspaceID: wsUUID,
-		UserID:      uUUID,
-	})
+	run := func(q *db.Queries) error {
+		return q.DeleteWorkspaceMember(ctx, db.DeleteWorkspaceMemberParams{
+			WorkspaceID: wsUUID,
+			UserID:      uUUID,
+		})
+	}
+	// Serialize seat-freeing removes with CreateInvitation/Accept so a freed
+	// seat is visible to the next locked consumer (no false plan_limit_seats).
+	if isInternalSeatRole(target.Role) {
+		return s.withSeatMutation(ctx, workspaceID, run)
+	}
+	return run(s.queries)
 }
 
 // UpdateInvitationRole changes a pending invitation role. Owner/admin only.
@@ -894,19 +1064,40 @@ func (s *Service) UpdateInvitationRole(ctx context.Context, actorID, workspaceID
 	if err := canManageTargetRole(actor.Role, role); err != nil {
 		return Invitation{}, err
 	}
-
+	consumesSeat := isInternalSeatRole(role) && !isInternalSeatRole(inv.Role)
+	freesSeat := !isInternalSeatRole(role) && isInternalSeatRole(inv.Role)
 	wsUUID, _ := pgUUID(workspaceID)
 	tokenUUID, _ := pgUUID(token)
-	updated, err := s.queries.UpdatePendingWorkspaceInvitationRole(ctx, db.UpdatePendingWorkspaceInvitationRoleParams{
-		WorkspaceID: wsUUID,
-		Token:       tokenUUID,
-		Role:        role,
-	})
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+	var updated db.WorkspaceInvitation
+	run := func(q *db.Queries) error {
+		if consumesSeat {
+			if seatErr := s.assertCanAddInternalSeatQ(ctx, q, workspaceID); seatErr != nil {
+				return seatErr
+			}
+		}
+		row, updErr := q.UpdatePendingWorkspaceInvitationRole(ctx, db.UpdatePendingWorkspaceInvitationRoleParams{
+			WorkspaceID: wsUUID,
+			Token:       tokenUUID,
+			Role:        role,
+		})
+		if updErr != nil {
+			return updErr
+		}
+		updated = row
+		return nil
+	}
+	if consumesSeat || freesSeat {
+		if seatErr := s.withSeatMutation(ctx, workspaceID, run); seatErr != nil {
+			if errors.Is(seatErr, pgx.ErrNoRows) {
+				return Invitation{}, ErrInvitationNotFound
+			}
+			return Invitation{}, seatErr
+		}
+	} else if runErr := run(s.queries); runErr != nil {
+		if errors.Is(runErr, pgx.ErrNoRows) {
 			return Invitation{}, ErrInvitationNotFound
 		}
-		return Invitation{}, err
+		return Invitation{}, runErr
 	}
 	return invitationFromDB(updated), nil
 }
@@ -927,10 +1118,17 @@ func (s *Service) RevokeInvitation(ctx context.Context, actorID, workspaceID, te
 
 	wsUUID, _ := pgUUID(workspaceID)
 	tokenUUID, _ := pgUUID(token)
-	return s.queries.DeletePendingWorkspaceInvitation(ctx, db.DeletePendingWorkspaceInvitationParams{
-		WorkspaceID: wsUUID,
-		Token:       tokenUUID,
-	})
+	run := func(q *db.Queries) error {
+		return q.DeletePendingWorkspaceInvitation(ctx, db.DeletePendingWorkspaceInvitationParams{
+			WorkspaceID: wsUUID,
+			Token:       tokenUUID,
+		})
+	}
+	// Pending internal invites reserve seats; lock so revoke + create serialize.
+	if isInternalSeatRole(inv.Role) {
+		return s.withSeatMutation(ctx, workspaceID, run)
+	}
+	return run(s.queries)
 }
 
 func (s *Service) requireManager(ctx context.Context, actorID, workspaceID, tenantID string) (db.WorkspaceMember, error) {

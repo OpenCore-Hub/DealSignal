@@ -106,6 +106,9 @@ func (h *Handler) GetInsightsOverview(c *gin.Context) {
 	workspaceID := middleware.WorkspaceIDFrom(c)
 	overview, err := h.service.InsightsOverviewQuery(c.Request.Context(), workspaceID, insightsRangeFromQuery(c))
 	if err != nil {
+		if httpx.WriteIfPlanLimit(c, err) {
+			return
+		}
 		if errors.Is(err, errInsightsRangeInvalid) || errors.Is(err, errInsightsRangeTooLong) {
 			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
 			return
@@ -157,6 +160,9 @@ func (h *Handler) ExportInsightsOverview(c *gin.Context) {
 	workspaceID := middleware.WorkspaceIDFrom(c)
 	overview, err := h.service.InsightsOverviewQuery(c.Request.Context(), workspaceID, insightsRangeFromQuery(c))
 	if err != nil {
+		if httpx.WriteIfPlanLimit(c, err) {
+			return
+		}
 		if errors.Is(err, errInsightsRangeInvalid) || errors.Is(err, errInsightsRangeTooLong) {
 			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
 			return

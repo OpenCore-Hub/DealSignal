@@ -7,7 +7,8 @@ import (
 	"time"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
-	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/docling"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/plan"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -21,11 +22,13 @@ var ErrQueryQuotaCheckFailed = errors.New("knowledge query quota check failed")
 type answersQuotaSnapshot struct {
 	Used     int
 	Limit    int
+	Included bool
 	Window   time.Duration // metering window for Used
 	CountErr error         // set when Used could not be loaded
 }
 
 // resolveAnswersQuotaLimit picks DailyAnswers when set, else MonthlySearches.
+// Kept for partner-entitlement tests; product metering uses the workspace plan.
 func resolveAnswersQuotaLimit(daily, monthly uint32) (limit int, window time.Duration) {
 	if daily > 0 {
 		return int(daily), 24 * time.Hour
@@ -36,31 +39,39 @@ func resolveAnswersQuotaLimit(daily, monthly uint32) (limit int, window time.Dur
 	return 0, 24 * time.Hour
 }
 
-func (s *Service) answersQuotaSnapshot(ctx context.Context, workspaceID pgtype.UUID) answersQuotaSnapshot {
-	def := docling.DefaultPartnerEntitlements()
-	limit, window := resolveAnswersQuotaLimit(def.DailyAnswers, def.MonthlySearches)
-	snap := answersQuotaSnapshot{Limit: limit, Window: window}
+func calendarMonthStartUTC(now time.Time) time.Time {
+	n := now.UTC()
+	return time.Date(n.Year(), n.Month(), 1, 0, 0, 0, 0, time.UTC)
+}
 
+func (s *Service) answersQuotaSnapshot(ctx context.Context, workspaceID pgtype.UUID) answersQuotaSnapshot {
+	// Fail-closed default is Free (desk off). Partner DailyAnswers is infra, not product.
+	now := time.Now().UTC()
+	since := calendarMonthStartUTC(now)
+	free := plan.Lookup(plan.CodeFree)
+	snap := answersQuotaSnapshot{
+		Limit:    int(free.KnowledgeAnswersMonthly),
+		Included: free.KnowledgeDesk,
+		Window:   since.AddDate(0, 1, 0).Sub(since),
+	}
+
+	if s.answersPlan != nil && workspaceID.Valid {
+		n, included, err := s.answersPlan.KnowledgeAnswersQuota(ctx, uuid.UUID(workspaceID.Bytes).String())
+		if err != nil {
+			snap.CountErr = err
+			return snap
+		}
+		snap.Limit = int(n)
+		snap.Included = included
+	}
+
+	if !snap.Included || snap.Limit <= 0 {
+		return snap
+	}
 	if s.queries == nil {
 		return snap
 	}
-	if s.client != nil && s.cfg.PlatformAdminKey != "" {
-		if tenant, err := s.queries.GetWorkspaceRagTenant(ctx, workspaceID); err == nil {
-			if ent, eerr := s.client.GetEntitlements(ctx, tenant.ExternalTenantSlug); eerr == nil {
-				limit, window = resolveAnswersQuotaLimit(
-					ent.Entitlements.DailyAnswers,
-					ent.Entitlements.MonthlySearches,
-				)
-				snap.Limit = limit
-				snap.Window = window
-			}
-		}
-	}
 
-	if snap.Window <= 0 {
-		snap.Window = 24 * time.Hour
-	}
-	since := time.Now().UTC().Add(-snap.Window)
 	n, err := s.queries.CountKnowledgeQATurnsForWorkspaceSince(ctx, db.CountKnowledgeQATurnsForWorkspaceSinceParams{
 		WorkspaceID: workspaceID,
 		Since:       pgtype.Timestamptz{Time: since, Valid: true},
@@ -84,11 +95,19 @@ func (s *Service) enforceAnswersQuota(ctx context.Context, workspaceID string) e
 		return nil
 	}
 	snap := s.answersQuotaSnapshot(ctx, pgUUID(workspaceID))
-	if snap.Limit > 0 && snap.CountErr != nil {
+	if snap.CountErr != nil {
 		return ErrQueryQuotaCheckFailed
+	}
+	if !snap.Included {
+		return ErrQueryQuotaExceeded
 	}
 	if snap.Limit > 0 && snap.Used >= snap.Limit {
 		return ErrQueryQuotaExceeded
 	}
 	return nil
+}
+
+// CheckAnswersQuota is the Knowledge Desk monthly gate (QuerySession / stream).
+func (s *Service) CheckAnswersQuota(ctx context.Context, workspaceID string) error {
+	return s.enforceAnswersQuota(ctx, workspaceID)
 }

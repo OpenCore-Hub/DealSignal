@@ -10,6 +10,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/plan"
 )
 
 func TestIsInfrastructure(t *testing.T) {
@@ -59,6 +61,9 @@ func TestSafeMessage(t *testing.T) {
 	if got := SafeMessage("workspace_not_found", pgx.ErrNoRows); got != "workspace not found" {
 		t.Fatalf("workspace_not_found = %q", got)
 	}
+	if got := SafeMessage("link_not_renewable", errors.New("only archived or expired links can be renewed")); got != "only archived or expired links can be renewed" {
+		t.Fatalf("link_not_renewable = %q", got)
+	}
 	if got := SafeMessage("invalid_slug", errors.New("slug must be lowercase")); got != "slug must be lowercase" {
 		t.Fatalf("domain pass-through = %q", got)
 	}
@@ -88,6 +93,123 @@ func TestInternalDoesNotLeak(t *testing.T) {
 	}
 	if containsAny(body, "23503", "workspace_members", "fk boom") {
 		t.Fatalf("leaked infrastructure details: %s", body)
+	}
+}
+
+func TestWriteIfPlanLimit(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+
+	if WriteIfPlanLimit(c, errors.New("other")) {
+		t.Fatal("unrelated error must not write")
+	}
+	if WriteIfPlanLimit(c, nil) {
+		t.Fatal("nil must not write")
+	}
+
+	before := plan.TestingDenialCount(plan.CodeLimitRooms)
+	w = httptest.NewRecorder()
+	c, _ = gin.CreateTestContext(w)
+	c.Set("workspaceID", "ws-plan-denial")
+	req := httptest.NewRequest(http.MethodPost, "/workspaces/demo/deal-rooms", nil)
+	c.Request = req
+	if !WriteIfPlanLimit(c, plan.ErrLimitRooms) {
+		t.Fatal("expected plan limit write")
+	}
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status=%d", w.Code)
+	}
+	if !containsAll(w.Body.String(), `"code":"plan_limit_rooms"`) {
+		t.Fatalf("body=%s", w.Body.String())
+	}
+	if plan.TestingDenialCount(plan.CodeLimitRooms) < before+1 {
+		t.Fatal("WriteIfPlanLimit must record plan_limit_rooms denial metric")
+	}
+
+	w = httptest.NewRecorder()
+	c, _ = gin.CreateTestContext(w)
+	if !WriteIfPlanLimit(c, plan.ErrFeatureWatermark) {
+		t.Fatal("expected watermark feature write")
+	}
+	if w.Code != http.StatusForbidden || !containsAll(w.Body.String(), `"code":"plan_feature_watermark"`) {
+		t.Fatalf("watermark body=%s status=%d", w.Body.String(), w.Code)
+	}
+
+	w = httptest.NewRecorder()
+	c, _ = gin.CreateTestContext(w)
+	if !WriteIfPlanLimit(c, plan.ErrFeatureNDA) {
+		t.Fatal("expected NDA feature write")
+	}
+	if w.Code != http.StatusForbidden || !containsAll(w.Body.String(), `"code":"plan_feature_nda"`) {
+		t.Fatalf("nda body=%s status=%d", w.Body.String(), w.Code)
+	}
+
+	w = httptest.NewRecorder()
+	c, _ = gin.CreateTestContext(w)
+	if !WriteIfPlanLimit(c, plan.ErrFeatureVisitorAskAI) {
+		t.Fatal("expected visitor ask AI feature write")
+	}
+	if w.Code != http.StatusForbidden || !containsAll(w.Body.String(), `"code":"plan_feature_visitor_ask_ai"`) {
+		t.Fatalf("ask ai body=%s status=%d", w.Body.String(), w.Code)
+	}
+
+	w = httptest.NewRecorder()
+	c, _ = gin.CreateTestContext(w)
+	if !WriteIfPlanLimit(c, plan.ErrLimitDocuments) {
+		t.Fatal("expected documents limit write")
+	}
+	if w.Code != http.StatusForbidden || !containsAll(w.Body.String(), `"code":"plan_limit_documents"`) {
+		t.Fatalf("documents body=%s status=%d", w.Body.String(), w.Code)
+	}
+
+	w = httptest.NewRecorder()
+	c, _ = gin.CreateTestContext(w)
+	if !WriteIfPlanLimit(c, plan.ErrFeatureBranding) {
+		t.Fatal("expected branding feature write")
+	}
+	if w.Code != http.StatusForbidden || !containsAll(w.Body.String(), `"code":"plan_feature_branding"`) {
+		t.Fatalf("branding body=%s status=%d", w.Body.String(), w.Code)
+	}
+
+	w = httptest.NewRecorder()
+	c, _ = gin.CreateTestContext(w)
+	if !WriteIfPlanLimit(c, plan.ErrFeatureAccessControl) {
+		t.Fatal("expected access-control feature write")
+	}
+	if w.Code != http.StatusForbidden || !containsAll(w.Body.String(), `"code":"plan_feature_access_controls"`) {
+		t.Fatalf("access controls body=%s status=%d", w.Body.String(), w.Code)
+	}
+
+	w = httptest.NewRecorder()
+	c, _ = gin.CreateTestContext(w)
+	if !WriteIfPlanLimit(c, plan.ErrFeatureWebhooks) {
+		t.Fatal("expected webhooks feature write")
+	}
+	if w.Code != http.StatusForbidden || !containsAll(w.Body.String(), `"code":"plan_feature_webhooks"`) {
+		t.Fatalf("webhooks body=%s status=%d", w.Body.String(), w.Code)
+	}
+
+	for _, tc := range []struct {
+		err  error
+		code string
+	}{
+		{plan.ErrFeatureHubSpot, "plan_feature_hubspot"},
+		{plan.ErrFeatureDailyDigest, "plan_feature_daily_digest"},
+		{plan.ErrFeatureSlackAlerts, "plan_feature_slack_alerts"},
+		{plan.ErrFeatureRoomInsights, "plan_feature_room_insights"},
+		{plan.ErrFeatureRoomAnalytics, "plan_feature_room_analytics"},
+		{plan.ErrFeatureFormalAsk, "plan_feature_formal_ask"},
+		{plan.ErrLimitWorkspaces, "plan_limit_workspaces"},
+	} {
+		w = httptest.NewRecorder()
+		c, _ = gin.CreateTestContext(w)
+		if !WriteIfPlanLimit(c, tc.err) {
+			t.Fatalf("expected %s write", tc.code)
+		}
+		if w.Code != http.StatusForbidden || !containsAll(w.Body.String(), `"code":"`+tc.code+`"`) {
+			t.Fatalf("%s body=%s status=%d", tc.code, w.Body.String(), w.Code)
+		}
 	}
 }
 

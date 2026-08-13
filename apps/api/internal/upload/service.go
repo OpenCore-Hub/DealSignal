@@ -8,8 +8,10 @@ import (
 	"mime/multipart"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/plan"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/storage"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -17,7 +19,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const maxFileSize = 100 * 1024 * 1024 // 100MB
+const MaxFileSize = 250 * 1024 * 1024 // 250MB platform hard cap (Business / Trial / Enterprise)
 
 var (
 	ErrFileTooLarge         = errors.New("file exceeds 100MB limit")
@@ -74,16 +76,64 @@ type DocumentDeleteImpact struct {
 	DealRoomCount   int64 `json:"deal_room_count"`
 }
 
+// ParkedLinkResolver is notified when library archive/delete parks share links
+// so host action queues (e.g. expiring_link renew items) can resolve.
+type ParkedLinkResolver interface {
+	OnLinksParked(ctx context.Context, workspaceID string, linkIDs []string)
+}
+
 // Service handles document uploads.
 type Service struct {
-	queries *db.Queries
-	storage *storage.Client
-	pool    Beginner
+	queries     *db.Queries
+	storage     *storage.Client
+	pool        Beginner
+	planChecker plan.Checker
+	parkedLinks ParkedLinkResolver
+}
+
+// ServiceOption configures a Service.
+type ServiceOption func(*Service)
+
+// WithPlanChecker enforces workspace storage limits on upload. Nil skips checks.
+func WithPlanChecker(c plan.Checker) ServiceOption {
+	return func(s *Service) { s.planChecker = c }
+}
+
+// WithParkedLinkResolver registers lifecycle cleanup for parked share links.
+func WithParkedLinkResolver(r ParkedLinkResolver) ServiceOption {
+	return func(s *Service) { s.parkedLinks = r }
+}
+
+// SetParkedLinkResolver wires the resolver after construction (routes create
+// upload before link services).
+func (s *Service) SetParkedLinkResolver(r ParkedLinkResolver) {
+	s.parkedLinks = r
 }
 
 // NewService creates an upload service. pool may be nil in unit tests (no TX).
-func NewService(q *db.Queries, s *storage.Client, pool Beginner) *Service {
-	return &Service{queries: q, storage: s, pool: pool}
+func NewService(q *db.Queries, s *storage.Client, pool Beginner, opts ...ServiceOption) *Service {
+	svc := &Service{queries: q, storage: s, pool: pool}
+	for _, opt := range opts {
+		opt(svc)
+	}
+	return svc
+}
+
+func (s *Service) notifyParkedLinks(ctx context.Context, workspaceID string, ids []pgtype.UUID) {
+	if s.parkedLinks == nil || len(ids) == 0 {
+		return
+	}
+	linkIDs := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if !id.Valid {
+			continue
+		}
+		linkIDs = append(linkIDs, uuid.UUID(id.Bytes).String())
+	}
+	if len(linkIDs) == 0 {
+		return
+	}
+	s.parkedLinks.OnLinksParked(ctx, workspaceID, linkIDs)
 }
 
 func (s *Service) withTx(ctx context.Context, fn func(q *db.Queries) error) error {
@@ -118,6 +168,30 @@ func NormalizeUploadFilename(name string) string {
 	return base
 }
 
+// LookupLiveByTitle reports whether a non-deleted document already uses this
+// filename in the workspace. It does not read or write object storage.
+func (s *Service) LookupLiveByTitle(ctx context.Context, workspaceID, filename string) (exists bool, id, title string, err error) {
+	title = NormalizeUploadFilename(filename)
+	if title == "" {
+		return false, "", "", fmt.Errorf("%w: filename is required", ErrUnsupportedUpload)
+	}
+	ws := pgUUID(workspaceID)
+	if !ws.Valid {
+		return false, "", "", fmt.Errorf("invalid id")
+	}
+	row, err := s.queries.GetDocumentByTitleInWorkspace(ctx, db.GetDocumentByTitleInWorkspaceParams{
+		WorkspaceID: ws,
+		Title:       title,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, "", title, nil
+	}
+	if err != nil {
+		return false, "", "", fmt.Errorf("lookup existing document: %w", err)
+	}
+	return true, uuid.UUID(row.ID.Bytes).String(), row.Title, nil
+}
+
 // ValidateUploadFilename rejects OS/editor sidecar files that commonly appear in
 // multi-select uploads (Excel lock files, AppleDouble resource forks).
 func ValidateUploadFilename(name string) error {
@@ -146,7 +220,7 @@ func ValidateFileHeader(fileHeader *multipart.FileHeader) (string, error) {
 	if fileHeader.Size == 0 {
 		return "", ErrEmptyFile
 	}
-	if fileHeader.Size > maxFileSize {
+	if fileHeader.Size > MaxFileSize {
 		return "", ErrFileTooLarge
 	}
 	ext := strings.ToLower(filepath.Ext(NormalizeUploadFilename(fileHeader.Filename)))
@@ -160,8 +234,9 @@ func ValidateFileHeader(fileHeader *multipart.FileHeader) (string, error) {
 // CreateDocument validates, stores the file and creates the document record.
 // When replace is false and a document with the same title already exists in the
 // workspace, it returns ExistingDocumentError without writing storage.
-// When replace is true, the existing document is overwritten in place and
-// re-queued for ingestion (preserving id and deal-room memberships).
+// When replace is true, the previous version is kept as an archived library
+// row (counts toward document + storage inventory) and the live document is
+// rebound in place so share links / room memberships stay on the same id.
 func (s *Service) CreateDocument(ctx context.Context, userID, tenantID, workspaceID, category string, fileHeader *multipart.FileHeader, replace bool) (Document, error) {
 	sourceType, err := ValidateFileHeader(fileHeader)
 	if err != nil {
@@ -195,6 +270,19 @@ func (s *Service) CreateDocument(ctx context.Context, userID, tenantID, workspac
 		}
 	}
 
+	if exists && replace {
+		file, err := fileHeader.Open()
+		if err != nil {
+			return Document{}, fmt.Errorf("%w: open uploaded file: %w", ErrUnsupportedUpload, err)
+		}
+		defer file.Close()
+
+		if err := validateFileContent(file, sourceType); err != nil {
+			return Document{}, err
+		}
+		return s.replaceExistingDocument(ctx, existing, workspaceUUID, sourceType, category, title, fileHeader, file)
+	}
+
 	file, err := fileHeader.Open()
 	if err != nil {
 		return Document{}, fmt.Errorf("%w: open uploaded file: %w", ErrUnsupportedUpload, err)
@@ -205,13 +293,26 @@ func (s *Service) CreateDocument(ctx context.Context, userID, tenantID, workspac
 		return Document{}, err
 	}
 
-	if exists && replace {
-		return s.replaceExistingDocument(ctx, existing, workspaceUUID, sourceType, category, title, fileHeader, file)
-	}
-
 	docID := uuid.New()
 	storageKey := storage.ObjectKey(tenantID, workspaceID, docID.String(), title)
 
+	// Fail-fast plan preflight before PutObject so a hard-capped workspace
+	// never writes an orphan object. WithAddStorageQuota still re-checks under
+	// the billing lock after the put (TOCTOU-safe).
+	if s.planChecker != nil {
+		if err := s.planChecker.AssertCanUploadFile(ctx, workspaceID, fileHeader.Size); err != nil {
+			return Document{}, err
+		}
+		if err := s.planChecker.AssertCanAddStorage(ctx, workspaceID, fileHeader.Size); err != nil {
+			return Document{}, err
+		}
+		if err := s.planChecker.AssertCanCreateDocument(ctx, workspaceID); err != nil {
+			return Document{}, err
+		}
+	}
+
+	// Put object before the short billing lock so large uploads do not serialize
+	// other workspace quota mutations for the whole transfer duration.
 	if err := s.storage.PutObject(ctx, storageKey, file, fileHeader.Size, fileHeader.Header.Get("Content-Type")); err != nil {
 		return Document{}, fmt.Errorf("store file: %w", err)
 	}
@@ -219,39 +320,51 @@ func (s *Service) CreateDocument(ctx context.Context, userID, tenantID, workspac
 	docCategory := NormalizeCreateCategory(category)
 
 	var created db.CreateDocumentRow
-	err = s.withTx(ctx, func(q *db.Queries) error {
-		d, createErr := q.CreateDocument(ctx, db.CreateDocumentParams{
-			ID:          pgUUID(docID.String()),
-			TenantID:    tenantUUID,
-			WorkspaceID: workspaceUUID,
-			CreatedBy:   userUUID,
-			Title:       title,
-			SourceType:  sourceType,
-			Status:      "uploaded",
-			StorageKey:  storageKey,
-			FileSize:    pgtype.Int8{Int64: fileHeader.Size, Valid: true},
-			Category:    docCategory,
-		})
-		if createErr != nil {
-			if isUniqueViolation(createErr) {
-				return &ExistingDocumentError{
-					ID:    docID.String(),
-					Title: title,
-				}
+	persist := func(ctx context.Context) error {
+		if s.planChecker != nil {
+			if err := s.planChecker.AssertCanCreateDocument(ctx, workspaceID); err != nil {
+				return err
 			}
-			return fmt.Errorf("create document record: %w", createErr)
 		}
-		if _, jobErr := q.CreateIngestionJob(ctx, db.CreateIngestionJobParams{
-			TenantID:    tenantUUID,
-			WorkspaceID: workspaceUUID,
-			DocumentID:  d.ID,
-			Status:      "queued",
-		}); jobErr != nil {
-			return fmt.Errorf("create ingestion job: %w", jobErr)
-		}
-		created = d
-		return nil
-	})
+		return s.withTx(ctx, func(q *db.Queries) error {
+			d, createErr := q.CreateDocument(ctx, db.CreateDocumentParams{
+				ID:          pgUUID(docID.String()),
+				TenantID:    tenantUUID,
+				WorkspaceID: workspaceUUID,
+				CreatedBy:   userUUID,
+				Title:       title,
+				SourceType:  sourceType,
+				Status:      "uploaded",
+				StorageKey:  storageKey,
+				FileSize:    pgtype.Int8{Int64: fileHeader.Size, Valid: true},
+				Category:    docCategory,
+			})
+			if createErr != nil {
+				if isUniqueViolation(createErr) {
+					return &ExistingDocumentError{
+						ID:    docID.String(),
+						Title: title,
+					}
+				}
+				return fmt.Errorf("create document record: %w", createErr)
+			}
+			if _, jobErr := q.CreateIngestionJob(ctx, db.CreateIngestionJobParams{
+				TenantID:    tenantUUID,
+				WorkspaceID: workspaceUUID,
+				DocumentID:  d.ID,
+				Status:      "queued",
+			}); jobErr != nil {
+				return fmt.Errorf("create ingestion job: %w", jobErr)
+			}
+			created = d
+			return nil
+		})
+	}
+	if s.planChecker != nil {
+		err = s.planChecker.WithAddStorageQuota(ctx, workspaceID, fileHeader.Size, persist)
+	} else {
+		err = persist(ctx)
+	}
 	if err != nil {
 		_ = s.storage.DeleteObject(ctx, storageKey)
 		var existsErr *ExistingDocumentError
@@ -275,6 +388,40 @@ func (s *Service) CreateDocument(ctx context.Context, userID, tenantID, workspac
 	return documentFromDB(created), nil
 }
 
+func replacedSnapshotTitle(original string, at time.Time, nonce string) string {
+	ext := filepath.Ext(original)
+	stem := strings.TrimSuffix(original, ext)
+	if stem == "" {
+		stem = "document"
+	}
+	suffix := at.UTC().Format("20060102-150405")
+	if nonce != "" {
+		suffix = suffix + "-" + nonce
+	}
+	return stem + " (" + suffix + ")" + ext
+}
+
+func uniqueReplacedSnapshotTitle(ctx context.Context, q *db.Queries, workspaceID pgtype.UUID, original string) (string, error) {
+	now := time.Now().UTC()
+	candidates := []string{
+		replacedSnapshotTitle(original, now, ""),
+		replacedSnapshotTitle(original, now, uuid.NewString()[:8]),
+	}
+	for _, title := range candidates {
+		_, err := q.GetDocumentByTitleInWorkspace(ctx, db.GetDocumentByTitleInWorkspaceParams{
+			WorkspaceID: workspaceID,
+			Title:       title,
+		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return title, nil
+		}
+		if err != nil {
+			return "", fmt.Errorf("lookup snapshot title: %w", err)
+		}
+	}
+	return replacedSnapshotTitle(original, now, uuid.NewString()), nil
+}
+
 func (s *Service) replaceExistingDocument(
 	ctx context.Context,
 	existing db.GetDocumentByTitleInWorkspaceRow,
@@ -288,8 +435,23 @@ func (s *Service) replaceExistingDocument(
 	docID := uuid.UUID(existing.ID.Bytes).String()
 	tenantID := uuid.UUID(existing.TenantID.Bytes).String()
 	workspaceID := uuid.UUID(existing.WorkspaceID.Bytes).String()
-	storageKey := storage.ObjectKey(tenantID, workspaceID, docID, title)
+	// New object key so the previous bytes stay addressable on the billed snapshot.
+	storageKey := storage.ObjectKey(tenantID, workspaceID, docID, uuid.NewString()+"-"+title)
 	oldKey := existing.StorageKey
+
+	if s.planChecker != nil {
+		if err := s.planChecker.AssertCanUploadFile(ctx, workspaceID, fileHeader.Size); err != nil {
+			return Document{}, err
+		}
+		// Keep the previous version's object; charge the incoming file in full
+		// (same as creating a renamed copy) so overwrite cannot bypass storage.
+		if err := s.planChecker.AssertCanAddStorage(ctx, workspaceID, fileHeader.Size); err != nil {
+			return Document{}, err
+		}
+		if err := s.planChecker.AssertCanCreateDocument(ctx, workspaceID); err != nil {
+			return Document{}, err
+		}
+	}
 
 	if err := s.storage.PutObject(ctx, storageKey, file, fileHeader.Size, fileHeader.Header.Get("Content-Type")); err != nil {
 		return Document{}, fmt.Errorf("store file: %w", err)
@@ -311,30 +473,56 @@ func (s *Service) replaceExistingDocument(
 	}
 
 	var rebound db.ReplaceDocumentFileRow
-	err := s.withTx(ctx, func(q *db.Queries) error {
-		d, rebindErr := RebindDocumentContent(ctx, q, RebindDocumentContentParams{
-			DocumentID:  existing.ID,
-			TenantID:    existing.TenantID,
-			WorkspaceID: workspaceUUID,
-			StorageKey:  storageKey,
-			SourceType:  sourceType,
-			FileSize:    fileHeader.Size,
-			Category:    docCategory,
-		})
-		if rebindErr != nil {
-			return rebindErr
+	persist := func(ctx context.Context) error {
+		if s.planChecker != nil {
+			if err := s.planChecker.AssertCanCreateDocument(ctx, workspaceID); err != nil {
+				return err
+			}
 		}
-		rebound = d
-		return nil
-	})
+		return s.withTx(ctx, func(q *db.Queries) error {
+			snapshotTitle, titleErr := uniqueReplacedSnapshotTitle(ctx, q, workspaceUUID, existing.Title)
+			if titleErr != nil {
+				return titleErr
+			}
+			if _, snapErr := q.CreateDocument(ctx, db.CreateDocumentParams{
+				ID:          pgUUID(uuid.NewString()),
+				TenantID:    existing.TenantID,
+				WorkspaceID: workspaceUUID,
+				CreatedBy:   existing.CreatedBy,
+				Title:       snapshotTitle,
+				SourceType:  existing.SourceType,
+				Status:      "archived",
+				StorageKey:  oldKey,
+				FileSize:    existing.FileSize,
+				Category:    existing.Category,
+			}); snapErr != nil {
+				return fmt.Errorf("archive replaced document snapshot: %w", snapErr)
+			}
+			d, rebindErr := RebindDocumentContent(ctx, q, RebindDocumentContentParams{
+				DocumentID:  existing.ID,
+				TenantID:    existing.TenantID,
+				WorkspaceID: workspaceUUID,
+				StorageKey:  storageKey,
+				SourceType:  sourceType,
+				FileSize:    fileHeader.Size,
+				Category:    docCategory,
+			})
+			if rebindErr != nil {
+				return rebindErr
+			}
+			rebound = d
+			return nil
+		})
+	}
+	var err error
+	if s.planChecker != nil {
+		err = s.planChecker.WithAddStorageQuota(ctx, workspaceID, fileHeader.Size, persist)
+	} else {
+		err = persist(ctx)
+	}
 	if err != nil {
 		_ = s.storage.DeleteObject(ctx, storageKey)
 		return Document{}, err
-	}
-
-	// Best-effort cleanup of the previous object when the key changed.
-	if oldKey != "" && oldKey != storageKey {
-		_ = s.storage.DeleteObject(ctx, oldKey)
 	}
 
 	return documentFromReplace(rebound), nil
@@ -366,7 +554,8 @@ func documentFromReplace(d db.ReplaceDocumentFileRow) Document {
 	})
 }
 
-// GetDocumentDeleteImpact returns active share-link and deal-room dependents.
+// GetDocumentDeleteImpact returns live share-link and deal-room dependents.
+// Link count matches plan inventory (active and not past-due).
 func (s *Service) GetDocumentDeleteImpact(ctx context.Context, workspaceID, documentID string) (DocumentDeleteImpact, error) {
 	ws := pgUUID(workspaceID)
 	docID := pgUUID(documentID)
@@ -392,8 +581,102 @@ func (s *Service) GetDocumentDeleteImpact(ctx context.Context, workspaceID, docu
 	}, nil
 }
 
+// ArchiveDocument parks a ready document and archives its live document-primary
+// (and orphan scoped) share links under the billing lock so plan link inventory
+// frees while the library archive remains reversible via UnarchiveDocument.
+// Unarchive does not auto-renew links — owners renew/reactivate explicitly.
+func (s *Service) ArchiveDocument(ctx context.Context, workspaceID, tenantID, documentID string) error {
+	ws := pgUUID(workspaceID)
+	docID := pgUUID(documentID)
+	tenant := pgUUID(tenantID)
+	if !ws.Valid || !docID.Valid || !tenant.Valid {
+		return fmt.Errorf("invalid id")
+	}
+
+	var parked []pgtype.UUID
+	run := func(ctx context.Context) error {
+		return s.withTx(ctx, func(q *db.Queries) error {
+			doc, err := q.GetDocumentByID(ctx, db.GetDocumentByIDParams{
+				ID:          docID,
+				WorkspaceID: ws,
+			})
+			if err != nil {
+				return err
+			}
+			if doc.Status == "archived" {
+				return nil
+			}
+			if err := q.ArchiveDocument(ctx, db.ArchiveDocumentParams{
+				ID:          docID,
+				WorkspaceID: ws,
+				TenantID:    tenant,
+			}); err != nil {
+				return fmt.Errorf("archive document: %w", err)
+			}
+			primary, err := q.ArchiveActiveLinksByDocument(ctx, db.ArchiveActiveLinksByDocumentParams{
+				WorkspaceID: ws,
+				DocumentID:  docID,
+			})
+			if err != nil {
+				return fmt.Errorf("archive document share links: %w", err)
+			}
+			orphan, err := q.ArchiveOrphanScopedActiveLinksForDocument(ctx, db.ArchiveOrphanScopedActiveLinksForDocumentParams{
+				WorkspaceID: ws,
+				DocumentID:  docID,
+			})
+			if err != nil {
+				return fmt.Errorf("archive orphan scoped links: %w", err)
+			}
+			parked = append(primary, orphan...)
+			return nil
+		})
+	}
+	var err error
+	if s.planChecker != nil {
+		err = s.planChecker.WithBillingLock(ctx, workspaceID, run)
+	} else {
+		err = run(ctx)
+	}
+	if err != nil {
+		return err
+	}
+	s.notifyParkedLinks(ctx, workspaceID, parked)
+	return nil
+}
+
+// UnarchiveDocument restores an archived document to ready. Share links stay
+// archived/expired until the owner renews them (avoids silent quota consume).
+func (s *Service) UnarchiveDocument(ctx context.Context, workspaceID, tenantID, documentID string) error {
+	ws := pgUUID(workspaceID)
+	docID := pgUUID(documentID)
+	tenant := pgUUID(tenantID)
+	if !ws.Valid || !docID.Valid || !tenant.Valid {
+		return fmt.Errorf("invalid id")
+	}
+
+	doc, err := s.queries.GetDocumentByID(ctx, db.GetDocumentByIDParams{
+		ID:          docID,
+		WorkspaceID: ws,
+	})
+	if err != nil {
+		return err
+	}
+	if doc.Status != "archived" {
+		return nil
+	}
+	if err := s.queries.UnarchiveDocument(ctx, db.UnarchiveDocumentParams{
+		ID:          docID,
+		WorkspaceID: ws,
+		TenantID:    tenant,
+	}); err != nil {
+		return fmt.Errorf("unarchive document: %w", err)
+	}
+	return nil
+}
+
 // DeleteDocument soft-deletes a workspace document and cleans dependent
 // memberships/share links so library deletion cannot leave live access paths.
+// Holds the billing lock so freed storage/link inventory serializes with creates.
 func (s *Service) DeleteDocument(ctx context.Context, workspaceID, documentID string) error {
 	ws := pgUUID(workspaceID)
 	docID := pgUUID(documentID)
@@ -401,45 +684,62 @@ func (s *Service) DeleteDocument(ctx context.Context, workspaceID, documentID st
 		return fmt.Errorf("invalid id")
 	}
 
-	return s.withTx(ctx, func(q *db.Queries) error {
-		if _, err := q.GetDocumentByID(ctx, db.GetDocumentByIDParams{
-			ID:          docID,
-			WorkspaceID: ws,
-		}); err != nil {
-			return err
-		}
+	var parked []pgtype.UUID
+	run := func(ctx context.Context) error {
+		return s.withTx(ctx, func(q *db.Queries) error {
+			if _, err := q.GetDocumentByID(ctx, db.GetDocumentByIDParams{
+				ID:          docID,
+				WorkspaceID: ws,
+			}); err != nil {
+				return err
+			}
 
-		// Revoke document-primary links first.
-		if _, err := q.SoftDeleteLinksByDocument(ctx, db.SoftDeleteLinksByDocumentParams{
-			WorkspaceID: ws,
-			DocumentID:  docID,
-		}); err != nil {
-			return fmt.Errorf("revoke share links: %w", err)
-		}
-		// Revoke multi-doc links that only pointed at this document.
-		if _, err := q.SoftDeleteOrphanScopedLinksForDocument(ctx, db.SoftDeleteOrphanScopedLinksForDocumentParams{
-			WorkspaceID: ws,
-			DocumentID:  docID,
-		}); err != nil {
-			return fmt.Errorf("revoke orphan scoped links: %w", err)
-		}
-		if err := q.DeleteLinkDocumentsByDocument(ctx, docID); err != nil {
-			return fmt.Errorf("detach scoped link documents: %w", err)
-		}
-		if err := q.DeleteDealRoomDocumentsByDocument(ctx, db.DeleteDealRoomDocumentsByDocumentParams{
-			WorkspaceID: ws,
-			DocumentID:  docID,
-		}); err != nil {
-			return fmt.Errorf("detach data room memberships: %w", err)
-		}
-		if err := q.SoftDeleteDocument(ctx, db.SoftDeleteDocumentParams{
-			ID:          docID,
-			WorkspaceID: ws,
-		}); err != nil {
-			return fmt.Errorf("soft delete document: %w", err)
-		}
-		return nil
-	})
+			// Revoke document-primary links first.
+			primary, err := q.SoftDeleteLinksByDocument(ctx, db.SoftDeleteLinksByDocumentParams{
+				WorkspaceID: ws,
+				DocumentID:  docID,
+			})
+			if err != nil {
+				return fmt.Errorf("revoke share links: %w", err)
+			}
+			// Revoke multi-doc links that only pointed at this document.
+			orphan, err := q.SoftDeleteOrphanScopedLinksForDocument(ctx, db.SoftDeleteOrphanScopedLinksForDocumentParams{
+				WorkspaceID: ws,
+				DocumentID:  docID,
+			})
+			if err != nil {
+				return fmt.Errorf("revoke orphan scoped links: %w", err)
+			}
+			if err := q.DeleteLinkDocumentsByDocument(ctx, docID); err != nil {
+				return fmt.Errorf("detach scoped link documents: %w", err)
+			}
+			if err := q.DeleteDealRoomDocumentsByDocument(ctx, db.DeleteDealRoomDocumentsByDocumentParams{
+				WorkspaceID: ws,
+				DocumentID:  docID,
+			}); err != nil {
+				return fmt.Errorf("detach data room memberships: %w", err)
+			}
+			if err := q.SoftDeleteDocument(ctx, db.SoftDeleteDocumentParams{
+				ID:          docID,
+				WorkspaceID: ws,
+			}); err != nil {
+				return fmt.Errorf("soft delete document: %w", err)
+			}
+			parked = append(primary, orphan...)
+			return nil
+		})
+	}
+	var err error
+	if s.planChecker != nil {
+		err = s.planChecker.WithBillingLock(ctx, workspaceID, run)
+	} else {
+		err = run(ctx)
+	}
+	if err != nil {
+		return err
+	}
+	s.notifyParkedLinks(ctx, workspaceID, parked)
+	return nil
 }
 
 func validateFileContent(file multipart.File, sourceType string) error {

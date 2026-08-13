@@ -12,11 +12,13 @@ import (
 )
 
 // ExpiryReminder periodically checks for links expiring soon and sends
-// reminder notifications to the link owners.
+// reminder notifications to the link owners. It also runs past-due expiry
+// (active → expired) so plan link inventory and RenewLink stay consistent.
 type ExpiryReminder struct {
-	queries  *db.Queries
-	notifier Notifier
-	interval time.Duration
+	queries       *db.Queries
+	notifier      Notifier
+	interval      time.Duration
+	expirePastDue func(context.Context) (int64, error)
 }
 
 func NewExpiryReminder(q *db.Queries, n Notifier, checkInterval time.Duration) *ExpiryReminder {
@@ -24,6 +26,11 @@ func NewExpiryReminder(q *db.Queries, n Notifier, checkInterval time.Duration) *
 		checkInterval = 6 * time.Hour
 	}
 	return &ExpiryReminder{queries: q, notifier: n, interval: checkInterval}
+}
+
+// SetPastDueExpirer registers the durable active→expired sweep (billing-locked).
+func (r *ExpiryReminder) SetPastDueExpirer(fn func(context.Context) (int64, error)) {
+	r.expirePastDue = fn
 }
 
 // Start begins the reminder loop in a background goroutine.
@@ -51,7 +58,33 @@ func (r *ExpiryReminder) loop(ctx context.Context) {
 
 func (r *ExpiryReminder) Stop() {}
 
+func (r *ExpiryReminder) expirePastDueOnce(ctx context.Context) {
+	if r.expirePastDue == nil {
+		return
+	}
+	n, err := r.expirePastDue(ctx)
+	if err != nil {
+		logger.ErrorCtx(ctx, "expiry reminder: expire past-due links", err)
+		return
+	}
+	if n > 0 {
+		logger.InfoCtx(ctx, "expiry reminder: expired past-due links", logger.Attr("count", n))
+	}
+}
+
+// RunOnce executes one reminder tick: durable past-due expire under the billing
+// lock, then upcoming expiry notifications. Start/loop call this; tests and
+// ops can invoke it directly without waiting for the ticker.
+func (r *ExpiryReminder) RunOnce(ctx context.Context) {
+	r.runOnce(ctx)
+}
+
 func (r *ExpiryReminder) runOnce(ctx context.Context) {
+	r.expirePastDueOnce(ctx)
+	if r.queries == nil {
+		return
+	}
+
 	// 24-hour window first; the query excludes links reminded within the last
 	// 23 hours, so a link won't get duplicate reminders across ticks.
 	window := pgtype.Text{String: "24", Valid: true}
@@ -82,6 +115,9 @@ func (r *ExpiryReminder) runOnce(ctx context.Context) {
 }
 
 func (r *ExpiryReminder) sendReminder(ctx context.Context, link db.Link) {
+	if r.notifier == nil {
+		return
+	}
 	name := "link"
 	if link.Name.Valid && link.Name.String != "" {
 		name = link.Name.String

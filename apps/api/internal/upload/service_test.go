@@ -110,19 +110,40 @@ func TestValidateFileContent_ValidXlsxMagic(t *testing.T) {
 
 type emptyFileReader struct{}
 
-func (emptyFileReader) Read([]byte) (int, error) { return 0, io.EOF }
+func (emptyFileReader) Read([]byte) (int, error)          { return 0, io.EOF }
 func (emptyFileReader) ReadAt([]byte, int64) (int, error) { return 0, io.EOF }
-func (emptyFileReader) Seek(int64, int) (int64, error) { return 0, nil }
-func (emptyFileReader) Close() error { return nil }
+func (emptyFileReader) Seek(int64, int) (int64, error)    { return 0, nil }
+func (emptyFileReader) Close() error                      { return nil }
 
 type nopSeekFile struct{ *bytes.Reader }
 
-func (n nopSeekFile) Close() error { return nil }
+func (n nopSeekFile) Close() error                            { return nil }
 func (n nopSeekFile) ReadAt(p []byte, off int64) (int, error) { return n.Reader.ReadAt(p, off) }
 
 func TestNormalizeUploadFilename(t *testing.T) {
 	if got := NormalizeUploadFilename(`financials/report.xlsx`); got != "report.xlsx" {
 		t.Fatalf("got %q", got)
+	}
+}
+
+func TestReplacedSnapshotTitle(t *testing.T) {
+	at := time.Date(2026, 8, 13, 8, 32, 0, 0, time.UTC)
+	got := replacedSnapshotTitle("Pitch Deck.pdf", at, "")
+	want := "Pitch Deck (20260813-083200).pdf"
+	if got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+	withNonce := replacedSnapshotTitle("Pitch Deck.pdf", at, "ab12cd34")
+	if withNonce != "Pitch Deck (20260813-083200-ab12cd34).pdf" {
+		t.Fatalf("nonce title %q", withNonce)
+	}
+}
+
+func TestLookupLiveByTitle_EmptyFilename(t *testing.T) {
+	s := NewService(nil, nil, nil)
+	_, _, _, err := s.LookupLiveByTitle(t.Context(), uuid.NewString(), "   ")
+	if !errors.Is(err, ErrUnsupportedUpload) {
+		t.Fatalf("expected ErrUnsupportedUpload, got %v", err)
 	}
 }
 
@@ -137,7 +158,7 @@ func TestValidateFileHeader(t *testing.T) {
 		{"pdf", "report.pdf", 1024, "pdf", false},
 		{"docx", "report.docx", 2048, "docx", false},
 		{"unsupported", "report.txt", 100, "", true},
-		{"too large", "report.pdf", maxFileSize + 1, "", true},
+		{"too large", "report.pdf", MaxFileSize + 1, "", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

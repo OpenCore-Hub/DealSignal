@@ -63,7 +63,7 @@ func TestRequireCNAMETarget(t *testing.T) {
 }
 
 func TestPutViewerDomainHappyPath(t *testing.T) {
-	fake := &fakeDB{t: t}
+	fake := &fakeDB{t: t, billing: activeTrialBilling()}
 	svc := NewService(db.New(fake), WithViewerDomain("cname.dealsignal.com"))
 	wsID := uuid.NewString()
 
@@ -96,7 +96,7 @@ func TestPutViewerDomainRejectsUnconfigured(t *testing.T) {
 }
 
 func TestVerifyViewerDomainCNAMEMissing(t *testing.T) {
-	fake := &fakeDB{t: t}
+	fake := &fakeDB{t: t, billing: activeTrialBilling()}
 	svc := NewService(db.New(fake), WithViewerDomain("cname.dealsignal.com"))
 	svc.cnameLookup = func(_ context.Context, _ string) (string, error) {
 		return "", errNoCNAME
@@ -112,7 +112,7 @@ func TestVerifyViewerDomainCNAMEMissing(t *testing.T) {
 }
 
 func TestVerifyViewerDomainFailClosed(t *testing.T) {
-	fake := &fakeDB{t: t}
+	fake := &fakeDB{t: t, billing: activeTrialBilling()}
 	svc := NewService(db.New(fake), WithViewerDomain("cname.dealsignal.com"))
 	svc.cnameLookup = func(_ context.Context, _ string) (string, error) {
 		return "wrong.example.net.", nil
@@ -135,7 +135,7 @@ func TestVerifyViewerDomainFailClosed(t *testing.T) {
 }
 
 func TestVerifyViewerDomainSuccess(t *testing.T) {
-	fake := &fakeDB{t: t}
+	fake := &fakeDB{t: t, billing: activeTrialBilling()}
 	svc := NewService(db.New(fake), WithViewerDomain("cname.dealsignal.com"))
 	svc.cnameLookup = func(_ context.Context, host string) (string, error) {
 		if host != "invest.example.com" {
@@ -171,7 +171,7 @@ func TestGetViewerDomainEmpty(t *testing.T) {
 }
 
 func TestDeleteViewerDomain(t *testing.T) {
-	fake := &fakeDB{t: t}
+	fake := &fakeDB{t: t, billing: activeTrialBilling()}
 	svc := NewService(db.New(fake), WithViewerDomain("cname.dealsignal.com"))
 	wsID := uuid.NewString()
 	if _, err := svc.PutViewerDomain(context.Background(), wsID, "invest.example.com"); err != nil {

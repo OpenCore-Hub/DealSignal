@@ -4,7 +4,11 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"testing"
+
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/plan"
+	"github.com/gin-gonic/gin"
 )
 
 func TestShouldLoadDealRoomMembershipExclude(t *testing.T) {
@@ -39,6 +43,9 @@ func TestClassifyCreateDocumentError(t *testing.T) {
 		{"lock file", fmt.Errorf("%w: excel lock files cannot be uploaded", ErrUnsupportedUpload), http.StatusBadRequest, "unsupported_upload", false},
 		{"bad content", ErrInvalidFileContent, http.StatusUnsupportedMediaType, "unsupported_media_type", false},
 		{"internal", errors.New("db down"), http.StatusInternalServerError, "internal_error", false},
+		{"plan storage", plan.ErrLimitStorage, http.StatusForbidden, "plan_limit_storage", false},
+		{"plan documents", plan.ErrLimitDocuments, http.StatusForbidden, "plan_limit_documents", false},
+		{"plan upload", plan.ErrLimitUpload, http.StatusForbidden, "plan_limit_upload", false},
 	}
 	for _, tc := range cases {
 		status, code, exists := classifyCreateDocumentError(tc.err)
@@ -66,6 +73,19 @@ func TestParseTruthyForm(t *testing.T) {
 		if got := parseTruthyForm(in); got != want {
 			t.Fatalf("parseTruthyForm(%q)=%v want %v", in, got, want)
 		}
+	}
+}
+
+func TestCheckExists_EmptyFilename(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := NewHandler(NewService(nil, nil, nil), nil, nil, "")
+	r := gin.New()
+	r.GET("/documents/exists", h.CheckExists)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/documents/exists?filename=%20", nil)
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 	}
 }
 
@@ -110,5 +130,18 @@ func TestDocumentMatchesCategoryListFilter(t *testing.T) {
 		if got := documentMatchesCategoryListFilter(tc.status, tc.filter, tc.category); got != tc.want {
 			t.Fatalf("status=%q filter=%q category=%q: got %v want %v", tc.status, tc.filter, tc.category, got, tc.want)
 		}
+	}
+}
+
+func TestRecordQuotaDenialFromCreateDocumentErrorPath(t *testing.T) {
+	t.Parallel()
+	before := plan.TestingDenialCount(plan.CodeLimitStorage)
+	status, code, _ := classifyCreateDocumentError(plan.ErrLimitStorage)
+	if status != http.StatusForbidden || code != plan.CodeLimitStorage {
+		t.Fatalf("classify=%d %q", status, code)
+	}
+	plan.RecordQuotaDenialFromErr(plan.ErrLimitStorage)
+	if plan.TestingDenialCount(plan.CodeLimitStorage) < before+1 {
+		t.Fatal("upload create path must be able to record plan_limit_storage denials")
 	}
 }

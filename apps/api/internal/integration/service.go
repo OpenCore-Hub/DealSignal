@@ -16,6 +16,7 @@ import (
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/logger"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/plan"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -28,16 +29,26 @@ var (
 
 // Settings is the public view of notification/integration settings.
 type Settings struct {
-	WorkspaceID         string `json:"workspace_id"`
-	EmailEnabled        bool   `json:"email_enabled"`
-	DailyDigestEnabled  bool   `json:"daily_digest_enabled"`
-	KeyPageSlackEnabled bool   `json:"key_page_slack_enabled"`
-	SlackWebhookURL     string `json:"slack_webhook_url,omitempty"`
-	SlackConnected      bool   `json:"slack_connected"`
-	HubSpotConnected    bool   `json:"hubspot_connected"`
-	SalesforceConnected bool   `json:"salesforce_connected"`
-	CanManage           bool   `json:"can_manage"`
-	UpdatedAt           string `json:"updated_at"`
+	WorkspaceID         string      `json:"workspace_id"`
+	EmailEnabled        bool        `json:"email_enabled"`
+	DailyDigestEnabled  bool        `json:"daily_digest_enabled"`
+	KeyPageSlackEnabled bool        `json:"key_page_slack_enabled"`
+	SlackWebhookURL     string      `json:"slack_webhook_url,omitempty"`
+	SlackConnected      bool        `json:"slack_connected"`
+	HubSpotConnected    bool        `json:"hubspot_connected"`
+	SalesforceConnected bool        `json:"salesforce_connected"`
+	CanManage           bool        `json:"can_manage"`
+	UpdatedAt           string      `json:"updated_at"`
+	PlanBlocked         PlanBlocked `json:"plan_blocked"`
+}
+
+// PlanBlocked is true when the plan does not include the feature.
+// GET stays open; connect/save/enable is 403. Credentials are not deleted on downgrade.
+type PlanBlocked struct {
+	Webhooks    bool `json:"webhooks"`
+	HubSpot     bool `json:"hubspot"`
+	DailyDigest bool `json:"daily_digest"`
+	SlackAlerts bool `json:"slack_alerts"`
 }
 
 // Service manages integrations and notification settings.
@@ -47,6 +58,7 @@ type Service struct {
 	httpClient      *http.Client
 	slackTokenURL   string
 	hubSpotTokenURL string
+	planChecker     plan.Checker
 }
 
 // NewService creates an integration service.
@@ -57,6 +69,33 @@ func NewService(q *db.Queries, cfg *config.Config) *Service {
 		httpClient:      &http.Client{Timeout: 15 * time.Second},
 		slackTokenURL:   "https://slack.com/api/oauth.v2.access",
 		hubSpotTokenURL: "https://api.hubapi.com/oauth/v1/token",
+	}
+}
+
+// WithPlanChecker gates HubSpot/webhooks/digest/Slack-alert writes. Nil is a no-op.
+func (s *Service) WithPlanChecker(c plan.Checker) *Service {
+	if s != nil {
+		s.planChecker = c
+	}
+	return s
+}
+
+func (s *Service) requireFeature(ctx context.Context, workspaceID string, assert func(plan.Checker, context.Context, string) error) error {
+	if s == nil || s.planChecker == nil || assert == nil {
+		return nil
+	}
+	return assert(s.planChecker, ctx, workspaceID)
+}
+
+func (s *Service) planBlocked(ctx context.Context, workspaceID string) PlanBlocked {
+	if s == nil || s.planChecker == nil || workspaceID == "" {
+		return PlanBlocked{}
+	}
+	return PlanBlocked{
+		Webhooks:    s.planChecker.AssertCanUseWebhooks(ctx, workspaceID) != nil,
+		HubSpot:     s.planChecker.AssertCanUseHubSpot(ctx, workspaceID) != nil,
+		DailyDigest: s.planChecker.AssertCanUseDailyDigest(ctx, workspaceID) != nil,
+		SlackAlerts: s.planChecker.AssertCanUseSlackAlerts(ctx, workspaceID) != nil,
 	}
 }
 
@@ -76,6 +115,7 @@ func (s *Service) GetSettings(ctx context.Context, workspaceID, actorID string) 
 			settings.SlackConnected = s.hasToken(ctx, wsUUID, "slack")
 			settings.HubSpotConnected = s.hasToken(ctx, wsUUID, "hubspot")
 			settings.CanManage = s.isManager(ctx, actorID, workspaceID)
+			settings.PlanBlocked = s.planBlocked(ctx, workspaceID)
 			return settings, nil
 		}
 		return Settings{}, err
@@ -88,6 +128,7 @@ func (s *Service) GetSettings(ctx context.Context, workspaceID, actorID string) 
 	settings.DailyDigestEnabled = digest
 	settings.KeyPageSlackEnabled = keyPageSlack
 	settings.CanManage = s.isManager(ctx, actorID, workspaceID)
+	settings.PlanBlocked = s.planBlocked(ctx, workspaceID)
 	return settings, nil
 }
 
@@ -192,6 +233,21 @@ func (s *Service) SaveSettings(ctx context.Context, workspaceID, actorID string,
 		return Settings{}, err
 	}
 
+	if req.DailyDigestEnabled {
+		if err := s.requireFeature(ctx, workspaceID, func(c plan.Checker, ctx context.Context, id string) error {
+			return c.AssertCanUseDailyDigest(ctx, id)
+		}); err != nil {
+			return Settings{}, err
+		}
+	}
+	if req.KeyPageSlackEnabled {
+		if err := s.requireFeature(ctx, workspaceID, func(c plan.Checker, ctx context.Context, id string) error {
+			return c.AssertCanUseSlackAlerts(ctx, id)
+		}); err != nil {
+			return Settings{}, err
+		}
+	}
+
 	existing, err := s.queries.GetNotificationSettings(ctx, wsUUID)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return Settings{}, err
@@ -281,6 +337,13 @@ func (s *Service) OAuthURL(ctx context.Context, workspaceID, provider string) (s
 	if provider != "slack" && provider != "hubspot" {
 		return "", errors.New("unsupported provider")
 	}
+	if provider == "hubspot" {
+		if err := s.requireFeature(ctx, workspaceID, func(c plan.Checker, ctx context.Context, id string) error {
+			return c.AssertCanUseHubSpot(ctx, id)
+		}); err != nil {
+			return "", err
+		}
+	}
 	if err := s.ensureOAuthConfigured(provider); err != nil {
 		return "", err
 	}
@@ -329,6 +392,13 @@ func (s *Service) OAuthCallback(ctx context.Context, provider, state, code strin
 	ws, err := s.queries.GetWorkspaceByID(ctx, row.WorkspaceID)
 	if err != nil {
 		return "", errors.New("workspace not found")
+	}
+	if provider == "hubspot" {
+		if err := s.requireFeature(ctx, uuid.UUID(row.WorkspaceID.Bytes).String(), func(c plan.Checker, ctx context.Context, id string) error {
+			return c.AssertCanUseHubSpot(ctx, id)
+		}); err != nil {
+			return ws.Slug, err
+		}
 	}
 
 	var token db.UpsertIntegrationTokenParams
@@ -682,6 +752,11 @@ func (s *Service) EnqueueHubSpotSync(ctx context.Context, workspaceID string) er
 	if err != nil {
 		return err
 	}
+	if err := s.requireFeature(ctx, workspaceID, func(c plan.Checker, ctx context.Context, id string) error {
+		return c.AssertCanUseHubSpot(ctx, id)
+	}); err != nil {
+		return err
+	}
 	_, err = s.queries.CreateHubSpotSyncJob(ctx, db.CreateHubSpotSyncJobParams{
 		WorkspaceID: wsUUID,
 		RecordType:  "workspace",
@@ -715,6 +790,19 @@ func (s *Service) ProcessHubSpotSyncJob(ctx context.Context, job db.HubspotSyncJ
 	}
 
 	workspaceID := uuidToString(job.WorkspaceID)
+	if err := s.requireFeature(ctx, workspaceID, func(c plan.Checker, ctx context.Context, id string) error {
+		return c.AssertCanUseHubSpot(ctx, id)
+	}); err != nil {
+		if failErr := s.queries.MarkHubSpotSyncJobFailed(ctx, db.MarkHubSpotSyncJobFailedParams{
+			ID:           job.ID,
+			ErrorMessage: pgtype.Text{String: err.Error(), Valid: true},
+		}); failErr != nil {
+			logger.ErrorCtx(ctx, "mark hubspot sync job failed", failErr,
+				logger.Attr("job_id", uuid.UUID(job.ID.Bytes).String()),
+			)
+		}
+		return err
+	}
 	if err := s.SyncHubSpot(ctx, workspaceID); err != nil {
 		if failErr := s.queries.MarkHubSpotSyncJobFailed(ctx, db.MarkHubSpotSyncJobFailedParams{
 			ID:           job.ID,

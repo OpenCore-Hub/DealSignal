@@ -130,6 +130,9 @@ func (h *Handler) SaveSettings(c *gin.Context) {
 	}
 	s, err := h.service.SaveSettings(c.Request.Context(), workspaceID(c), middleware.UserIDFrom(c), SaveSettingsRequest(req))
 	if err != nil {
+		if httpx.WriteIfPlanLimit(c, err) {
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
@@ -165,6 +168,9 @@ func (h *Handler) HubSpotConnect(c *gin.Context) {
 	}
 	oauthURL, err := h.service.OAuthURL(c.Request.Context(), workspaceID(c), "hubspot")
 	if err != nil {
+		if httpx.WriteIfPlanLimit(c, err) {
+			return
+		}
 		h.writeOAuthURLError(c, err)
 		return
 	}
@@ -207,6 +213,9 @@ func (h *Handler) HubSpotSync(c *gin.Context) {
 		return
 	}
 	if err := h.service.EnqueueHubSpotSync(c.Request.Context(), workspaceID(c)); err != nil {
+		if httpx.WriteIfPlanLimit(c, err) {
+			return
+		}
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"code": "sync_failed", "message": httpx.SafeMessage("sync_failed", err)})
 		return
 	}
@@ -242,6 +251,9 @@ func (h *Handler) SaveOutboundWebhook(c *gin.Context) {
 	}
 	v, err := h.service.SaveOutboundWebhook(c.Request.Context(), workspaceID(c), req)
 	if err != nil {
+		if httpx.WriteIfPlanLimit(c, err) {
+			return
+		}
 		if notification.IsOutboundWebhookURLError(err) {
 			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_webhook_url", "message": httpx.SafeMessage("invalid_webhook_url", err)})
 			return

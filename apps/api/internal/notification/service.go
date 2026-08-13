@@ -13,6 +13,7 @@ import (
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/locale"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/mailer"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/plan"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -81,16 +82,25 @@ type Pool interface {
 
 // Service enqueues and sends notifications.
 type Service struct {
-	pool    Pool
-	queries Querier
-	mailer  mailer.Mailer
-	cfg     *config.Config
-	rules   *RuleEngine
+	pool        Pool
+	queries     Querier
+	mailer      mailer.Mailer
+	cfg         *config.Config
+	rules       *RuleEngine
+	planChecker plan.Checker
 }
 
 // NewService creates a notification service.
 func NewService(pool Pool, q Querier, m mailer.Mailer, cfg *config.Config) *Service {
 	return &Service{pool: pool, queries: q, mailer: m, cfg: cfg}
+}
+
+// WithPlanChecker skips paid Slack/webhook delivery when the plan does not include the feature.
+func (s *Service) WithPlanChecker(c plan.Checker) *Service {
+	if s != nil {
+		s.planChecker = c
+	}
+	return s
 }
 
 const (
@@ -288,6 +298,12 @@ func (s *Service) sendEmail(ctx context.Context, n db.Notification) (string, err
 }
 
 func (s *Service) sendSlack(ctx context.Context, n db.Notification) error {
+	if featureDenied(s.planChecker, ctx, workspaceIDString(n.WorkspaceID), func(c plan.Checker, ctx context.Context, id string) error {
+		return c.AssertCanUseSlackAlerts(ctx, id)
+	}) {
+		// Downgrade must not retry/dead-letter already-queued Slack jobs.
+		return nil
+	}
 	settings, err := s.queries.GetNotificationSettings(ctx, n.WorkspaceID)
 	if err != nil {
 		return err
