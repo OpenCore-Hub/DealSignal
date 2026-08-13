@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   DEAL_ROOM_PAGE_TABS,
   orderDealRoomPageTabs,
+  visibleDealRoomPageTabs,
 } from "./useDealRoomTab";
 
 describe("orderDealRoomPageTabs", () => {
@@ -28,5 +29,19 @@ describe("orderDealRoomPageTabs", () => {
 
   it("falls back to canonical order for non-page tabs", () => {
     expect(orderDealRoomPageTabs("settings")).toEqual(DEAL_ROOM_PAGE_TABS);
+  });
+
+  it("hides access and knowledge tabs for read-only guests", () => {
+    expect(visibleDealRoomPageTabs(false)).toEqual(["documents", "links", "analytics"]);
+    expect(orderDealRoomPageTabs("knowledge", visibleDealRoomPageTabs(false))).toEqual([
+      "documents",
+      "links",
+      "analytics",
+    ]);
+    expect(orderDealRoomPageTabs("links", visibleDealRoomPageTabs(false))).toEqual([
+      "links",
+      "documents",
+      "analytics",
+    ]);
   });
 });

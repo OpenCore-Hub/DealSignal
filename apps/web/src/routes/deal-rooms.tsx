@@ -10,6 +10,7 @@ import { PageHeader } from "@/components/common/PageHeader";
 import { EmptyState } from "@/components/common/EmptyState";
 import { api } from "@/lib/api";
 import { formatRelativeTime } from "@/lib/formatters";
+import { usageAtCap } from "@/lib/planQuota";
 import { useAsyncData } from "@/hooks/useAsyncData";
 import { useTranslation } from "react-i18next";
 import type { DealRoom } from "@/types";
@@ -25,7 +26,7 @@ export function DealRoomsPage() {
   const navigate = useNavigate();
   const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
   const location = useLocation();
-  const { canWrite } = useWorkspaceAccess(workspaceSlug);
+  const { canWrite, loading: accessLoading } = useWorkspaceAccess(workspaceSlug);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const searchQuery = search.trim();
@@ -45,6 +46,12 @@ export function DealRoomsPage() {
     },
     [page, searchQuery],
   );
+  const { data: billing } = useAsyncData(() => {
+    if (accessLoading || !canWrite) return Promise.resolve(null);
+    return api.getBillingInfo().catch(() => null);
+  }, [accessLoading, canWrite]);
+  const roomsAtCap = billing ? usageAtCap(billing.roomsUsed, billing.roomsLimit) : false;
+  const canCreateRoom = canWrite && !roomsAtCap;
 
   const rooms = data?.data;
   const pagination = data?.pagination;
@@ -97,15 +104,29 @@ export function DealRoomsPage() {
               aria-label={t("search.placeholder")}
             />
           </div>
-          <Button
-            className="w-full shrink-0 gap-1.5 sm:w-auto"
-            onClick={() => navigate(`/${workspaceSlug}/deal-rooms/new`)}
-            disabled={!canWrite}
-            title={canWrite ? undefined : tc("error.codes.insufficient_role")}
-          >
-            <Plus size={16} weight="bold" />
-            {t("page.create")}
-          </Button>
+          <div className="flex w-full flex-col items-stretch gap-1 sm:w-auto sm:items-end">
+            <Button
+              className="w-full shrink-0 gap-1.5 sm:w-auto"
+              onClick={() => navigate(`/${workspaceSlug}/deal-rooms/new`)}
+              disabled={!canCreateRoom}
+              title={
+                !canWrite
+                  ? tc("error.codes.insufficient_role")
+                  : roomsAtCap
+                    ? t("page.roomLimitReached")
+                    : undefined
+              }
+              data-testid="deal-rooms-create"
+            >
+              <Plus size={16} weight="bold" />
+              {t("page.create")}
+            </Button>
+            {roomsAtCap ? (
+              <p className="text-caption text-muted-foreground" data-testid="deal-rooms-limit-hint">
+                {t("page.roomLimitReached")}
+              </p>
+            ) : null}
+          </div>
         </div>
       </PageHeader>
 
@@ -130,7 +151,7 @@ export function DealRoomsPage() {
             title={t("empty.title")}
             description={t("empty.description")}
             action={
-              canWrite
+              canCreateRoom
                 ? { label: t("empty.action"), onClick: () => navigate(`/${workspaceSlug}/deal-rooms/new`) }
                 : undefined
             }

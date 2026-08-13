@@ -4,13 +4,14 @@ import { render, screen, waitFor, fireEvent, act } from "@testing-library/react"
 import { MemoryRouter, Routes, Route } from "react-router";
 import { I18nextProvider, initReactI18next } from "react-i18next";
 import i18n from "i18next";
-import { SettingsMembersPage } from "./members";
+import { SettingsMembersPage, internalSeatsAtCap, inviteRoleBlockedBySeats } from "./members";
 import { toast } from "sonner";
 import { ApiError } from "@/lib/apiClient";
 import { getCachedAccountEmail } from "@/lib/authAccount";
 
 const {
   getWorkspaceMembersMock,
+  getBillingInfoMock,
   inviteWorkspaceMemberMock,
   updateWorkspaceInvitationRoleMock,
   revokeWorkspaceInvitationMock,
@@ -18,6 +19,7 @@ const {
   removeWorkspaceMemberMock,
 } = vi.hoisted(() => ({
   getWorkspaceMembersMock: vi.fn(),
+  getBillingInfoMock: vi.fn(),
   inviteWorkspaceMemberMock: vi.fn(),
   updateWorkspaceInvitationRoleMock: vi.fn(),
   revokeWorkspaceInvitationMock: vi.fn(),
@@ -28,6 +30,7 @@ const {
 vi.mock("@/lib/api", () => ({
   api: {
     getWorkspaceMembers: getWorkspaceMembersMock,
+    getBillingInfo: getBillingInfoMock,
     inviteWorkspaceMember: inviteWorkspaceMemberMock,
     updateWorkspaceInvitationRole: updateWorkspaceInvitationRoleMock,
     revokeWorkspaceInvitation: revokeWorkspaceInvitationMock,
@@ -79,6 +82,9 @@ const settingsResources = {
         cannotModifyOwner: "The workspace owner cannot be changed here",
         cannotModifySelf: "You cannot change your own membership here",
         cannotManageMember: "You do not have permission to manage this member",
+        seatsUsage: "Internal seats",
+        seatLimitReached:
+          "You've reached the team seat limit. Invite guests for free, or upgrade to add more members.",
         status: { pending: "Pending", active: "Active", suspended: "Suspended" },
         roles: { owner: "Owner", admin: "Admin", member: "Member", guest: "Guest" },
       },
@@ -88,11 +94,15 @@ const settingsResources = {
       save: "Save",
       delete: "Delete",
       moreActions: "More actions",
+      unlimited: "Unlimited",
+      usageAtLimit: "At limit",
+      usageNearLimit: "Near limit",
       error: {
         saveFailed: "Failed to save",
         deleteFailed: "Failed to delete",
         codes: {
           already_member: "This person is already a member.",
+          plan_limit_seats: "You've reached the team seat limit for your plan. Upgrade to invite more members.",
         },
       },
     },
@@ -146,6 +156,23 @@ describe("SettingsMembersPage", () => {
         },
       ],
     });
+    getBillingInfoMock.mockResolvedValue({
+      plan: "trial",
+      period: "monthly",
+      trialExpired: false,
+      storageUsed: 0,
+      storageLimit: 0,
+      linksUsed: 0,
+      linksLimit: 0,
+      roomsUsed: 0,
+      roomsLimit: 0,
+      seatsUsed: 1,
+      seatsLimit: 10,
+      customDomainEnabled: true,
+      watermarkEnabled: true,
+      ndaEnabled: true,
+      visitorAskAiEnabled: true,
+    });
     inviteWorkspaceMemberMock.mockResolvedValue({
       data: {
         id: "inv_1",
@@ -160,6 +187,15 @@ describe("SettingsMembersPage", () => {
     revokeWorkspaceInvitationMock.mockResolvedValue(undefined);
     updateWorkspaceMemberRoleMock.mockResolvedValue({ data: { userId: "u_2", role: "admin" } });
     removeWorkspaceMemberMock.mockResolvedValue(undefined);
+  });
+
+  it("computes internal seat cap correctly", () => {
+    expect(internalSeatsAtCap(1, 1)).toBe(true);
+    expect(internalSeatsAtCap(0, 1)).toBe(false);
+    expect(internalSeatsAtCap(5, 0)).toBe(false);
+    expect(inviteRoleBlockedBySeats("member", 1, 1)).toBe(true);
+    expect(inviteRoleBlockedBySeats("admin", 1, 1)).toBe(true);
+    expect(inviteRoleBlockedBySeats("guest", 1, 1)).toBe(false);
   });
 
   it("lists members and invites with role + toast", async () => {
@@ -351,6 +387,61 @@ describe("SettingsMembersPage", () => {
     await waitFor(() => {
       expect(revokeWorkspaceInvitationMock).toHaveBeenCalledWith("inv_pending");
       expect(toast.success).toHaveBeenCalledWith("Invitation to pending@acme.com was revoked");
+    });
+  });
+
+  it("blocks member invites at seat cap and shows usage", async () => {
+    getBillingInfoMock.mockResolvedValue({
+      plan: "free",
+      period: "monthly",
+      trialExpired: false,
+      storageUsed: 0,
+      storageLimit: 1,
+      linksUsed: 0,
+      linksLimit: 20,
+      roomsUsed: 1,
+      roomsLimit: 1,
+      seatsUsed: 1,
+      seatsLimit: 1,
+      customDomainEnabled: false,
+      watermarkEnabled: false,
+      ndaEnabled: false,
+      visitorAskAiEnabled: false,
+    });
+
+    await renderPage();
+    await screen.findByTestId("members-seat-usage");
+    expect(screen.getByText(/Internal seats/i)).toBeTruthy();
+
+    fireEvent.change(screen.getByPlaceholderText("Email address"), {
+      target: { value: "member@example.com" },
+    });
+    expect(screen.getByRole("button", { name: /^Invite$/i })).toBeDisabled();
+    expect(screen.getByTestId("members-seat-limit-hint")).toBeTruthy();
+    expect(inviteWorkspaceMemberMock).not.toHaveBeenCalled();
+  });
+
+  it("surfaces plan_limit_seats from the API via toast", async () => {
+    inviteWorkspaceMemberMock.mockRejectedValueOnce(
+      new ApiError({
+        status: 403,
+        code: "plan_limit_seats",
+        message: "internal seat limit reached for this plan",
+        requestId: "req_seats",
+      }),
+    );
+    await renderPage();
+    await screen.findByText("owner@acme.com");
+
+    fireEvent.change(screen.getByPlaceholderText("Email address"), {
+      target: { value: "extra@example.com" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^Invite$/i }));
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith(
+        "You've reached the team seat limit for your plan. Upgrade to invite more members.",
+      );
     });
   });
 });

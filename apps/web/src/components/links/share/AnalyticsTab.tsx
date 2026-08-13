@@ -22,6 +22,7 @@ import { formatAskDeflectionRate, hasAskActivity } from "@/lib/linkAskSummary";
 import { api } from "@/lib/api";
 import { ApiError } from "@/lib/apiClient";
 import { apiErrorMessage } from "@/lib/apiErrors";
+import { useWorkspaceAccess } from "@/hooks/useWorkspaceAccess";
 import { LinkAccessLog } from "../LinkAccessLog";
 import { ManagementTab } from "./ManagementTab";
 import { AskSecurityEventsPanel } from "./AskSecurityEventsPanel";
@@ -73,6 +74,7 @@ async function fetchManagementData(linkId: string) {
 
 export function AnalyticsTab({ link, logs }: AnalyticsTabProps) {
   const { t } = useTranslation("linkShare");
+  const { canWrite } = useWorkspaceAccess();
   const [analytics, setAnalytics] = useState<LinkAnalytics | null>(null);
   const [analyticsLoading, setAnalyticsLoading] = useState(true);
   const [pendingHostCount, setPendingHostCount] = useState(0);
@@ -130,7 +132,7 @@ export function AnalyticsTab({ link, logs }: AnalyticsTabProps) {
       setSection("delivery");
       return;
     }
-    if (pendingEngageCount > 0) {
+    if (canWrite && pendingEngageCount > 0) {
       setSection("engage");
     }
   }, [
@@ -139,7 +141,14 @@ export function AnalyticsTab({ link, logs }: AnalyticsTabProps) {
     remediableCount,
     pendingEngageCount,
     showDeliveryTab,
+    canWrite,
   ]);
+
+  useEffect(() => {
+    if (!canWrite && section === "engage") {
+      setSection("visitors");
+    }
+  }, [canWrite, section]);
 
   useEffect(() => {
     visitorsSeededForLinkRef.current = null;
@@ -485,6 +494,12 @@ export function AnalyticsTab({ link, logs }: AnalyticsTabProps) {
 
   useEffect(() => {
     let cancelled = false;
+    if (!canWrite) {
+      setPendingHostCount(0);
+      setFileRequests([]);
+      setManagementLoading(false);
+      return;
+    }
     fetchManagementData(link.id)
       .then((data) => {
         if (!cancelled) {
@@ -501,9 +516,10 @@ export function AnalyticsTab({ link, logs }: AnalyticsTabProps) {
     return () => {
       cancelled = true;
     };
-  }, [link.id, t]);
+  }, [link.id, t, canWrite]);
 
   const refreshManagement = async () => {
+    if (!canWrite) return;
     setManagementLoading(true);
     try {
       const data = await fetchManagementData(link.id);
@@ -595,14 +611,16 @@ export function AnalyticsTab({ link, logs }: AnalyticsTabProps) {
               ) : null}
             </TabsTrigger>
           ) : null}
-          <TabsTrigger value="engage" className="gap-1.5">
-            {t("analytics.tabs.engage")}
-            {pendingEngageCount > 0 ? (
-              <Badge variant="secondary" className="h-5 min-w-5 px-1.5 text-[10px]">
-                {pendingEngageCount}
-              </Badge>
-            ) : null}
-          </TabsTrigger>
+          {canWrite ? (
+            <TabsTrigger value="engage" className="gap-1.5">
+              {t("analytics.tabs.engage")}
+              {pendingEngageCount > 0 ? (
+                <Badge variant="secondary" className="h-5 min-w-5 px-1.5 text-[10px]">
+                  {pendingEngageCount}
+                </Badge>
+              ) : null}
+            </TabsTrigger>
+          ) : null}
         </TabsList>
 
         <TabsContent value="visitors" className="space-y-3">
@@ -824,6 +842,7 @@ export function AnalyticsTab({ link, logs }: AnalyticsTabProps) {
           </TabsContent>
         ) : null}
 
+          {canWrite ? (
         <TabsContent value="engage" className="space-y-4">
           {link.dealRoomId && hasAskActivity(analytics?.ask_summary) ? (
             <Card>
@@ -941,6 +960,7 @@ export function AnalyticsTab({ link, logs }: AnalyticsTabProps) {
 
           <AskSecurityEventsPanel mode="link" linkId={link.id} />
         </TabsContent>
+          ) : null}
       </Tabs>
     </div>
   );

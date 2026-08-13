@@ -11,6 +11,7 @@ vi.mock("@/lib/api", () => ({
     getDealRoomAccessPolicy: vi.fn(),
     upsertDealRoomAccessPolicy: vi.fn(),
     getDealRoomAccessRequests: vi.fn(),
+    getBillingInfo: vi.fn(),
   },
 }));
 
@@ -25,22 +26,30 @@ vi.mock("@/components/links/share", async (importOriginal) => {
     ContactEmailTagInput: ({
       values,
       onChange,
+      disabled,
+      hint,
     }: {
       values: string[];
       onChange: (values: string[]) => void;
+      disabled?: boolean;
+      hint?: string;
     }) => (
-      <input
-        data-testid="blocked-emails-input"
-        value={values.join(",")}
-        onChange={(e) =>
-          onChange(
-            e.target.value
-              .split(",")
-              .map((v) => v.trim())
-              .filter(Boolean),
-          )
-        }
-      />
+      <div>
+        <input
+          data-testid="blocked-emails-input"
+          value={values.join(",")}
+          disabled={disabled}
+          onChange={(e) =>
+            onChange(
+              e.target.value
+                .split(",")
+                .map((v) => v.trim())
+                .filter(Boolean),
+            )
+          }
+        />
+        {hint ? <p>{hint}</p> : null}
+      </div>
     ),
   };
 });
@@ -60,6 +69,10 @@ describe("DealRoomAccessControlTab", () => {
     vi.clearAllMocks();
     vi.mocked(api.getDealRoomAccessPolicy).mockResolvedValue({ data: emptyPolicy });
     vi.mocked(api.getDealRoomAccessRequests).mockResolvedValue({ data: [] });
+    vi.mocked(api.getBillingInfo).mockResolvedValue({
+      accessControlsEnabled: true,
+      ndaEnabled: true,
+    } as Awaited<ReturnType<typeof api.getBillingInfo>>);
     vi.mocked(api.upsertDealRoomAccessPolicy).mockResolvedValue({
       data: { ...emptyPolicy, configured: true },
     });
@@ -171,5 +184,48 @@ describe("DealRoomAccessControlTab", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Save access policy" }));
     await waitFor(() => expect(onDirtyChange).toHaveBeenCalledWith(false));
+  });
+
+  it("disables verification, NDA, and empty blocklist on plans without those features", async () => {
+    vi.mocked(api.getBillingInfo).mockResolvedValue({
+      accessControlsEnabled: false,
+      ndaEnabled: false,
+    } as Awaited<ReturnType<typeof api.getBillingInfo>>);
+    const i18n = await createTestI18n({
+      dealRooms: {
+        "accessControl.blocklistTitle": "Access blacklist",
+        "accessControl.floorsTitle": "Security domain",
+        "accessControl.floorMustVerify": "Must verify email",
+        "accessControl.floorMustNda": "Must require NDA",
+        "accessControl.saveButton": "Save access policy",
+        "accessControl.saveHint": "Access blacklist syncs",
+        "accessControl.accessControlsPlanRequired":
+          "Email verification and access blacklist require Business or higher",
+        "accessControl.ndaPlanRequired": "NDA floor requires Business or higher",
+      },
+      linkShare: {
+        "accessRules.blockedViewers.placeholder": "bad@example.com",
+        "accessRules.blockedViewers.roomHint": "Blocked for every link",
+        "accessRules.saved": "Saved",
+        "share.savedButtonLabel": "Saved",
+      },
+      common: { loading: "Loading...", saving: "Saving..." },
+    });
+
+    render(
+      <I18nextProvider i18n={i18n}>
+        <DealRoomAccessControlTab roomId="room-1" />
+      </I18nextProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId("room-security-form")).toBeInTheDocument());
+    expect(screen.getByLabelText("Must verify email")).toBeDisabled();
+    expect(screen.getByLabelText("Must require NDA")).toBeDisabled();
+    expect(screen.getByTestId("blocked-emails-input")).toBeDisabled();
+    expect(
+      screen.getAllByText(/Email verification and access blacklist require Business or higher/i)
+        .length,
+    ).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText(/NDA floor requires Business or higher/i)).toBeInTheDocument();
   });
 });

@@ -18,11 +18,24 @@ const translations: Record<string, string> = {
     "The reserved delivery email does not match this link’s verification code.",
   "documents:viewer.invalidPassword": "Incorrect password.",
   "documents:viewer.blocked_emailDescription": "Blocked from this link.",
+  "documents:viewer.link_archivedDescription":
+    "This share link is no longer active. Please contact the sender if you need access.",
   "linkShare:share.linkNameDuplicate": "Name taken",
   "auth:login.errorInvalidCredentials": "Bad credentials",
   "auth:verifyEmail.error": "Verify failed",
   "auth:acceptInvitation.emailMismatch":
     "You're signed in with a different email than this invitation. Sign out and continue with the invited email.",
+  "auth:acceptInvitation.planLimitSeats":
+    "This workspace has no available team seats. Ask an admin to free a seat or upgrade the plan, then try again.",
+  "common:error.codes.plan_limit_seats":
+    "This workspace has no available team seats.",
+  "common:error.codes.plan_payment_required":
+    "This plan requires checkout before it can be activated.",
+      "common:error.codes.plan_sales_assisted":
+        "Enterprise is provisioned with our sales team, not self-serve checkout.",
+      "common:error.codes.plan_manage_via_portal":
+        "Manage this subscription in the billing portal.",
+      "common:error.codes.stripe_not_configured": "Checkout is not configured.",
 };
 
 vi.mock("@/i18n/config", () => ({
@@ -109,6 +122,14 @@ describe("apiErrorMessage", () => {
     ).toBe("Incorrect password.");
   });
 
+  it("maps archived share links to visitor-facing unavailable copy", () => {
+    expect(
+      apiErrorMessage(
+        new ApiError({ status: 410, code: "link_archived", message: "link archived", requestId: "r" }),
+      ),
+    ).toBe("This share link is no longer active. Please contact the sender if you need access.");
+  });
+
   it("keeps workspace invite email mismatch off viewer copy", () => {
     const err = new ApiError({
       status: 403,
@@ -126,5 +147,51 @@ describe("apiErrorMessage", () => {
         { context: "viewerGate" },
       ),
     ).toBe("The reserved delivery email does not match this link’s verification code.");
+  });
+
+  it("maps plan_limit_seats for invitee accept context", () => {
+    const err = new ApiError({
+      status: 403,
+      code: "plan_limit_seats",
+      message: "internal seat limit reached for this plan",
+      requestId: "r",
+    });
+    expect(apiErrorMessage(err, { context: "acceptInvitation" })).toBe(
+      "This workspace has no available team seats. Ask an admin to free a seat or upgrade the plan, then try again.",
+    );
+    expect(apiErrorMessage(err, { context: "acceptInvitation" })).not.toMatch(/invite more/i);
+  });
+
+  it("maps unpaid plan change codes", () => {
+    expect(
+      apiErrorMessage(
+        new ApiError({
+          status: 402,
+          code: "plan_payment_required",
+          message: "pay",
+          requestId: "r",
+        }),
+      ),
+    ).toBe("This plan requires checkout before it can be activated.");
+    expect(
+      apiErrorMessage(
+        new ApiError({
+          status: 403,
+          code: "plan_sales_assisted",
+          message: "sales",
+          requestId: "r",
+        }),
+      ),
+    ).toBe("Enterprise is provisioned with our sales team, not self-serve checkout.");
+    expect(
+      apiErrorMessage(
+        new ApiError({
+          status: 409,
+          code: "plan_manage_via_portal",
+          message: "portal",
+          requestId: "r",
+        }),
+      ),
+    ).toBe("Manage this subscription in the billing portal.");
   });
 });

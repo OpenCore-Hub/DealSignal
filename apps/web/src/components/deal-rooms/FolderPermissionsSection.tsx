@@ -208,8 +208,8 @@ export function FolderPermissionsSection({
       await api.updateLink(linkId, { status: checked ? "active" : "revoked" });
       await refetch();
       onLinksChanged?.();
-    } catch {
-      // error toast handled by api client
+    } catch (err) {
+      toast.error(apiErrorMessage(err, { fallback: "saveFailed" }));
     }
   };
 
@@ -501,11 +501,14 @@ export function FolderPermissionsSection({
                         <TableCell className="text-muted-foreground tabular-nums">
                           {formatDateTime(link.createdAt, emptyCell)}
                         </TableCell>
-                        <TableCell className="text-right">
+                        <TableCell
+                          className="text-right"
+                          onClick={stopRowActivation}
+                          onPointerDown={stopRowActivation}
+                        >
                           <Switch
                             checked={link.isActive ?? false}
                             onCheckedChange={(checked) => handleActiveChange(link.id, checked)}
-                            onClick={(e) => e.stopPropagation()}
                             disabled={!canWrite}
                             aria-label={t("permissions.links.table.active")}
                           />
@@ -536,7 +539,7 @@ export function FolderPermissionsSection({
                                 <PencilSimple size={16} />
                               </Button>
                             ) : null}
-                            {pendingCount > 0 && onManageAccess ? (
+                            {pendingCount > 0 && onManageAccess && canWrite ? (
                               <Button
                                 type="button"
                                 size="icon-sm"

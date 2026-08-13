@@ -21,7 +21,16 @@ i18nInstance.use(initReactI18next).init({
         saving: "Saving...",
         loading: "Loading...",
         close: "Close",
-        error: { loadFailed: "Failed to load", saveFailed: "Failed to save" },
+        error: {
+          loadFailed: "Failed to load",
+          saveFailed: "Failed to save",
+          codes: {
+            plan_limit_links:
+              "You've reached the share link limit for your plan. Upgrade to create more.",
+            plan_feature_watermark:
+              "Watermark and viewer protection features are not available on your plan. Upgrade to Pro or higher.",
+          },
+        },
       },
     },
   },
@@ -51,6 +60,9 @@ vi.mock("@/lib/api", () => ({
     listNDATemplates: vi.fn(() => Promise.resolve({ data: [] })),
     getDocuments: vi.fn(() => Promise.resolve({ data: [] })),
     getWorkspaceViewerDomain: vi.fn(),
+    getBillingInfo: vi.fn(),
+    getDealRoomAccessPolicy: vi.fn(),
+    getLinkAskPolicy: vi.fn(),
   },
 }));
 
@@ -93,6 +105,23 @@ describe("LinkShareDialog", () => {
       status: "",
       cnameHost: "",
       cnameTarget: "",
+    });
+    vi.mocked(api.getBillingInfo).mockResolvedValue({
+      plan: "trial",
+      period: "monthly",
+      trialExpired: false,
+      storageUsed: 0,
+      storageLimit: 10,
+      linksUsed: 0,
+      linksLimit: 50,
+      roomsUsed: 0,
+      roomsLimit: 10,
+      seatsUsed: 1,
+      seatsLimit: 5,
+      customDomainEnabled: true,
+      watermarkEnabled: true,
+      ndaEnabled: true,
+      visitorAskAiEnabled: true,
     });
   });
 
@@ -298,5 +327,94 @@ describe("LinkShareDialog", () => {
     });
 
     expect(saveButton).toBeDisabled();
+  });
+
+  it("surfaces plan_limit_links when reactivating a link at quota", async () => {
+    const { toast } = await import("sonner");
+    const { ApiError } = await import("@/lib/apiClient");
+    const inactive: Link = { ...baseLink, isActive: false, status: "revoked" };
+    vi.mocked(api.getLinkById).mockResolvedValue(inactive);
+    vi.mocked(api.updateLink).mockRejectedValue(
+      new ApiError({
+        status: 403,
+        code: "plan_limit_links",
+        message: "share link limit reached for this plan",
+        requestId: "r1",
+      }),
+    );
+
+    render(
+      <Wrapper>
+        <LinkShareDialog linkId="link-1">
+          <Button>Open</Button>
+        </LinkShareDialog>
+      </Wrapper>,
+    );
+
+    fireEvent.click(screen.getByText("Open"));
+    await waitFor(() => screen.getByText("Acme Corp"));
+
+    const dialog = screen.getByRole("dialog");
+    const inactiveLabel = within(dialog).getByText("Inactive");
+    const toggle = within(inactiveLabel.parentElement as HTMLElement).getByRole("switch");
+    fireEvent.click(toggle);
+
+    await waitFor(() => {
+      expect(api.updateLink).toHaveBeenCalledWith("link-1", { status: "active" });
+      expect(toast.error).toHaveBeenCalled();
+    });
+    const [[message]] = vi.mocked(toast.error).mock.calls;
+    expect(String(message)).toMatch(/share link limit|Failed to save/i);
+  });
+
+  it("surfaces plan_feature_watermark when updateLinkFull races past a stale client gate", async () => {
+    const { toast } = await import("sonner");
+    const { ApiError } = await import("@/lib/apiClient");
+    // Client still thinks watermark is allowed (billing lag); server rejects re-enable.
+    vi.mocked(api.getBillingInfo).mockResolvedValue({
+      plan: "free",
+      period: "monthly",
+      trialExpired: false,
+      storageUsed: 0,
+      storageLimit: 1 << 30,
+      linksUsed: 0,
+      linksLimit: 20,
+      roomsUsed: 0,
+      roomsLimit: 1,
+      seatsUsed: 1,
+      seatsLimit: 1,
+      customDomainEnabled: false,
+      watermarkEnabled: true,
+      ndaEnabled: false,
+      visitorAskAiEnabled: false,
+    });
+    vi.mocked(api.updateLinkFull).mockRejectedValue(
+      new ApiError({
+        status: 403,
+        code: "plan_feature_watermark",
+        message: "watermark not available on this plan",
+        requestId: "r-wm-race",
+      }),
+    );
+
+    render(
+      <Wrapper>
+        <LinkShareDialog linkId="link-1">
+          <Button>Open</Button>
+        </LinkShareDialog>
+      </Wrapper>,
+    );
+
+    fireEvent.click(screen.getByText("Open"));
+    await waitFor(() => screen.getByText("Acme Corp"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Save link settings" }));
+
+    await waitFor(() => {
+      expect(api.updateLinkFull).toHaveBeenCalled();
+      expect(toast.error).toHaveBeenCalled();
+    });
+    const [[message]] = vi.mocked(toast.error).mock.calls;
+    expect(String(message)).toMatch(/Watermark and viewer protection|Failed to save/i);
   });
 });

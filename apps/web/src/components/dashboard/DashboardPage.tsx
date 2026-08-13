@@ -16,6 +16,7 @@ import { useReducedMotion } from "@/hooks/useReducedMotion";
 import { useAsyncData } from "@/hooks/useAsyncData";
 import { api } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/apiErrors";
+import { usageAtCap } from "@/lib/planQuota";
 import { useRadarStore } from "@/stores/radarStore";
 import type { ActionStatus } from "@/types";
 import {
@@ -53,6 +54,13 @@ export function DashboardPage() {
       api.getRadar(circleExplicit && circle ? { circle } : undefined),
     [circleExplicit, circle],
   );
+  const { data: billing } = useAsyncData(
+    () => api.getBillingInfo().catch(() => null),
+    [],
+  );
+  const roomsAtCap = billing
+    ? usageAtCap(billing.roomsUsed, billing.roomsLimit)
+    : false;
 
   const feed = useMemo(() => {
     const base = feedOverride ?? data;
@@ -238,6 +246,7 @@ export function DashboardPage() {
             onSelect={(item) => setSelectedId(item.id)}
             onPrimary={handlePrimary}
             onStatusChange={handleStatusChange}
+            roomsAtCap={roomsAtCap}
           />
         </div>
 

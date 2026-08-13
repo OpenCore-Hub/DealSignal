@@ -3,7 +3,6 @@ import type {
   AccessRule,
   ActionItem,
   Activity,
-  BillingInfo,
   Contact,
   DealRoom,
   DealRoomAccessPolicy,
@@ -74,11 +73,15 @@ import {
   toWorkspaceMembers,
   toWorkspaceSettings,
   toWorkspaceViewerDomain,
+  toBillingInfo,
+  toBillingPlansResponse,
   type BackendIntegrationStatus,
   type BackendOutboundWebhook,
   type BackendWorkspaceMember,
   type BackendWorkspaceSettings,
   type BackendWorkspaceViewerDomain,
+  type BackendBillingInfo,
+  type BackendBillingPlansResponse,
   type UpdateLinkPayload,
 } from "@/lib/apiAdapters";
 import {
@@ -721,6 +724,11 @@ export const api = {
   },
   getDocumentById: (id: string) =>
     request<Document>(getWorkspaceSlug(), `/documents/${id}`),
+  checkDocumentExists: (filename: string) =>
+    request<{ exists: boolean; document?: { id: string; title: string } }>(
+      getWorkspaceSlug(),
+      `/documents/exists?filename=${encodeURIComponent(filename)}`,
+    ),
   deleteDocument: (id: string) =>
     request<void>(getWorkspaceSlug(), `/documents/${id}`, { method: "DELETE" }),
   getDocumentDeleteImpact: (id: string) =>
@@ -1381,6 +1389,7 @@ export const api = {
         ask_ai_monthly_used?: number;
         ask_ai_monthly_limit?: number;
         ask_ai_quota_exceeded?: boolean;
+        ask_ai_included?: boolean;
         ask_ai_entitled?: boolean;
         formal_entitled?: boolean;
       };
@@ -1416,6 +1425,7 @@ export const api = {
         ask_ai_monthly_used: number;
         ask_ai_monthly_limit: number;
         ask_ai_quota_exceeded: boolean;
+        ask_ai_included?: boolean;
         ask_ai_entitled?: boolean;
         formal_entitled?: boolean;
       };
@@ -2122,7 +2132,39 @@ export const api = {
   deleteWorkspaceViewerDomain: () =>
     request<void>(getWorkspaceSlug(), "/viewer-domain", { method: "DELETE" }),
 
-  getBillingInfo: () => request<BillingInfo>(getWorkspaceSlug(), "/billing"),
+  getBillingInfo: async () => {
+    const backend = await request<BackendBillingInfo>(getWorkspaceSlug(), "/billing");
+    return toBillingInfo(backend);
+  },
+
+  getBillingPlans: async () => {
+    const backend = await request<BackendBillingPlansResponse>(
+      getWorkspaceSlug(),
+      "/billing/plans",
+    );
+    return toBillingPlansResponse(backend);
+  },
+
+  changeBillingPlan: async (planCode: string, period: "monthly" | "yearly" = "monthly") => {
+    const backend = await request<BackendBillingInfo>(getWorkspaceSlug(), "/billing/plan", {
+      method: "PUT",
+      body: JSON.stringify({ plan_code: planCode, period }),
+    });
+    return toBillingInfo(backend);
+  },
+
+  createBillingCheckout: async (planCode: string, period: "monthly" | "yearly" = "monthly") => {
+    return request<{ url: string }>(getWorkspaceSlug(), "/billing/checkout", {
+      method: "POST",
+      body: JSON.stringify({ plan_code: planCode, period }),
+    });
+  },
+
+  createBillingPortal: async () => {
+    return request<{ url: string }>(getWorkspaceSlug(), "/billing/portal", {
+      method: "POST",
+    });
+  },
 
   getIntegrations: async () => {
     const backend = await request<BackendIntegrationStatus>(

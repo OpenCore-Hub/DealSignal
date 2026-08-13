@@ -6,17 +6,20 @@ import { I18nextProvider, initReactI18next } from "react-i18next";
 import i18n from "i18next";
 import { NewDealRoomPage } from "./new";
 import { toast } from "sonner";
+import { ApiError } from "@/lib/apiClient";
 import type { DealRoomTemplate, DealRoom } from "@/types";
 
-const { getDealRoomTemplatesMock, createDealRoomMock } = vi.hoisted(() => ({
+const { getDealRoomTemplatesMock, createDealRoomMock, getBillingInfoMock } = vi.hoisted(() => ({
   getDealRoomTemplatesMock: vi.fn(),
   createDealRoomMock: vi.fn(),
+  getBillingInfoMock: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({
   api: {
     getDealRoomTemplates: getDealRoomTemplatesMock,
     createDealRoom: createDealRoomMock,
+    getBillingInfo: getBillingInfoMock,
   },
 }));
 
@@ -82,6 +85,8 @@ const resources = {
         descriptionPlaceholder: "Describe the purpose",
         enableNda: "Enable NDA",
         enableNdaDescription: "Require NDA signature before access",
+        ndaPlanRequired: "NDA requires Business or higher",
+        roomLimitReached: "You've reached the data room limit for your plan. Upgrade to create more.",
         folders: "Folder structure",
         recommendedFiles: "Recommended files",
         defaultPermission: "Default permission",
@@ -102,7 +107,14 @@ const resources = {
     },
     common: {
       retry: "Retry",
-      error: { loadFailed: "Failed to load" },
+      error: {
+        loadFailed: "Failed to load",
+        saveFailed: "Failed to save",
+        codes: {
+          plan_limit_rooms: "You've reached the data room limit for your plan. Upgrade to create more.",
+          plan_feature_nda: "NDA requirements are not available on your plan. Upgrade to Business or higher.",
+        },
+      },
     },
   },
 };
@@ -143,9 +155,27 @@ describe("NewDealRoomPage", () => {
   beforeEach(() => {
     getDealRoomTemplatesMock.mockReset();
     createDealRoomMock.mockReset();
+    getBillingInfoMock.mockReset();
     vi.mocked(toast.success).mockClear();
     vi.mocked(toast.error).mockClear();
     getDealRoomTemplatesMock.mockResolvedValue({ data: mockTemplates });
+    getBillingInfoMock.mockResolvedValue({
+      plan: "trial",
+      period: "monthly",
+      trialExpired: false,
+      storageUsed: 0,
+      storageLimit: 0,
+      linksUsed: 0,
+      linksLimit: 0,
+      roomsUsed: 0,
+      roomsLimit: 0,
+      seatsUsed: 1,
+      seatsLimit: 10,
+      customDomainEnabled: true,
+      watermarkEnabled: true,
+      ndaEnabled: true,
+      visitorAskAiEnabled: true,
+    });
 
     Object.defineProperty(window, "matchMedia", {
       writable: true,
@@ -224,6 +254,83 @@ describe("NewDealRoomPage", () => {
     expect(toast.success).toHaveBeenCalledWith("Data room created");
     await waitFor(() => {
       expect(screen.getByTestId("location")).toHaveTextContent("/acme/deal-rooms/room-1");
+    });
+  });
+
+  it("disables create and shows hint when room quota is exhausted", async () => {
+    getBillingInfoMock.mockResolvedValue({
+      plan: "free",
+      period: "monthly",
+      trialExpired: false,
+      storageUsed: 0,
+      storageLimit: 1,
+      linksUsed: 0,
+      linksLimit: 20,
+      roomsUsed: 1,
+      roomsLimit: 1,
+      seatsUsed: 1,
+      seatsLimit: 1,
+      customDomainEnabled: false,
+      watermarkEnabled: false,
+      ndaEnabled: false,
+      visitorAskAiEnabled: false,
+    });
+    await renderPage();
+    await waitFor(() => {
+      expect(screen.getByTestId("new-room-limit-hint")).toBeInTheDocument();
+    });
+    expect(screen.getByRole("button", { name: /create data room/i })).toBeDisabled();
+  });
+
+  it("locks NDA off when the plan lacks NDA", async () => {
+    getBillingInfoMock.mockResolvedValue({
+      plan: "free",
+      period: "monthly",
+      trialExpired: false,
+      storageUsed: 0,
+      storageLimit: 1,
+      linksUsed: 0,
+      linksLimit: 20,
+      roomsUsed: 0,
+      roomsLimit: 1,
+      seatsUsed: 1,
+      seatsLimit: 1,
+      customDomainEnabled: false,
+      watermarkEnabled: false,
+      ndaEnabled: false,
+      visitorAskAiEnabled: false,
+    });
+    await renderPage();
+    await waitFor(() => {
+      expect(screen.getByText("Series A")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByText("Series A"));
+    const ndaSwitch = await screen.findByRole("switch", { name: /enable nda/i });
+    await waitFor(() => {
+      expect(ndaSwitch).toBeDisabled();
+      expect(ndaSwitch).not.toBeChecked();
+    });
+    expect(screen.getByText(/nda requires business or higher/i)).toBeInTheDocument();
+  });
+
+  it("surfaces plan_limit_rooms from the API via toast", async () => {
+    createDealRoomMock.mockRejectedValueOnce(
+      new ApiError({
+        status: 403,
+        code: "plan_limit_rooms",
+        message: "data room limit reached for this plan",
+        requestId: "req_rooms",
+      }),
+    );
+    await renderPage();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /create data room/i })).toBeEnabled();
+    });
+    fireEvent.click(screen.getByRole("button", { name: /create data room/i }));
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith(
+        "You've reached the data room limit for your plan. Upgrade to create more.",
+      );
     });
   });
 

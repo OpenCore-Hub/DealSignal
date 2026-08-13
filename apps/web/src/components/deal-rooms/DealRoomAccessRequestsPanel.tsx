@@ -54,6 +54,7 @@ export function DealRoomAccessRequestsPanel({
     error,
     refetch,
   } = useAsyncData(async () => {
+    if (!canWrite) return [];
     // Room membership requests + deal-room-scoped link inbox (creator-only emails).
     const [roomRes, pendingLinkRes] = await Promise.all([
       api.getDealRoomAccessRequests(roomId),
@@ -81,7 +82,7 @@ export function DealRoomAccessRequestsPanel({
     }));
 
     return [...roomPending, ...linkPending];
-  }, [roomId]);
+  }, [roomId, canWrite]);
 
   const pending = requests ?? [];
   const memberCount = useMemo(
@@ -172,6 +173,10 @@ export function DealRoomAccessRequestsPanel({
   );
 
   const activeBusyId = busyId ?? linkBusyId;
+
+  if (!canWrite) {
+    return null;
+  }
 
   if (loading && !requests && !error) {
     return (

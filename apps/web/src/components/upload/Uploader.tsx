@@ -3,15 +3,20 @@ import { UploadSimple, File, X, Check, Warning } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
+import { UsageBar } from "@/components/common/UsageBar";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import {
   UploadCancelledError,
   useDocumentUploadConflict,
 } from "@/hooks/useDocumentUploadConflict";
+import { api } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/apiErrors";
+import { formatFileSize } from "@/lib/formatters";
+import { usageAtCap } from "@/lib/planQuota";
 import { filterUploadSelection, notifyUploadSelectionFiltered } from "@/lib/uploadFileFilters";
 import { dispatchDocumentsUploaded } from "@/lib/documentsUploadedEvent";
+import { useAsyncData } from "@/hooks/useAsyncData";
 import type { Document } from "@/types";
 
 interface UploadFile {
@@ -37,6 +42,13 @@ export function Uploader({
   const { t } = useTranslation("documents");
   const { uploadDocument, conflictDialog, isAwaitingConflict } =
     useDocumentUploadConflict({ onAwaitingConflictChange });
+  const { data: billing } = useAsyncData(() => api.getBillingInfo().catch(() => null), []);
+  const storageAtCap = billing
+    ? usageAtCap(billing.storageUsed, billing.storageLimit)
+    : false;
+  const documentsAtCap = billing
+    ? usageAtCap(billing.documentsUsed ?? 0, billing.documentsLimit ?? 0)
+    : false;
   const [isDragging, setIsDragging] = useState(false);
   const [files, setFiles] = useState<UploadFile[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -223,6 +235,32 @@ export function Uploader({
 
   return (
     <div className="flex flex-col gap-4">
+      {billing ? (
+        <div className="space-y-1" data-testid="upload-storage-usage">
+          <UsageBar
+            label={t("upload.storageUsage")}
+            current={billing.storageUsed}
+            max={billing.storageLimit}
+            formatCurrent={formatFileSize(billing.storageUsed)}
+            formatMax={formatFileSize(billing.storageLimit)}
+          />
+          {storageAtCap ? (
+            <p className="text-caption text-muted-foreground" data-testid="upload-storage-limit-hint">
+              {t("upload.storageLimitReached")}
+            </p>
+          ) : null}
+          <UsageBar
+            label={t("upload.documentsUsage")}
+            current={billing.documentsUsed ?? 0}
+            max={billing.documentsLimit ?? 0}
+          />
+          {documentsAtCap ? (
+            <p className="text-caption text-muted-foreground" data-testid="upload-documents-limit-hint">
+              {t("upload.documentsLimitReached")}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
       <div
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}

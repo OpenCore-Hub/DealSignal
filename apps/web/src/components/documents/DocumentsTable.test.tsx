@@ -148,6 +148,8 @@ const resources = {
         description: "“{{name}}” will move to Archived in your library.",
         visitorRevoke:
           "Visitors will no longer be able to open this document through existing share links.",
+        unarchiveDoesNotRestore:
+          "Unarchiving later will not automatically reactivate those share links. Renew them from Links.",
         withLinks_one: "This document is on {{count}} active share link.",
         withLinks_other: "This document is on {{count}} active share links.",
         confirmLoading: "Archiving…",
@@ -413,6 +415,11 @@ describe("DocumentsTable", () => {
     expect(
       within(dialog).getByText(
         "Visitors will no longer be able to open this document through existing share links.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(dialog).getByText(
+        "Unarchiving later will not automatically reactivate those share links. Renew them from Links.",
       ),
     ).toBeInTheDocument();
     await waitFor(() => {

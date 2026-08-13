@@ -411,6 +411,7 @@ export function DocumentsTable({ category }: DocumentsTableProps) {
     workspaceSlug,
     navigate,
     refetch,
+    canWrite,
     onAddToDealRoom: canWrite ? setDocToAddToRoom : undefined,
     onArchive: canWrite ? setDocToArchive : undefined,
     onShare: canWrite && !isAgreement ? setDocToShare : undefined,
@@ -903,6 +904,7 @@ export function DocumentsTable({ category }: DocumentsTableProps) {
                 {t("documents:archive.description", { name: docToArchive?.title ?? "" })}
               </span>
               <span className="block">{t("documents:archive.visitorRevoke")}</span>
+              <span className="block">{t("documents:archive.unarchiveDoesNotRestore")}</span>
               {(archiveImpact?.activeLinkCount ?? 0) > 0 ? (
                 <span className="block text-destructive">
                   {t("documents:archive.withLinks", {

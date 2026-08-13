@@ -181,8 +181,16 @@ export function draftFromRoomAccessPolicy(policy: DealRoomAccessPolicy | null | 
  */
 export function hydrateCreateDraftFromRoomPolicy(
   policy: DealRoomAccessPolicy | null | undefined,
+  options?: {
+    visitorAskAiEnabled?: boolean;
+    watermarkEnabled?: boolean;
+    ndaEnabled?: boolean;
+    accessControlsEnabled?: boolean;
+  },
 ): DraftLink {
   const draft = buildDraft(null, []);
+  const visitorAskExperience =
+    options?.visitorAskAiEnabled === false ? "host_only" : "ai_supervised";
   return clampDraftToRoomPolicy(
     {
       ...draft,
@@ -190,7 +198,17 @@ export function hydrateCreateDraftFromRoomPolicy(
       allowedViewers: [],
       folderScopeMode: "full",
       folderPaths: [],
-      visitorAskExperience: "ai_supervised",
+      visitorAskExperience,
+      // Plan-gated create defaults: never start ON when the catalog denies the feature.
+      watermarkEnabled:
+        options?.watermarkEnabled === false ? false : draft.watermarkEnabled,
+      enableScreenshotProtection:
+        options?.watermarkEnabled === false ? false : draft.enableScreenshotProtection,
+      requireNda: options?.ndaEnabled === false ? false : draft.requireNda,
+      ndaDocumentId: options?.ndaEnabled === false ? "" : draft.ndaDocumentId,
+      ndaTemplateId: options?.ndaEnabled === false ? "" : draft.ndaTemplateId,
+      requireEmailVerification:
+        options?.accessControlsEnabled === false ? false : draft.requireEmailVerification,
     },
     policy,
   );

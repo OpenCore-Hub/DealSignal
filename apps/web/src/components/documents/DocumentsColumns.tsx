@@ -66,6 +66,11 @@ interface UseDocumentColumnsOptions {
   /** Opens library Share dialog (create + copy). Agreements omit this. */
   onShare?: (doc: DocumentRow) => void;
   onDelete?: (doc: DocumentRow) => void;
+  /**
+   * Workspace content write (owner/admin/member). Guests keep preview/download.
+   * Default true so agreement rows that omit onShare still get Create link.
+   */
+  canWrite?: boolean;
   returnTo?: string;
   returnLabel?: string;
 }
@@ -78,6 +83,7 @@ export function useDocumentColumns({
   onArchive,
   onShare,
   onDelete,
+  canWrite = true,
   returnTo,
   returnLabel,
 }: UseDocumentColumnsOptions) {
@@ -209,16 +215,21 @@ export function useDocumentColumns({
           const archived = doc.status === "archived";
           const downloadReady = doc.status === "ready";
           // §3.2: Share stays visible while processing/archived; disabled + title copy (not hidden).
-          const showShareCta = Boolean(onShare);
+          const showShareCta = canWrite && Boolean(onShare);
           const shareDisabled = busy || archived || doc.status !== "ready";
           const shareTitle = archived
             ? t("documents:columns.archivedActionDisabled")
             : doc.status !== "ready"
               ? t("documents:share.notReady")
               : undefined;
-          const showAddToDealRoom = Boolean(onAddToDealRoom) && canAddDocumentToDealRoom(doc.category);
+          const showAddToDealRoom =
+            canWrite && Boolean(onAddToDealRoom) && canAddDocumentToDealRoom(doc.category);
+          const showCreateLink = canWrite && !onShare;
+          const showArchive = canWrite;
+          const showDelete = canWrite;
 
           const handleArchive = async () => {
+            if (!canWrite) return;
             if (!archived && onArchive) {
               onArchive(doc);
               return;
@@ -226,7 +237,12 @@ export function useDocumentColumns({
             try {
               if (archived) {
                 await api.unarchiveDocument(doc.id);
-                toast.success(t("documents:columns.unarchived"));
+                toast.success(t("documents:columns.unarchived"), {
+                  action: {
+                    label: t("documents:columns.unarchivedRenewAction"),
+                    onClick: () => navigate(`/${workspaceSlug}/links`),
+                  },
+                });
               } else {
                 // Fallback when parent omits confirm (should not happen in DocumentsTable).
                 await api.archiveDocument(doc.id);
@@ -303,12 +319,12 @@ export function useDocumentColumns({
               </Button>
               <RowActions
                 actions={[
-                  ...(onShare
+                  ...(showShareCta
                     ? [
                         {
                           label: t("documents:share.cta"),
                           icon: <ShareNetwork size={16} />,
-                          onClick: () => onShare(doc),
+                          onClick: () => onShare?.(doc),
                           disabled: busy || archived || doc.status !== "ready",
                           title: archived
                             ? t("documents:columns.archivedActionDisabled")
@@ -317,18 +333,20 @@ export function useDocumentColumns({
                               : undefined,
                         },
                       ]
-                    : [
-                        {
-                          label: t("common:createLink"),
-                          icon: <LinkIcon size={16} />,
-                          onClick: () =>
-                            navigate(`/${workspaceSlug}/links/new?documentId=${doc.id}`),
-                          disabled: busy || archived,
-                          title: archived
-                            ? t("documents:columns.archivedActionDisabled")
-                            : undefined,
-                        },
-                      ]),
+                    : showCreateLink
+                      ? [
+                          {
+                            label: t("common:createLink"),
+                            icon: <LinkIcon size={16} />,
+                            onClick: () =>
+                              navigate(`/${workspaceSlug}/links/new?documentId=${doc.id}`),
+                            disabled: busy || archived,
+                            title: archived
+                              ? t("documents:columns.archivedActionDisabled")
+                              : undefined,
+                          },
+                        ]
+                      : []),
                   ...(showAddToDealRoom
                     ? [
                         {
@@ -340,22 +358,26 @@ export function useDocumentColumns({
                         },
                       ]
                     : []),
-                  {
-                    label: archived ? t("common:unarchive") : t("common:archive"),
-                    icon: archived ? (
-                      <ArrowCounterClockwise size={16} />
-                    ) : (
-                      <Archive size={16} />
-                    ),
-                    onClick: () => {
-                      void handleArchive();
-                    },
-                    disabled: busy || doc.status === "failed",
-                    title:
-                      busy || doc.status === "failed"
-                        ? t("documents:columns.archiveDisabled")
-                        : undefined,
-                  },
+                  ...(showArchive
+                    ? [
+                        {
+                          label: archived ? t("common:unarchive") : t("common:archive"),
+                          icon: archived ? (
+                            <ArrowCounterClockwise size={16} />
+                          ) : (
+                            <Archive size={16} />
+                          ),
+                          onClick: () => {
+                            void handleArchive();
+                          },
+                          disabled: busy || doc.status === "failed",
+                          title:
+                            busy || doc.status === "failed"
+                              ? t("documents:columns.archiveDisabled")
+                              : undefined,
+                        },
+                      ]
+                    : []),
                   {
                     label: t("common:download"),
                     icon: <DownloadSimple size={16} />,
@@ -369,14 +391,18 @@ export function useDocumentColumns({
                         ? undefined
                         : t("documents:columns.downloadNotReady"),
                   },
-                  {
-                    label: t("common:delete"),
-                    icon: <Trash size={16} />,
-                    onClick: () => onDelete?.(doc),
-                    disabled: busy || !onDelete,
-                    title: busy ? t("documents:columns.deleteBusy") : undefined,
-                    destructive: true,
-                  },
+                  ...(showDelete
+                    ? [
+                        {
+                          label: t("common:delete"),
+                          icon: <Trash size={16} />,
+                          onClick: () => onDelete?.(doc),
+                          disabled: busy || !onDelete,
+                          title: busy ? t("documents:columns.deleteBusy") : undefined,
+                          destructive: true,
+                        },
+                      ]
+                    : []),
                 ]}
               />
             </div>
@@ -393,6 +419,7 @@ export function useDocumentColumns({
       onArchive,
       onShare,
       onDelete,
+      canWrite,
       returnTo,
       returnLabel,
     ],

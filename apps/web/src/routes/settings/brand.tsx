@@ -11,7 +11,7 @@ import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import { useAsyncData } from "@/hooks/useAsyncData";
 import { cn } from "@/lib/utils";
-import type { WorkspaceSettings, WorkspaceViewerDomain } from "@/types";
+import type { BillingInfo, WorkspaceSettings, WorkspaceViewerDomain } from "@/types";
 
 const MAX_LOGO_SIZE = 5 * 1024 * 1024;
 const LOGO_ACCEPT = "image/*,.svg,image/svg+xml";
@@ -38,11 +38,12 @@ export function SettingsBrandPage() {
   const { t } = useTranslation("settings");
   const { t: tc } = useTranslation("common");
   const { data, loading, error, refetch } = useAsyncData(async () => {
-    const [settings, viewerDomain] = await Promise.all([
+    const [settings, viewerDomain, billing] = await Promise.all([
       api.getWorkspaceSettings(),
       api.getWorkspaceViewerDomain(),
+      api.getBillingInfo(),
     ]);
-    return { settings, viewerDomain };
+    return { settings, viewerDomain, billing };
   }, []);
   const [draft, setDraft] = useState<WorkspaceSettings | null>(null);
   const [viewerDomain, setViewerDomain] = useState<WorkspaceViewerDomain | null>(null);
@@ -55,9 +56,14 @@ export function SettingsBrandPage() {
 
   const settings = draft ?? data?.settings ?? null;
   const domain = viewerDomain ?? data?.viewerDomain ?? null;
+  const billing: BillingInfo | null = data?.billing ?? null;
+  // New registration only; grandfathered domains keep verify/remove.
+  const domainAddBlocked =
+    billing != null && !billing.customDomainEnabled && !domain?.status;
+  const brandingBlocked = billing != null && billing.brandingEnabled === false;
 
   const handleSave = async () => {
-    if (!settings) return;
+    if (!settings || brandingBlocked) return;
     setSaving(true);
     try {
       const res = await api.updateWorkspaceSettings(settings);
@@ -71,6 +77,7 @@ export function SettingsBrandPage() {
   };
 
   const handleAddDomain = async () => {
+    if (domainAddBlocked) return;
     const hostname = viewerDraftHost.trim();
     if (!hostname) return;
     setDomainBusy("add");
@@ -134,7 +141,7 @@ export function SettingsBrandPage() {
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !settings) {
+    if (!file || !settings || brandingBlocked) {
       if (fileInputRef.current) fileInputRef.current.value = "";
       return;
     }
@@ -221,7 +228,7 @@ export function SettingsBrandPage() {
             <Label>{t("brand.logo")}</Label>
             <button
               type="button"
-              disabled={uploading}
+              disabled={uploading || brandingBlocked}
               aria-label={uploading ? t("brand.uploading") : t("brand.upload")}
               onClick={() => fileInputRef.current?.click()}
               className={cn(
@@ -256,7 +263,9 @@ export function SettingsBrandPage() {
               tabIndex={-1}
               onChange={handleFileChange}
             />
-            <p className="text-caption text-muted-foreground">{t("brand.hint")}</p>
+            <p className="text-caption text-muted-foreground">
+              {brandingBlocked ? t("brand.brandingPlanRequired") : t("brand.hint")}
+            </p>
           </div>
           <div className="space-y-2">
             <Label htmlFor="brandColor">{t("brand.brandColor")}</Label>
@@ -264,6 +273,7 @@ export function SettingsBrandPage() {
               id="brandColor"
               type="color"
               value={toColorInputValue(settings.brandColor)}
+              disabled={brandingBlocked}
               onChange={(e) => updateField("brandColor", e.target.value)}
             />
           </div>
@@ -275,12 +285,15 @@ export function SettingsBrandPage() {
                   id="viewer-domain"
                   placeholder={t("brand.viewerDomainPlaceholder")}
                   value={viewerDraftHost}
+                  disabled={domainAddBlocked || domainBusy !== null}
                   onChange={(e) => setViewerDraftHost(e.target.value)}
                 />
                 <Button
                   type="button"
                   variant="secondary"
-                  disabled={domainBusy !== null || !viewerDraftHost.trim()}
+                  disabled={
+                    domainAddBlocked || domainBusy !== null || !viewerDraftHost.trim()
+                  }
                   onClick={() => void handleAddDomain()}
                 >
                   {domainBusy === "add" ? t("brand.viewerDomainAdding") : t("brand.viewerDomainAdd")}
@@ -330,9 +343,11 @@ export function SettingsBrandPage() {
                 </div>
               </div>
             )}
-            <p className="text-caption text-muted-foreground">{t("brand.viewerDomainHint")}</p>
+            <p className="text-caption text-muted-foreground">
+              {domainAddBlocked ? t("brand.viewerDomainPlanRequired") : t("brand.viewerDomainHint")}
+            </p>
           </div>
-          <Button onClick={handleSave} disabled={saving}>
+          <Button onClick={handleSave} disabled={saving || brandingBlocked}>
             {saving ? t("brand.saving") : t("brand.save")}
           </Button>
         </CardContent>

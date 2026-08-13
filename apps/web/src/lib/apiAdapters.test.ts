@@ -8,6 +8,7 @@ import {
   toWorkspaceSettings,
   toUpdateWorkspaceSettingsPayload,
   toWorkspaceViewerDomain,
+  toBillingInfo,
 } from "@/lib/apiAdapters";
 import { buildConfigFromPreset } from "@/components/links/link-bundle/pipelineUtils";
 import type { PermissionConfig } from "@/types";
@@ -58,6 +59,7 @@ describe("toCreateLinkPayload", () => {
     const config: PermissionConfig = {
       ...buildConfigFromPreset("public"),
       ndaEnabled: true,
+      visitorAskAiEnabled: true,
       ndaDocumentId: "nda-doc-id",
       requireEmailVerification: false,
       contactIds: ["contact-nda"],
@@ -83,6 +85,7 @@ describe("toCreateLinkPayload", () => {
     const config: PermissionConfig = {
       ...buildConfigFromPreset("public"),
       ndaEnabled: true,
+      visitorAskAiEnabled: true,
       ndaDocumentId: "nda-doc-id",
       contactIds: ["contact-nda"],
     };
@@ -95,6 +98,7 @@ describe("toCreateLinkPayload", () => {
     const config: PermissionConfig = {
       ...buildConfigFromPreset("public"),
       ndaEnabled: true,
+      visitorAskAiEnabled: true,
       ndaTemplateId: "tpl-1",
       ndaDocumentId: "nda-doc-id",
       contactIds: ["contact-nda"],
@@ -388,6 +392,261 @@ describe("workspace member adapters", () => {
       name: "Jane Smith",
       email: "jane@acme.com",
       role: "admin",
+    });
+  });
+});
+
+describe("toBillingInfo", () => {
+  it("maps snake_case bytes and counts from the API", () => {
+    expect(
+      toBillingInfo({
+        plan: "free",
+        period: "monthly",
+        storage_used: 5 * 1024 * 1024,
+        storage_limit: 1073741824,
+        links_used: 3,
+        links_limit: 20,
+        rooms_used: 1,
+        rooms_limit: 1,
+        seats_used: 1,
+        seats_limit: 1,
+        custom_domain_enabled: false,
+      }),
+    ).toEqual({
+      plan: "free",
+      period: "monthly",
+      trialExpired: false,
+      storageUsed: 5 * 1024 * 1024,
+      storageLimit: 1073741824,
+      linksUsed: 3,
+      linksLimit: 20,
+      roomsUsed: 1,
+      roomsLimit: 1,
+      seatsUsed: 1,
+      seatsLimit: 1,
+      documentsUsed: 0,
+      documentsLimit: 0,
+      askAiUsed: 0,
+      askAiLimit: 0,
+      knowledgeAnswersUsed: 0,
+      knowledgeAnswersLimit: 0,
+      maxUploadBytes: 0,
+      customDomainEnabled: false,
+      watermarkEnabled: false,
+      ndaEnabled: false,
+      visitorAskAiEnabled: false,
+      brandingEnabled: false,
+      accessControlsEnabled: false,
+      knowledgeDeskEnabled: false,
+      webhooksEnabled: false,
+      hubspotEnabled: false,
+      dailyDigestEnabled: false,
+      slackAlertsEnabled: false,
+      roomAnalyticsEnabled: false,
+      roomInsightsEnabled: false,
+      formalAskEnabled: false,
+      hasStripeSubscription: false,
+    });
+  });
+
+  it("maps trial expiry fields from snake_case", () => {
+    expect(
+      toBillingInfo({
+        plan: "trial",
+        period: "monthly",
+        trial_expired: true,
+        trial_ends_at: "2026-08-01T00:00:00Z",
+        rooms_limit: 1,
+        custom_domain_enabled: false,
+        watermark_enabled: false,
+        nda_enabled: false,
+        visitor_ask_ai_enabled: false,
+      }),
+    ).toMatchObject({
+      plan: "trial",
+      trialExpired: true,
+      trialEndsAt: "2026-08-01T00:00:00Z",
+      roomsLimit: 1,
+      customDomainEnabled: false,
+      watermarkEnabled: false,
+      ndaEnabled: false,
+      visitorAskAiEnabled: false,
+    });
+  });
+
+  it("maps production GET /billing wire body (active trial + expired trial + missing-row fail-open)", () => {
+    // Mirrors apps/api workspace.Billing JSON tags / TestBillingHTTPGetBilling*.
+    const activeTrial = toBillingInfo({
+      plan: "trial",
+      period: "monthly",
+      trial_expired: false,
+      trial_ends_at: "2026-08-20T00:00:00Z",
+      storage_used: 1024,
+      storage_limit: 0,
+      links_used: 1,
+      links_limit: 0,
+      rooms_used: 0,
+      rooms_limit: 0,
+      seats_used: 0,
+      seats_limit: 10,
+      custom_domain_enabled: true,
+      watermark_enabled: true,
+      nda_enabled: true,
+      visitor_ask_ai_enabled: true,
+    });
+    expect(activeTrial).toEqual({
+      plan: "trial",
+      period: "monthly",
+      trialExpired: false,
+      trialEndsAt: "2026-08-20T00:00:00Z",
+      storageUsed: 1024,
+      storageLimit: 0,
+      linksUsed: 1,
+      linksLimit: 0,
+      roomsUsed: 0,
+      roomsLimit: 0,
+      seatsUsed: 0,
+      seatsLimit: 10,
+      documentsUsed: 0,
+      documentsLimit: 0,
+      askAiUsed: 0,
+      askAiLimit: 0,
+      knowledgeAnswersUsed: 0,
+      knowledgeAnswersLimit: 0,
+      maxUploadBytes: 0,
+      customDomainEnabled: true,
+      watermarkEnabled: true,
+      ndaEnabled: true,
+      visitorAskAiEnabled: true,
+      brandingEnabled: false,
+      accessControlsEnabled: false,
+      knowledgeDeskEnabled: false,
+      webhooksEnabled: false,
+      hubspotEnabled: false,
+      dailyDigestEnabled: false,
+      slackAlertsEnabled: false,
+      roomAnalyticsEnabled: false,
+      roomInsightsEnabled: false,
+      formalAskEnabled: false,
+      hasStripeSubscription: false,
+    });
+
+    const expiredTrial = toBillingInfo({
+      plan: "trial",
+      period: "monthly",
+      trial_expired: true,
+      trial_ends_at: "2026-08-01T00:00:00Z",
+      storage_used: 1024,
+      storage_limit: 1073741824,
+      links_used: 1,
+      links_limit: 20,
+      rooms_used: 0,
+      rooms_limit: 1,
+      seats_used: 0,
+      seats_limit: 1,
+      custom_domain_enabled: false,
+      watermark_enabled: false,
+      nda_enabled: false,
+      visitor_ask_ai_enabled: false,
+    });
+    expect(expiredTrial.trialExpired).toBe(true);
+    expect(expiredTrial.plan).toBe("trial");
+    expect(expiredTrial.roomsLimit).toBe(1);
+    expect(expiredTrial.customDomainEnabled).toBe(false);
+    expect(expiredTrial.visitorAskAiEnabled).toBe(false);
+
+    // Fail-open missing workspace_billing: omitempty drops trial_ends_at.
+    const missingRow = toBillingInfo({
+      plan: "trial",
+      period: "monthly",
+      trial_expired: false,
+      storage_used: 0,
+      storage_limit: 0,
+      links_used: 0,
+      links_limit: 0,
+      rooms_used: 0,
+      rooms_limit: 0,
+      seats_used: 0,
+      seats_limit: 10,
+      custom_domain_enabled: true,
+      watermark_enabled: true,
+      nda_enabled: true,
+      visitor_ask_ai_enabled: true,
+    });
+    expect(missingRow.trialEndsAt).toBeUndefined();
+    expect(missingRow.trialExpired).toBe(false);
+    expect(missingRow.plan).toBe("trial");
+    expect(missingRow.seatsLimit).toBe(10);
+  });
+
+  it("accepts camelCase or { data } wrappers from mocks", () => {
+    expect(
+      toBillingInfo({
+        data: {
+          plan: "pro",
+          period: "annual",
+          storageUsed: 10,
+          linksUsed: 1,
+          roomsUsed: 1,
+          seatsUsed: 2,
+          seatsLimit: 3,
+          customDomainEnabled: true,
+          watermarkEnabled: true,
+          ndaEnabled: true,
+          visitorAskAiEnabled: true,
+        },
+      }),
+    ).toMatchObject({
+      plan: "pro",
+      period: "annual",
+      trialExpired: false,
+      storageUsed: 10,
+      linksUsed: 1,
+      roomsUsed: 1,
+      seatsUsed: 2,
+      seatsLimit: 3,
+      customDomainEnabled: true,
+      watermarkEnabled: true,
+      ndaEnabled: true,
+      visitorAskAiEnabled: true,
+    });
+  });
+
+  it("coerces missing or non-numeric usage to 0 so UsageBar never sees NaN", () => {
+    expect(toBillingInfo({})).toEqual({
+      plan: "free",
+      period: "monthly",
+      trialExpired: false,
+      storageUsed: 0,
+      storageLimit: 0,
+      linksUsed: 0,
+      linksLimit: 0,
+      roomsUsed: 0,
+      roomsLimit: 0,
+      seatsUsed: 0,
+      seatsLimit: 0,
+      documentsUsed: 0,
+      documentsLimit: 0,
+      askAiUsed: 0,
+      askAiLimit: 0,
+      knowledgeAnswersUsed: 0,
+      knowledgeAnswersLimit: 0,
+      maxUploadBytes: 0,
+      customDomainEnabled: false,
+      watermarkEnabled: false,
+      ndaEnabled: false,
+      visitorAskAiEnabled: false,
+      brandingEnabled: false,
+      accessControlsEnabled: false,
+      knowledgeDeskEnabled: false,
+      webhooksEnabled: false,
+      hubspotEnabled: false,
+      dailyDigestEnabled: false,
+      slackAlertsEnabled: false,
+      roomAnalyticsEnabled: false,
+      roomInsightsEnabled: false,
+      formalAskEnabled: false,
+      hasStripeSubscription: false,
     });
   });
 });

@@ -48,6 +48,8 @@ const resources = {
         emailMismatch:
           "You're signed in with a different email than this invitation. Sign out and continue with the invited email.",
         emailMismatchDetail: "You're signed in as {{signedIn}}, but this invitation is for {{invited}}.",
+        planLimitSeats:
+          "This workspace has no available team seats. Ask an admin to free a seat or upgrade the plan, then try again.",
         createAccount: "Create account",
         signIn: "Sign in",
         openWorkspace: "Open workspace",
@@ -205,5 +207,29 @@ describe("AcceptInvitationPage", () => {
       expect(screen.getByText("Could not join")).toBeInTheDocument();
     });
     expect(screen.queryByText(/reserved delivery email/i)).not.toBeInTheDocument();
+  });
+
+  it("surfaces plan_limit_seats with invitee-facing copy", async () => {
+    document.cookie = "auth_session=1; path=/";
+    previewWorkspaceInvitationMock.mockResolvedValue(pendingPreview);
+    getMeMock.mockResolvedValue({ id: "u1", email: "guest@example.test" });
+    acceptWorkspaceInvitationMock.mockRejectedValue(
+      new ApiError({
+        status: 403,
+        code: "plan_limit_seats",
+        message: "internal seat limit reached for this plan",
+        requestId: "r1",
+      }),
+    );
+
+    await renderPage("/invitations/tok-1/accept");
+    await waitFor(() => {
+      expect(
+        screen.getByText(
+          "This workspace has no available team seats. Ask an admin to free a seat or upgrade the plan, then try again.",
+        ),
+      ).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/invite more members/i)).not.toBeInTheDocument();
   });
 });

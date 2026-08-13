@@ -8,6 +8,7 @@ import { createTestI18n } from "@/i18n/test-utils";
 import { ApiError } from "@/lib/apiClient";
 
 const navigateMock = vi.fn();
+const setCurrentWorkspaceMock = vi.fn();
 const { createWorkspaceMock } = vi.hoisted(() => ({
   createWorkspaceMock: vi.fn(),
 }));
@@ -15,6 +16,13 @@ const { createWorkspaceMock } = vi.hoisted(() => ({
 vi.mock("@/lib/api", () => ({
   api: {
     createWorkspace: createWorkspaceMock,
+  },
+}));
+
+vi.mock("@/stores/uiStore", () => ({
+  useUIStore: (selector?: (state: { setCurrentWorkspace: (w: unknown) => void }) => unknown) => {
+    const state = { setCurrentWorkspace: setCurrentWorkspaceMock };
+    return selector ? selector(state) : state;
   },
 }));
 
@@ -63,6 +71,7 @@ async function renderPage() {
 describe("CreateWorkspacePage", () => {
   beforeEach(() => {
     navigateMock.mockClear();
+    setCurrentWorkspaceMock.mockClear();
     createWorkspaceMock.mockReset();
   });
 
@@ -167,6 +176,13 @@ describe("CreateWorkspacePage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create workspace" }));
 
     await waitFor(() => {
+      expect(setCurrentWorkspaceMock).toHaveBeenCalledWith({
+        id: "ws-1",
+        slug: "acme",
+        name: "Acme",
+        brand_color: "#0055ff",
+        created_at: "2026-08-12T00:00:00Z",
+      });
       expect(navigateMock).toHaveBeenCalledWith("/acme/dashboard", { replace: true });
     });
   });

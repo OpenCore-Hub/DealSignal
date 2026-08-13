@@ -36,6 +36,9 @@ const SettingsBrandPage = lazy(() => import("@/routes/settings/brand").then((m) 
 const SettingsMembersPage = lazy(() => import("@/routes/settings/members").then((m) => ({ default: m.SettingsMembersPage })));
 const SettingsIntegrationsPage = lazy(() => import("@/routes/settings/integrations").then((m) => ({ default: m.SettingsIntegrationsPage })));
 const SettingsBillingPage = lazy(() => import("@/routes/settings/billing").then((m) => ({ default: m.SettingsBillingPage })));
+const SettingsBillingPlansPage = lazy(() =>
+  import("@/routes/settings/billing-plans").then((m) => ({ default: m.SettingsBillingPlansPage })),
+);
 const SettingsSecurityPage = lazy(() => import("@/routes/settings/security").then((m) => ({ default: m.SettingsSecurityPage })));
 const SettingsCompliancePage = lazy(() => import("@/routes/settings/compliance").then((m) => ({ default: m.SettingsCompliancePage })));
 const SettingsLanguagePage = lazy(() => import("@/routes/settings/language").then((m) => ({ default: m.SettingsLanguagePage })));
@@ -258,6 +261,7 @@ export const router = createBrowserRouter([
           { path: "members", element: <SettingsMembersPage /> },
           { path: "integrations", element: <SettingsIntegrationsPage /> },
           { path: "billing", element: <SettingsBillingPage /> },
+          { path: "billing/plans", element: <SettingsBillingPlansPage /> },
           { path: "security", element: <SettingsSecurityPage /> },
           { path: "compliance", element: <SettingsCompliancePage /> },
         ],

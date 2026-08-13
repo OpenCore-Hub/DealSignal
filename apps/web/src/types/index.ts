@@ -851,7 +851,7 @@ export interface DealRoomKnowledgeOpsSummary {
   /** Gold-review queue by status (ceiling Phase O). */
   evalCandidatesByStatus?: Record<string, number>;
   pendingEvalCandidates?: number;
-  answersQuota: { used: number; limit: number; windowHours: number };
+  answersQuota: { used: number; limit: number; included?: boolean; windowHours: number };
   retentionDays: number;
   coldArchiveCount: number;
   roomCorpusFingerprint?: string;
@@ -997,12 +997,72 @@ export interface WorkspaceViewerDomain {
 export interface BillingInfo {
   plan: string;
   period: string;
+  trialExpired: boolean;
+  trialEndsAt?: string;
   storageUsed: number;
   storageLimit: number;
   linksUsed: number;
   linksLimit: number;
   roomsUsed: number;
   roomsLimit: number;
+  seatsUsed: number;
+  seatsLimit: number;
+  documentsUsed?: number;
+  documentsLimit?: number;
+  askAiUsed?: number;
+  askAiLimit?: number;
+  knowledgeAnswersUsed?: number;
+  knowledgeAnswersLimit?: number;
+  maxUploadBytes?: number;
+  customDomainEnabled: boolean;
+  watermarkEnabled: boolean;
+  ndaEnabled: boolean;
+  visitorAskAiEnabled: boolean;
+  brandingEnabled?: boolean;
+  accessControlsEnabled?: boolean;
+  knowledgeDeskEnabled?: boolean;
+  webhooksEnabled?: boolean;
+  hubspotEnabled?: boolean;
+  dailyDigestEnabled?: boolean;
+  slackAlertsEnabled?: boolean;
+  roomAnalyticsEnabled?: boolean;
+  roomInsightsEnabled?: boolean;
+  formalAskEnabled?: boolean;
+  billingStatus?: string;
+  hasStripeSubscription?: boolean;
+  currentPeriodEnd?: string;
+}
+
+/** Purchasable plan from GET /billing/plans (server catalog; trial is not listed). */
+export interface BillingPlanOffer {
+  code: string;
+  internalSeats: number;
+  storageBytes: number;
+  documents?: number;
+  links: number;
+  rooms: number;
+  maxUploadBytes?: number;
+  visitorAskAiMonthly?: number;
+  customDomain: boolean;
+  watermark: boolean;
+  nda: boolean;
+  visitorAskAi: boolean;
+  branding?: boolean;
+  accessControls?: boolean;
+  formalAsk?: boolean;
+  priceMonthlyUsd: number;
+  customPricing: boolean;
+  highlighted: boolean;
+}
+
+export interface BillingPlansResponse {
+  currentPlan: string;
+  currentPeriod: string;
+  trialExpired: boolean;
+  trialEndsAt?: string;
+  billingStatus?: string;
+  hasStripeSubscription?: boolean;
+  plans: BillingPlanOffer[];
 }
 
 export interface IntegrationStatus {

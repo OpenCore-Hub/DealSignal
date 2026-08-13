@@ -12,6 +12,7 @@ const mockFns = vi.hoisted(() => ({
   getRadar: vi.fn(),
   getRadarEvidence: vi.fn(),
   updateRadarItem: vi.fn(),
+  getBillingInfo: vi.fn(),
   navigate: vi.fn(),
 }));
 
@@ -221,6 +222,23 @@ beforeEach(() => {
     },
   });
   mockFns.updateRadarItem.mockResolvedValue({});
+  mockFns.getBillingInfo.mockResolvedValue({
+    plan: "trial",
+    period: "monthly",
+    trialExpired: false,
+    storageUsed: 0,
+    storageLimit: 0,
+    linksUsed: 0,
+    linksLimit: 0,
+    roomsUsed: 0,
+    roomsLimit: 0,
+    seatsUsed: 1,
+    seatsLimit: 10,
+    customDomainEnabled: true,
+    watermarkEnabled: true,
+    ndaEnabled: true,
+    visitorAskAiEnabled: true,
+  });
   Object.defineProperty(window, "matchMedia", {
     writable: true,
     value: vi.fn().mockImplementation((query: string) => ({
@@ -296,6 +314,29 @@ describe("DashboardPage inbox", () => {
       canWrite: false,
       canManage: false,
       isGuest: true,
+    });
+    await renderPage();
+    expect(await screen.findByTestId("radar-queue")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Create data room" })).not.toBeInTheDocument();
+  });
+
+  it("hides create data room when room quota is exhausted", async () => {
+    mockFns.getBillingInfo.mockResolvedValue({
+      plan: "free",
+      period: "monthly",
+      trialExpired: false,
+      storageUsed: 0,
+      storageLimit: 1,
+      linksUsed: 0,
+      linksLimit: 20,
+      roomsUsed: 1,
+      roomsLimit: 1,
+      seatsUsed: 1,
+      seatsLimit: 1,
+      customDomainEnabled: false,
+      watermarkEnabled: false,
+      ndaEnabled: false,
+      visitorAskAiEnabled: false,
     });
     await renderPage();
     expect(await screen.findByTestId("radar-queue")).toBeInTheDocument();

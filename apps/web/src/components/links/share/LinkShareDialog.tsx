@@ -18,7 +18,13 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
 import { ApiError } from "@/lib/apiClient";
 import { apiErrorMessage } from "@/lib/apiErrors";
-import type { AccessRule, DealRoomAccessPolicy, Link, WorkspaceViewerDomain } from "@/types";
+import type {
+  AccessRule,
+  BillingInfo,
+  DealRoomAccessPolicy,
+  Link,
+  WorkspaceViewerDomain,
+} from "@/types";
 import { useAsyncData } from "@/hooks/useAsyncData";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import {
@@ -64,13 +70,15 @@ interface DialogData {
   rules: AccessRule[];
   policy: DealRoomAccessPolicy | null;
   viewerDomain: WorkspaceViewerDomain | null;
+  billing: BillingInfo | null;
 }
 
 async function fetchDialogData(linkId: string): Promise<DialogData | null> {
-  const [link, rulesRes, viewerDomain] = await Promise.all([
+  const [link, rulesRes, viewerDomain, billing] = await Promise.all([
     api.getLinkById(linkId),
     api.getLinkAccessRules(linkId),
     api.getWorkspaceViewerDomain().catch(() => null),
+    api.getBillingInfo().catch(() => null),
   ]);
   if (!link) return null;
   let policy: DealRoomAccessPolicy | null = null;
@@ -87,6 +95,7 @@ async function fetchDialogData(linkId: string): Promise<DialogData | null> {
     rules: rulesRes.data,
     policy,
     viewerDomain,
+    billing,
   };
 }
 
@@ -114,6 +123,16 @@ function LinkShareDialogContent({
     [data?.viewerDomain],
   );
   const brandSettingsHref = workspaceSlug ? `/${workspaceSlug}/settings/brand` : undefined;
+  const planFeatures = useMemo(() => {
+    const billing = data?.billing;
+    if (!billing) return undefined;
+    return {
+      watermarkEnabled: billing.watermarkEnabled,
+      ndaEnabled: billing.ndaEnabled,
+      visitorAskAiEnabled: billing.visitorAskAiEnabled,
+      accessControlsEnabled: billing.accessControlsEnabled,
+    };
+  }, [data?.billing]);
   const [tab, setTab] = useState<"share" | "access">(defaultTab);
   const [draft, setDraft] = useState<DraftLink>(() =>
     data?.link?.dealRoomId
@@ -262,8 +281,8 @@ function LinkShareDialogContent({
             await api.updateLink(link.id, { status: "revoked" });
             await refetch();
             onChanged?.();
-          } catch {
-            toast.error(t("common:error.saveFailed"));
+          } catch (err) {
+            toast.error(apiErrorMessage(err, { fallback: "saveFailed" }));
           }
         },
       });
@@ -273,8 +292,8 @@ function LinkShareDialogContent({
       await api.updateLink(link.id, { status: "active" });
       await refetch();
       onChanged?.();
-    } catch {
-      toast.error(t("common:error.saveFailed"));
+    } catch (err) {
+      toast.error(apiErrorMessage(err, { fallback: "saveFailed" }));
     }
   };
 
@@ -363,6 +382,7 @@ function LinkShareDialogContent({
                     ndaTemplates={ndaTemplates}
                     documents={resolveNdaDocumentFallback(agreementDocs)}
                     linkId={link?.id ?? data.link.id}
+                    planFeatures={planFeatures}
                   />
                 </TabsContent>
 

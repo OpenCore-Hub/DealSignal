@@ -18,6 +18,7 @@ const {
   deleteOnDelete,
   archiveOnArchive,
   shareOnShare,
+  toastSuccessMock,
 } = vi.hoisted(() => ({
   getDocumentDownloadUrlMock: vi.fn(),
   archiveDocumentMock: vi.fn(),
@@ -25,6 +26,7 @@ const {
   deleteOnDelete: vi.fn(),
   archiveOnArchive: vi.fn(),
   shareOnShare: vi.fn(),
+  toastSuccessMock: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({
@@ -42,6 +44,13 @@ vi.mock("@/lib/formatters", () => ({
 
 vi.mock("@/lib/clipboard", () => ({
   copyToClipboard: vi.fn(),
+}));
+
+vi.mock("sonner", () => ({
+  toast: {
+    success: toastSuccessMock,
+    error: vi.fn(),
+  },
 }));
 
 const readyDoc: DocumentRow = {
@@ -84,6 +93,8 @@ async function initI18n() {
             deleteBusy: "Busy",
             archiveDisabled: "Only ready documents can be archived",
             archivedActionDisabled: "Unarchive the document to use this action",
+            unarchived: "Document restored. Share links stay inactive until you renew them.",
+            unarchivedRenewAction: "Open Links",
           },
           share: {
             cta: "Share",
@@ -144,6 +155,95 @@ describe("useDocumentColumns download/delete", () => {
       filename: "Pitch Deck.pdf",
       content_type: "application/pdf",
     });
+  });
+
+  it("hides write actions for read-only guests and keeps preview/download", async () => {
+    const i18nInstance = await initI18n();
+    function GuestActionsHarness() {
+      const navigate = vi.fn();
+      const columns = useDocumentColumns({
+        workspaceSlug: "acme",
+        navigate,
+        canWrite: false,
+      });
+      const table = useReactTable({
+        data: [readyDoc],
+        columns,
+        getCoreRowModel: getCoreRowModel(),
+      });
+      const actionsCell = table
+        .getRowModel()
+        .rows[0]!
+        .getVisibleCells()
+        .find((c) => c.column.id === "actions");
+      return (
+        <div>
+          {actionsCell ? flexRender(actionsCell.column.columnDef.cell, actionsCell.getContext()) : null}
+        </div>
+      );
+    }
+    render(
+      <I18nextProvider i18n={i18nInstance}>
+        <MemoryRouter>
+          <GuestActionsHarness />
+        </MemoryRouter>
+      </I18nextProvider>,
+    );
+
+    expect(screen.queryByTestId("document-row-share")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Preview" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "More actions" }));
+    const menu = await screen.findByRole("menu");
+    expect(within(menu).queryByRole("menuitem", { name: /Create Link/i })).not.toBeInTheDocument();
+    expect(within(menu).queryByRole("menuitem", { name: /^Share$/i })).not.toBeInTheDocument();
+    expect(within(menu).queryByRole("menuitem", { name: /^Archive$/i })).not.toBeInTheDocument();
+    expect(within(menu).queryByRole("menuitem", { name: /Add to Data Room/i })).not.toBeInTheDocument();
+    expect(within(menu).queryByRole("menuitem", { name: /Delete/i })).not.toBeInTheDocument();
+    expect(within(menu).getByRole("menuitem", { name: /Download/i })).toBeInTheDocument();
+    expect(archiveDocumentMock).not.toHaveBeenCalled();
+    expect(unarchiveDocumentMock).not.toHaveBeenCalled();
+  });
+
+  it("hides Unarchive for read-only guests on archived documents", async () => {
+    const i18nInstance = await initI18n();
+    const archived: DocumentRow = { ...readyDoc, status: "archived" };
+    function GuestArchivedHarness() {
+      const navigate = vi.fn();
+      const columns = useDocumentColumns({
+        workspaceSlug: "acme",
+        navigate,
+        canWrite: false,
+      });
+      const table = useReactTable({
+        data: [archived],
+        columns,
+        getCoreRowModel: getCoreRowModel(),
+      });
+      const actionsCell = table
+        .getRowModel()
+        .rows[0]!
+        .getVisibleCells()
+        .find((c) => c.column.id === "actions");
+      return (
+        <div>
+          {actionsCell ? flexRender(actionsCell.column.columnDef.cell, actionsCell.getContext()) : null}
+        </div>
+      );
+    }
+    render(
+      <I18nextProvider i18n={i18nInstance}>
+        <MemoryRouter>
+          <GuestArchivedHarness />
+        </MemoryRouter>
+      </I18nextProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "More actions" }));
+    const menu = await screen.findByRole("menu");
+    expect(within(menu).queryByRole("menuitem", { name: /^Unarchive$/i })).not.toBeInTheDocument();
+    expect(within(menu).queryByRole("menuitem", { name: /Create Link/i })).not.toBeInTheDocument();
+    expect(within(menu).queryByRole("menuitem", { name: /Delete/i })).not.toBeInTheDocument();
+    expect(within(menu).getByRole("menuitem", { name: /Download/i })).toBeInTheDocument();
   });
 
   it("opens share dialog via row Share CTA instead of navigating to /links/new", async () => {
@@ -310,6 +410,59 @@ describe("useDocumentColumns download/delete", () => {
     expect(within(menu).getByRole("menuitem", { name: /Delete/i })).not.toHaveAttribute(
       "data-disabled",
     );
+  });
+
+  it("toasts that share links stay inactive after unarchive and offers Links", async () => {
+    const i18nInstance = await initI18n();
+    unarchiveDocumentMock.mockResolvedValue({ ...readyDoc, status: "ready" });
+    const archived: DocumentRow = { ...readyDoc, status: "archived" };
+    const navigate = vi.fn();
+    function UnarchiveHarness() {
+      const columns = useDocumentColumns({
+        workspaceSlug: "acme",
+        navigate,
+        onDelete: deleteOnDelete,
+      });
+      const table = useReactTable({
+        data: [archived],
+        columns,
+        getCoreRowModel: getCoreRowModel(),
+      });
+      const actionsCell = table
+        .getRowModel()
+        .rows[0]!
+        .getVisibleCells()
+        .find((c) => c.column.id === "actions");
+      return (
+        <div>
+          {actionsCell ? flexRender(actionsCell.column.columnDef.cell, actionsCell.getContext()) : null}
+        </div>
+      );
+    }
+    render(
+      <I18nextProvider i18n={i18nInstance}>
+        <MemoryRouter>
+          <UnarchiveHarness />
+        </MemoryRouter>
+      </I18nextProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "More actions" }));
+    const menu = await screen.findByRole("menu");
+    fireEvent.click(within(menu).getByRole("menuitem", { name: /^Unarchive$/i }));
+
+    await waitFor(() => {
+      expect(unarchiveDocumentMock).toHaveBeenCalledWith("doc_1");
+    });
+    expect(toastSuccessMock).toHaveBeenCalledWith(
+      "Document restored. Share links stay inactive until you renew them.",
+      expect.objectContaining({
+        action: expect.objectContaining({ label: "Open Links" }),
+      }),
+    );
+    const toastArg = toastSuccessMock.mock.calls[0]?.[1] as { action?: { onClick?: () => void } };
+    toastArg?.action?.onClick?.();
+    expect(navigate).toHaveBeenCalledWith("/acme/links");
   });
 
   it("disables download while processing and keeps delete available after ready", async () => {

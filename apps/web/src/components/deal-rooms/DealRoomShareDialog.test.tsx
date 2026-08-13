@@ -38,6 +38,7 @@ vi.mock("@/lib/api", () => ({
     getDocuments: vi.fn(),
     getLinkAskPolicy: vi.fn(),
     getWorkspaceViewerDomain: vi.fn(),
+    getBillingInfo: vi.fn(),
   },
 }));
 
@@ -59,6 +60,8 @@ async function renderDialog(ui: React.ReactNode) {
     dealRooms: {
       "share.createTitle": "Create share link",
       "share.createLink": "Create link",
+      "share.linkLimitReached":
+        "You've reached the share link limit for your plan. Upgrade to create more.",
       "share.saveLinkSettings": "Save link settings",
       "share.createSuccess": "Created",
       "share.saveSuccess": "Saved",
@@ -71,6 +74,12 @@ async function renderDialog(ui: React.ReactNode) {
       cancel: "Cancel",
       saving: "Saving...",
       "error.saveFailed": "Save failed",
+      "error.codes.plan_limit_links":
+        "You've reached the share link limit for your plan. Upgrade to create more.",
+      "error.codes.plan_feature_watermark":
+        "Watermark and viewer protection features are not available on your plan. Upgrade to Pro or higher.",
+      "error.codes.plan_feature_nda":
+        "NDA requirements are not available on your plan. Upgrade to Business or higher.",
       unsavedChangesTitle: "Unsaved",
       unsavedChangesDescription: "Discard?",
       unsavedChangesConfirm: "Discard",
@@ -133,6 +142,23 @@ describe("DealRoomShareDialog", () => {
       status: "",
       cnameHost: "",
       cnameTarget: "",
+    });
+    vi.mocked(api.getBillingInfo).mockResolvedValue({
+      plan: "trial",
+      period: "monthly",
+      trialExpired: false,
+      storageUsed: 0,
+      storageLimit: 10,
+      linksUsed: 0,
+      linksLimit: 50,
+      roomsUsed: 0,
+      roomsLimit: 10,
+      seatsUsed: 1,
+      seatsLimit: 5,
+      customDomainEnabled: true,
+      watermarkEnabled: true,
+      ndaEnabled: true,
+      visitorAskAiEnabled: true,
     });
   });
 
@@ -245,6 +271,58 @@ describe("DealRoomShareDialog", () => {
     validateSpy.mockRestore();
   });
 
+  it("sends ask_ai_enabled false on create when plan lacks visitor Ask AI", async () => {
+    const validateSpy = vi.spyOn(shareModule, "validateDraft").mockReturnValue({});
+    vi.mocked(api.getBillingInfo).mockResolvedValue({
+      plan: "free",
+      period: "monthly",
+      trialExpired: false,
+      storageUsed: 0,
+      storageLimit: 1,
+      linksUsed: 0,
+      linksLimit: 3,
+      roomsUsed: 0,
+      roomsLimit: 1,
+      seatsUsed: 1,
+      seatsLimit: 1,
+      customDomainEnabled: false,
+      watermarkEnabled: false,
+      ndaEnabled: false,
+      visitorAskAiEnabled: false,
+    });
+    vi.mocked(api.createDealRoomLink).mockResolvedValue({
+      id: "link-new",
+      name: "Free plan",
+      shortUrl: "http://localhost/l/abc",
+      dealRoomId: "room-1",
+      isActive: true,
+      qaEnabled: true,
+      askAiEnabled: false,
+    } as Link);
+
+    await renderDialog(<DealRoomShareDialog roomId="room-1" open />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Create share link")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Create link" }));
+
+    await waitFor(() => {
+      expect(api.createDealRoomLink).toHaveBeenCalledWith(
+        "room-1",
+        expect.objectContaining({
+          ask_ai_enabled: false,
+          watermark_enabled: false,
+          screenshot_protection_enabled: false,
+          require_nda: false,
+        }),
+      );
+    });
+
+    validateSpy.mockRestore();
+  });
+
   it("sends ask_ai_enabled false and qa_enabled true on update when AI assistant is disabled", async () => {
     const existingLink = {
       id: "link-1",
@@ -279,5 +357,127 @@ describe("DealRoomShareDialog", () => {
         expect.objectContaining({ qa_enabled: true, ask_ai_enabled: false }),
       );
     });
+  });
+
+  it("blocks create when share link quota is exhausted", async () => {
+    vi.mocked(api.getBillingInfo).mockResolvedValue({
+      plan: "free",
+      period: "monthly",
+      trialExpired: false,
+      storageUsed: 0,
+      storageLimit: 1,
+      linksUsed: 20,
+      linksLimit: 20,
+      roomsUsed: 1,
+      roomsLimit: 1,
+      seatsUsed: 1,
+      seatsLimit: 1,
+      customDomainEnabled: false,
+      watermarkEnabled: false,
+      ndaEnabled: false,
+      visitorAskAiEnabled: false,
+    });
+
+    await renderDialog(<DealRoomShareDialog roomId="room-1" open />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("share-link-limit-hint")).toBeInTheDocument();
+    });
+    expect(screen.getByRole("button", { name: "Create link" })).toBeDisabled();
+  });
+
+  it("surfaces plan_limit_links when create races past a stale client quota gate", async () => {
+    const { toast } = await import("sonner");
+    const { ApiError } = await import("@/lib/apiClient");
+    const validateSpy = vi.spyOn(shareModule, "validateDraft").mockReturnValue({});
+    vi.mocked(api.getBillingInfo).mockResolvedValue({
+      plan: "free",
+      period: "monthly",
+      trialExpired: false,
+      storageUsed: 0,
+      storageLimit: 1,
+      linksUsed: 19,
+      linksLimit: 20,
+      roomsUsed: 1,
+      roomsLimit: 1,
+      seatsUsed: 1,
+      seatsLimit: 1,
+      customDomainEnabled: false,
+      watermarkEnabled: false,
+      ndaEnabled: false,
+      visitorAskAiEnabled: false,
+    });
+    vi.mocked(api.createDealRoomLink).mockRejectedValue(
+      new ApiError({
+        status: 403,
+        code: "plan_limit_links",
+        message: "share link limit reached for this plan",
+        requestId: "r-race",
+      }),
+    );
+
+    await renderDialog(<DealRoomShareDialog roomId="room-1" open />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Create link" })).toBeEnabled();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create link" }));
+
+    await waitFor(() => {
+      expect(api.createDealRoomLink).toHaveBeenCalled();
+      expect(toast.error).toHaveBeenCalled();
+    });
+    const [[message]] = vi.mocked(toast.error).mock.calls;
+    expect(String(message)).toMatch(/share link limit/i);
+
+    validateSpy.mockRestore();
+  });
+
+  it("surfaces plan_feature_watermark when create races past a stale client feature gate", async () => {
+    const { toast } = await import("sonner");
+    const { ApiError } = await import("@/lib/apiClient");
+    const validateSpy = vi.spyOn(shareModule, "validateDraft").mockReturnValue({});
+    // Stale client billing still thinks watermark is allowed.
+    vi.mocked(api.getBillingInfo).mockResolvedValue({
+      plan: "free",
+      period: "monthly",
+      trialExpired: false,
+      storageUsed: 0,
+      storageLimit: 1,
+      linksUsed: 0,
+      linksLimit: 20,
+      roomsUsed: 1,
+      roomsLimit: 1,
+      seatsUsed: 1,
+      seatsLimit: 1,
+      customDomainEnabled: false,
+      watermarkEnabled: true,
+      ndaEnabled: false,
+      visitorAskAiEnabled: false,
+    });
+    vi.mocked(api.createDealRoomLink).mockRejectedValue(
+      new ApiError({
+        status: 403,
+        code: "plan_feature_watermark",
+        message: "watermark not available on this plan",
+        requestId: "r-wm-race",
+      }),
+    );
+
+    await renderDialog(<DealRoomShareDialog roomId="room-1" open />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Create link" })).toBeEnabled();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create link" }));
+
+    await waitFor(() => {
+      expect(api.createDealRoomLink).toHaveBeenCalled();
+      expect(toast.error).toHaveBeenCalled();
+    });
+    const [[message]] = vi.mocked(toast.error).mock.calls;
+    expect(String(message)).toMatch(/Watermark and viewer protection|Save failed|Failed to save/i);
+
+    validateSpy.mockRestore();
   });
 });

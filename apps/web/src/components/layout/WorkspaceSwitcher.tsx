@@ -32,15 +32,21 @@ export function WorkspaceSwitcher() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [workspaceSlug]);
 
+  // URL slug is the source of truth. Persisted currentWorkspace can lag after
+  // create-workspace (store still holds the previous tenant).
   const activeWorkspace =
-    currentWorkspace ||
     workspaces.find((w) => w.slug === workspaceSlug) ||
+    currentWorkspace ||
     workspaces[0];
 
   useEffect(() => {
-    if (activeWorkspace && activeWorkspace.id !== currentWorkspace?.id) {
+    if (!activeWorkspace) return;
+    if (
+      activeWorkspace.id !== currentWorkspace?.id ||
+      activeWorkspace.slug !== currentWorkspace?.slug
+    ) {
       setCurrentWorkspace(activeWorkspace);
     }
   }, [activeWorkspace, currentWorkspace, setCurrentWorkspace]);
@@ -79,6 +85,7 @@ export function WorkspaceSwitcher() {
             <DropdownMenuItem
               key={workspace.id}
               className="gap-2"
+              aria-current={workspace.id === activeWorkspace.id ? "true" : undefined}
               onClick={() => {
                 setCurrentWorkspace(workspace);
                 navigate(`/${workspace.slug}/dashboard`);

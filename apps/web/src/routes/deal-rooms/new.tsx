@@ -22,6 +22,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { api } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/apiErrors";
+import { usageAtCap } from "@/lib/planQuota";
 import { BackButton } from "@/components/common/BackButton";
 import { useReducedMotion } from "@/hooks/useReducedMotion";
 import { useAsyncData } from "@/hooks/useAsyncData";
@@ -58,6 +59,9 @@ export function NewDealRoomPage() {
     const res = await api.getDealRoomTemplates();
     return res.data;
   }, [tc]);
+  const { data: billing } = useAsyncData(() => api.getBillingInfo().catch(() => null), []);
+  const roomsAtCap = billing ? usageAtCap(billing.roomsUsed, billing.roomsLimit) : false;
+  const ndaPlanBlocked = billing != null && billing.ndaEnabled === false;
 
   const getTemplateDisplay = useCallback(
     (template: DealRoomTemplate) => ({
@@ -74,16 +78,22 @@ export function NewDealRoomPage() {
       const first = templates[0];
       const display = getTemplateDisplay(first);
       setSelectedTemplateId(first.id);
-      setNda(first.ndaEnabled);
+      setNda(ndaPlanBlocked ? false : first.ndaEnabled);
       setName(display.name);
       setDescription(display.description);
     }
-  }, [templates, selectedTemplateId, getTemplateDisplay]);
+  }, [templates, selectedTemplateId, getTemplateDisplay, ndaPlanBlocked]);
+
+  useEffect(() => {
+    if (ndaPlanBlocked && nda) {
+      setNda(false);
+    }
+  }, [ndaPlanBlocked, nda]);
 
   const selectTemplate = (template: DealRoomTemplate, fillFields = false) => {
     const display = getTemplateDisplay(template);
     setSelectedTemplateId(template.id);
-    setNda(template.ndaEnabled);
+    setNda(ndaPlanBlocked ? false : template.ndaEnabled);
     if (fillFields || !name) setName(display.name);
     if (fillFields || !description) setDescription(display.description);
   };
@@ -111,6 +121,10 @@ export function NewDealRoomPage() {
 
   const handleCreate = async () => {
     if (!selectedTemplate || !name) return;
+    if (roomsAtCap) {
+      toast.error(t("new.roomLimitReached"));
+      return;
+    }
     const slug = slugify(name) || selectedTemplate.scenario;
     if (!slug) {
       toast.error(tc("error.saveFailed"));
@@ -123,7 +137,7 @@ export function NewDealRoomPage() {
         slug,
         description,
         template: selectedTemplate.scenario,
-        ndaEnabled: nda,
+        ndaEnabled: ndaPlanBlocked ? false : nda,
       });
       toast.success(t("new.created"));
       navigate(`/${workspaceSlug}/deal-rooms/${room.id}`);
@@ -263,15 +277,34 @@ export function NewDealRoomPage() {
             <div className="flex items-center justify-between rounded-md border border-border p-3">
               <div>
                 <p className="text-sm font-medium">{t("new.enableNda")}</p>
-                <p className="text-caption text-muted-foreground">{t("new.enableNdaDescription")}</p>
+                <p className="text-caption text-muted-foreground">
+                  {ndaPlanBlocked ? t("new.ndaPlanRequired") : t("new.enableNdaDescription")}
+                </p>
               </div>
-              <Switch checked={nda} onCheckedChange={setNda} />
+              <Switch
+                checked={nda}
+                disabled={ndaPlanBlocked}
+                onCheckedChange={(checked) => {
+                  if (ndaPlanBlocked && checked) return;
+                  setNda(checked);
+                }}
+                aria-label={t("new.enableNda")}
+              />
             </div>
+            {roomsAtCap ? (
+              <p className="text-xs text-muted-foreground" data-testid="new-room-limit-hint">
+                {t("new.roomLimitReached")}
+              </p>
+            ) : null}
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="outline" onClick={() => navigate(`/${workspaceSlug}/deal-rooms`)}>
                 {t("new.cancel")}
               </Button>
-              <Button className="gap-1.5" disabled={!name || creating} onClick={handleCreate}>
+              <Button
+                className="gap-1.5"
+                disabled={!name || creating || roomsAtCap}
+                onClick={handleCreate}
+              >
                 <Plus size={16} weight="bold" />
                 {creating ? t("new.creating") : t("new.create")}
               </Button>

@@ -17,6 +17,17 @@ vi.mock("@/components/deal-rooms/DealRoomShareDialog", () => ({
   DealRoomShareDialog: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
+vi.mock("@/hooks/useWorkspaceAccess", () => ({
+  useWorkspaceAccess: () => ({
+    role: "owner",
+    loading: false,
+    canRead: true,
+    canWrite: true,
+    canManage: true,
+    isGuest: false,
+  }),
+}));
+
 function makeRoom(overrides: Partial<DealRoom> = {}): DealRoom {
   return {
     id: "room-1",
@@ -34,7 +45,7 @@ function makeRoom(overrides: Partial<DealRoom> = {}): DealRoom {
   };
 }
 
-async function renderSection(rooms: DealRoom[]) {
+async function renderSection(rooms: DealRoom[], roomsAtCap = false) {
   const i18n = await createTestI18n({
     dashboard: {
       "sections.activeRooms": "Active data rooms",
@@ -47,6 +58,8 @@ async function renderSection(rooms: DealRoom[]) {
       "room.pendingApprovals_other": "{{count}} pending",
       "room.viewAllWithCount_one": "View all {{count}} room",
       "room.viewAllWithCount_other": "View all {{count}} rooms",
+      "room.status.active": "Active",
+      "room.status.inactive": "Inactive",
     },
     common: {
       viewDetails: "View details",
@@ -57,7 +70,7 @@ async function renderSection(rooms: DealRoom[]) {
   });
   render(
     <I18nextProvider i18n={i18n}>
-      <ActiveRoomsSection rooms={rooms} workspaceSlug="acme" />
+      <ActiveRoomsSection rooms={rooms} workspaceSlug="acme" roomsAtCap={roomsAtCap} />
     </I18nextProvider>
   );
 }
@@ -70,6 +83,13 @@ describe("ActiveRoomsSection", () => {
   it("renders empty state when no active rooms", async () => {
     await renderSection([]);
     expect(screen.getByText("No active rooms")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create" })).toBeInTheDocument();
+  });
+
+  it("hides create action when room quota is exhausted", async () => {
+    await renderSection([], true);
+    expect(screen.getByText("No active rooms")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Create" })).not.toBeInTheDocument();
   });
 
   it("navigates to room detail when card is clicked", async () => {

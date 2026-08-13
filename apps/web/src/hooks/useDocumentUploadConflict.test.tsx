@@ -10,10 +10,12 @@ import {
 } from "./useDocumentUploadConflict";
 
 const uploadDocumentMock = vi.hoisted(() => vi.fn());
+const checkDocumentExistsMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/api", () => ({
   api: {
     uploadDocument: uploadDocumentMock,
+    checkDocumentExists: checkDocumentExistsMock,
   },
 }));
 
@@ -76,6 +78,8 @@ describe("isDocumentExistsError", () => {
 describe("useDocumentUploadConflict", () => {
   beforeEach(() => {
     uploadDocumentMock.mockReset();
+    checkDocumentExistsMock.mockReset();
+    checkDocumentExistsMock.mockResolvedValue({ exists: false });
   });
 
   it("returns cleanly when the server accepts the upload", async () => {
@@ -85,7 +89,50 @@ describe("useDocumentUploadConflict", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "upload" }));
     await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("ok"));
+    expect(checkDocumentExistsMock).toHaveBeenCalledWith("a.pdf");
     expect(uploadDocumentMock).toHaveBeenCalledWith(file, undefined);
+    expect(uploadDocumentMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("asks before uploading when the preflight finds an existing document", async () => {
+    checkDocumentExistsMock.mockResolvedValueOnce({
+      exists: true,
+      document: { id: "d1", title: "a.pdf" },
+    });
+    uploadDocumentMock.mockResolvedValueOnce({ id: "d1", title: "a.pdf" });
+
+    const file = new File(["x"], "a.pdf", { type: "application/pdf" });
+    render(<Harness file={file} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "upload" }));
+    await screen.findByText("upload.replaceTitle");
+    expect(uploadDocumentMock).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "upload.replaceConfirm" }));
+
+    await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("ok"));
+    expect(uploadDocumentMock).toHaveBeenCalledTimes(1);
+    expect(uploadDocumentMock).toHaveBeenCalledWith(file, undefined, { replace: true });
+  });
+
+  it("does not upload bytes when the user cancels a preflight conflict", async () => {
+    checkDocumentExistsMock.mockResolvedValueOnce({
+      exists: true,
+      document: { id: "d1", title: "a.pdf" },
+    });
+
+    const file = new File(["x"], "a.pdf", { type: "application/pdf" });
+    render(<Harness file={file} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "upload" }));
+    await screen.findByText("upload.replaceTitle");
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "upload.replaceCancel" }));
+    });
+
+    await waitFor(() =>
+      expect(screen.getByTestId("status")).toHaveTextContent("cancelled"),
+    );
+    expect(uploadDocumentMock).not.toHaveBeenCalled();
   });
 
   it("retries with replace after the user confirms", async () => {

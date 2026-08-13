@@ -71,6 +71,12 @@ export function LinkAskPolicyQuotaPanel({
         <p className="text-xs text-muted-foreground">{t("management.askPolicyNotEntitled")}</p>
       ) : null}
 
+      {quotaExceeded ? (
+        <p className="text-xs font-medium text-amber-700 dark:text-amber-300">
+          {t("management.askPolicyQuotaPaywall")}
+        </p>
+      ) : null}
+
       {showQuota ? (
         <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2.5 text-sm">
           <p className="text-muted-foreground">
@@ -79,11 +85,6 @@ export function LinkAskPolicyQuotaPanel({
               limit: monthlyLimit,
             })}
           </p>
-          {quotaExceeded ? (
-            <p className="mt-1 text-xs font-medium text-amber-700 dark:text-amber-300">
-              {t("management.askPolicyQuotaPaywall")}
-            </p>
-          ) : null}
         </div>
       ) : null}
     </div>

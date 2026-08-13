@@ -17,6 +17,7 @@ import {
   DEAL_ROOM_PAGE_TAB_LABEL_KEY,
   isDealRoomPageTab,
   orderDealRoomPageTabs,
+  visibleDealRoomPageTabs,
   useDealRoomTab,
 } from "@/hooks/useDealRoomTab";
 import type { DealRoomTab } from "@/hooks/useDealRoomTab";
@@ -76,7 +77,7 @@ export function DealRoomDetailPage() {
   const { t: td } = useTranslation("documents");
   const { uploadDocument, conflictDialog } = useDocumentUploadConflict();
   const { workspaceSlug, roomId } = useParams<{ workspaceSlug: string; roomId: string }>();
-  const { canWrite } = useWorkspaceAccess(workspaceSlug);
+  const { canWrite, loading: accessLoading } = useWorkspaceAccess(workspaceSlug);
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams] = useSearchParams();
@@ -94,6 +95,13 @@ export function DealRoomDetailPage() {
   const [accessPolicyDirty, setAccessPolicyDirty] = useState(false);
   const [pendingLeaveTab, setPendingLeaveTab] = useState<DealRoomTab | null>(null);
   const { tab, setTab } = useDealRoomTab();
+
+  useEffect(() => {
+    if (accessLoading || canWrite) return;
+    if (tab === "access" || tab === "knowledge") {
+      setTab("documents");
+    }
+  }, [accessLoading, canWrite, tab, setTab]);
 
   const requestTabChange = useCallback(
     (next: DealRoomTab) => {
@@ -518,7 +526,7 @@ export function DealRoomDetailPage() {
 
   const showPageTabs = isDealRoomPageTab(tab);
   // Plain derivation (not a hook) so it can sit after loading early-returns safely.
-  const pageTabs = orderDealRoomPageTabs(tab);
+  const pageTabs = orderDealRoomPageTabs(tab, visibleDealRoomPageTabs(canWrite || accessLoading));
 
   return (
     <motion.div className="space-y-6" {...(reducedMotion ? {} : pageTransition)}>
@@ -611,7 +619,7 @@ export function DealRoomDetailPage() {
             </DealRoomDocumentsHome>
           )}
 
-          {tab === "access" && (
+          {tab === "access" && canWrite && (
             <DealRoomAccessControlTab
               roomId={room.id}
               initialLinkId={resolvedAccessLinkId}
@@ -636,7 +644,7 @@ export function DealRoomDetailPage() {
             />
           )}
 
-          {tab === "knowledge" && <DealRoomKnowledgeTab roomId={room.id} />}
+          {tab === "knowledge" && canWrite && <DealRoomKnowledgeTab roomId={room.id} />}
 
           {tab === "qa" && (
             <DealRoomQATab

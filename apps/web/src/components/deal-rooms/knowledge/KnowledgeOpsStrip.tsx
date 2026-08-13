@@ -104,7 +104,12 @@ export function KnowledgeOpsStrip({
           <span data-testid="deal-room-knowledge-ops-quota">
             {t("knowledge.opsQuota", {
               used: ops.answersQuota.used,
-              limit: ops.answersQuota.limit > 0 ? ops.answersQuota.limit : "∞",
+              limit:
+                ops.answersQuota.included === false
+                  ? 0
+                  : ops.answersQuota.limit > 0
+                    ? ops.answersQuota.limit
+                    : "∞",
             })}
           </span>
           <span data-testid="deal-room-knowledge-ops-archives">

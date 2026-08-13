@@ -40,6 +40,12 @@ function renderAccessTab(
   roomSecurityFloors?: { requireEmailVerification?: boolean; requireNda?: boolean },
   roomBlockedEmails?: string[],
   linkId?: string,
+  planFeatures?: {
+    watermarkEnabled?: boolean;
+    ndaEnabled?: boolean;
+    visitorAskAiEnabled?: boolean;
+    accessControlsEnabled?: boolean;
+  },
 ) {
   const updateDraft = vi.fn();
   const { rerender } = render(
@@ -55,6 +61,7 @@ function renderAccessTab(
         roomSecurityFloors={roomSecurityFloors}
         roomBlockedEmails={roomBlockedEmails}
         linkId={linkId}
+        planFeatures={planFeatures}
       />
     </Wrapper>
   );
@@ -242,6 +249,173 @@ describe("AccessTab", () => {
     expect(switchEl).not.toBeDisabled();
     fireEvent.click(switchEl);
     expect(updateDraft).toHaveBeenCalledWith({ enableScreenshotProtection: true });
+  });
+
+  it("blocks enabling watermark, screenshot, and NDA when plan features are off", () => {
+    const locked = {
+      watermarkEnabled: false,
+      ndaEnabled: false,
+      visitorAskAiEnabled: false,
+    };
+    const { updateDraft } = renderAccessTab(
+      { ...baseDraft, watermarkEnabled: false, requireNda: false, enableScreenshotProtection: false },
+      {},
+      true,
+      [],
+      false,
+      [],
+      undefined,
+      undefined,
+      undefined,
+      locked,
+    );
+
+    const watermark = screen.getByRole("switch", { name: /apply watermark/i });
+    const screenshot = screen.getByRole("switch", { name: /screenshot protection/i });
+    const nda = screen.getByRole("switch", { name: /require NDA to view/i });
+    expect(watermark).toBeDisabled();
+    expect(screenshot).toBeDisabled();
+    expect(nda).toBeDisabled();
+    expect(screen.getByRole("button", { name: /watermark requires pro or higher/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /screenshot protection requires pro or higher/i }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /nda requires business or higher/i })).toBeInTheDocument();
+
+    fireEvent.click(watermark);
+    fireEvent.click(screenshot);
+    fireEvent.click(nda);
+    expect(updateDraft).not.toHaveBeenCalled();
+  });
+
+  it("grandfathers already-enabled watermark and NDA when plan features are off", () => {
+    const locked = {
+      watermarkEnabled: false,
+      ndaEnabled: false,
+      visitorAskAiEnabled: false,
+    };
+    const { updateDraft } = renderAccessTab(
+      { ...baseDraft, watermarkEnabled: true, requireNda: true, ndaDocumentId: "doc-1" },
+      {},
+      true,
+      [{ id: "doc-1", title: "NDA" }],
+      false,
+      [],
+      undefined,
+      undefined,
+      undefined,
+      locked,
+    );
+
+    const watermark = screen.getByRole("switch", { name: /apply watermark/i });
+    const nda = screen.getByRole("switch", { name: /require NDA to view/i });
+    expect(watermark).not.toBeDisabled();
+    expect(nda).not.toBeDisabled();
+    fireEvent.click(watermark);
+    expect(updateDraft).toHaveBeenCalledWith({ watermarkEnabled: false });
+  });
+
+  it("blocks enabling Ask AI experiences when plan lacks visitor Ask AI", () => {
+    renderAccessTab(
+      { ...baseDraft, visitorAskExperience: "host_only" },
+      {},
+      true,
+      [],
+      false,
+      [],
+      undefined,
+      undefined,
+      undefined,
+      { watermarkEnabled: true, ndaEnabled: true, visitorAskAiEnabled: false },
+    );
+    fireEvent.click(screen.getByText(/advanced/i));
+    expect(screen.getByTestId("visitor-ask-experience-ai_supervised")).toBeDisabled();
+    expect(screen.getByTestId("visitor-ask-experience-ai_self_serve")).toBeDisabled();
+    expect(screen.getByText(/visitor ask ai requires pro or higher/i)).toBeInTheDocument();
+  });
+
+  it("blocks email verification and empty allow/block lists when access controls are off", () => {
+    const { updateDraft } = renderAccessTab(
+      baseDraft,
+      {},
+      true,
+      [],
+      false,
+      [],
+      undefined,
+      undefined,
+      undefined,
+      { accessControlsEnabled: false, watermarkEnabled: true, ndaEnabled: true },
+    );
+
+    const verification = screen.getByRole("switch", { name: /require email verification/i });
+    expect(verification).toBeDisabled();
+    expect(
+      screen.getByRole("button", {
+        name: /email verification and allow\/block lists require business or higher/i,
+      }),
+    ).toBeInTheDocument();
+    fireEvent.click(verification);
+    expect(updateDraft).not.toHaveBeenCalled();
+
+    const allowedInput = screen.getByPlaceholderText(/alice@vc\.com/i);
+    expect(allowedInput).toBeDisabled();
+    fireEvent.change(allowedInput, { target: { value: "alice@vc.com" } });
+    fireEvent.keyDown(allowedInput, { key: "Enter" });
+    expect(updateDraft).not.toHaveBeenCalled();
+    expect(
+      screen.getAllByText(/email verification and allow\/block lists require business or higher/i)
+        .length,
+    ).toBeGreaterThanOrEqual(2);
+  });
+
+  it("grandfathers already-on verification and existing allow lists when access controls are off", () => {
+    const { updateDraft } = renderAccessTab(
+      {
+        ...baseDraft,
+        requireEmailVerification: true,
+        allowedViewers: ["alice@vc.com"],
+        blockedViewers: ["blocked@bad.com"],
+      },
+      {},
+      true,
+      [],
+      false,
+      [],
+      undefined,
+      undefined,
+      undefined,
+      { accessControlsEnabled: false },
+    );
+
+    expect(screen.getByRole("switch", { name: /require email verification/i })).not.toBeDisabled();
+    expect(screen.getByText("alice@vc.com")).toBeInTheDocument();
+    const allowedInput = screen.getAllByRole("textbox").find(
+      (el) => (el as HTMLTextAreaElement).placeholder === "" || (el as HTMLTextAreaElement).placeholder === "alice@vc.com",
+    );
+    expect(allowedInput).toBeTruthy();
+    expect(allowedInput).not.toBeDisabled();
+    fireEvent.change(allowedInput!, { target: { value: "bob@vc.com" } });
+    fireEvent.keyDown(allowedInput!, { key: "Enter" });
+    expect(updateDraft).toHaveBeenCalled();
+  });
+
+  it("grandfathers Ask AI experience already on when plan lacks visitor Ask AI", () => {
+    renderAccessTab(
+      { ...baseDraft, visitorAskExperience: "ai_supervised" },
+      {},
+      true,
+      [],
+      false,
+      [],
+      undefined,
+      undefined,
+      undefined,
+      { watermarkEnabled: true, ndaEnabled: true, visitorAskAiEnabled: false },
+    );
+    fireEvent.click(screen.getByText(/advanced/i));
+    expect(screen.getByTestId("visitor-ask-experience-ai_supervised")).not.toBeDisabled();
+    expect(screen.getByTestId("visitor-ask-experience-ai_self_serve")).not.toBeDisabled();
   });
 
   it("exposes screenshot protection help on the question trigger", () => {

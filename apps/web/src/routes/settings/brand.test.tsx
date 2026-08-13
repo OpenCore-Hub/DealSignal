@@ -15,6 +15,7 @@ const {
   putWorkspaceViewerDomainMock,
   verifyWorkspaceViewerDomainMock,
   deleteWorkspaceViewerDomainMock,
+  getBillingInfoMock,
 } = vi.hoisted(() => ({
   getWorkspaceSettingsMock: vi.fn(),
   updateWorkspaceSettingsMock: vi.fn(),
@@ -23,6 +24,7 @@ const {
   putWorkspaceViewerDomainMock: vi.fn(),
   verifyWorkspaceViewerDomainMock: vi.fn(),
   deleteWorkspaceViewerDomainMock: vi.fn(),
+  getBillingInfoMock: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({
@@ -34,6 +36,7 @@ vi.mock("@/lib/api", () => ({
     putWorkspaceViewerDomain: putWorkspaceViewerDomainMock,
     verifyWorkspaceViewerDomain: verifyWorkspaceViewerDomainMock,
     deleteWorkspaceViewerDomain: deleteWorkspaceViewerDomainMock,
+    getBillingInfo: getBillingInfoMock,
   },
 }));
 
@@ -61,6 +64,7 @@ const settingsResources = {
         viewerDomain: "Custom Domain",
         viewerDomainPlaceholder: "invest.yourdomain.com",
         viewerDomainHint: "Share links use this hostname only after DNS is verified.",
+        viewerDomainPlanRequired: "Custom viewer domains require Business or higher",
         viewerDomainCname: "Create a CNAME record: {{host}} → {{target}}",
         viewerDomainPending: "Waiting for DNS",
         viewerDomainVerified: "Verified",
@@ -84,6 +88,10 @@ const settingsResources = {
         loadFailed: "Failed to load",
         saveFailed: "Failed to save",
         deleteFailed: "Failed to delete",
+        codes: {
+          plan_feature_custom_domain:
+            "Custom viewer domains are not available on your plan. Upgrade to Business or higher.",
+        },
       },
       retry: "Retry",
       delete: "Delete",
@@ -131,8 +139,29 @@ describe("SettingsBrandPage", () => {
     putWorkspaceViewerDomainMock.mockReset();
     verifyWorkspaceViewerDomainMock.mockReset();
     deleteWorkspaceViewerDomainMock.mockReset();
+    getBillingInfoMock.mockReset();
     vi.mocked(toast.success).mockClear();
     vi.mocked(toast.error).mockClear();
+
+    getBillingInfoMock.mockResolvedValue({
+      plan: "trial",
+      period: "monthly",
+      trialExpired: false,
+      storageUsed: 0,
+      storageLimit: 0,
+      linksUsed: 0,
+      linksLimit: 0,
+      roomsUsed: 0,
+      roomsLimit: 0,
+      seatsUsed: 1,
+      seatsLimit: 10,
+      customDomainEnabled: true,
+      watermarkEnabled: true,
+      ndaEnabled: true,
+      visitorAskAiEnabled: true,
+      brandingEnabled: true,
+      accessControlsEnabled: true,
+    });
 
     getWorkspaceSettingsMock.mockResolvedValue({
       logoUrl: "https://cdn.example.com/old-logo.png",
@@ -326,6 +355,170 @@ describe("SettingsBrandPage", () => {
     expect(screen.getByDisplayValue("view.example.com")).toBeInTheDocument();
     expect(screen.getByText("Waiting for DNS")).toBeInTheDocument();
     expect(screen.getByText(/Create a CNAME record/)).toBeInTheDocument();
+  });
+
+  it("blocks adding a viewer domain when plan lacks customDomainEnabled", async () => {
+    getBillingInfoMock.mockResolvedValue({
+      plan: "free",
+      period: "monthly",
+      trialExpired: false,
+      storageUsed: 0,
+      storageLimit: 1 << 30,
+      linksUsed: 0,
+      linksLimit: 20,
+      roomsUsed: 0,
+      roomsLimit: 1,
+      seatsUsed: 1,
+      seatsLimit: 1,
+      customDomainEnabled: false,
+      watermarkEnabled: false,
+      ndaEnabled: false,
+      visitorAskAiEnabled: false,
+    });
+    getWorkspaceSettingsMock.mockResolvedValue({
+      logoUrl: "",
+      brandColor: "#0055ff",
+      viewerDomain: "",
+    });
+    getWorkspaceViewerDomainMock.mockResolvedValue({
+      hostname: "",
+      status: "",
+      cnameHost: "",
+      cnameTarget: "cname.dealsignal.com",
+    });
+
+    await renderPage();
+    await waitFor(() => {
+      expect(screen.getByText(/Custom viewer domains require Business/)).toBeInTheDocument();
+    });
+    expect(screen.getByPlaceholderText("invest.yourdomain.com")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Add domain" })).toBeDisabled();
+    expect(putWorkspaceViewerDomainMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps verify/remove for grandfathered domains on free", async () => {
+    getBillingInfoMock.mockResolvedValue({
+      plan: "free",
+      period: "monthly",
+      trialExpired: false,
+      storageUsed: 0,
+      storageLimit: 1 << 30,
+      linksUsed: 0,
+      linksLimit: 20,
+      roomsUsed: 0,
+      roomsLimit: 1,
+      seatsUsed: 1,
+      seatsLimit: 1,
+      customDomainEnabled: false,
+      watermarkEnabled: false,
+      ndaEnabled: false,
+      visitorAskAiEnabled: false,
+    });
+
+    await renderPage();
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("invest.example.com")).toBeInTheDocument();
+    });
+    expect(screen.getByRole("button", { name: "Remove" })).toBeEnabled();
+    expect(screen.queryByText(/Custom viewer domains require Business/)).not.toBeInTheDocument();
+  });
+
+  it("blocks add on expired trial (customDomainEnabled false) like free", async () => {
+    getBillingInfoMock.mockResolvedValue({
+      plan: "trial",
+      period: "monthly",
+      trialExpired: true,
+      trialEndsAt: "2026-08-01T00:00:00Z",
+      storageUsed: 0,
+      storageLimit: 1 << 30,
+      linksUsed: 0,
+      linksLimit: 20,
+      roomsUsed: 0,
+      roomsLimit: 1,
+      seatsUsed: 1,
+      seatsLimit: 1,
+      customDomainEnabled: false,
+      watermarkEnabled: false,
+      ndaEnabled: false,
+      visitorAskAiEnabled: false,
+    });
+    getWorkspaceSettingsMock.mockResolvedValue({
+      logoUrl: "",
+      brandColor: "#0055ff",
+      viewerDomain: "",
+    });
+    getWorkspaceViewerDomainMock.mockResolvedValue({
+      hostname: "",
+      status: "",
+      cnameHost: "",
+      cnameTarget: "cname.dealsignal.com",
+    });
+
+    await renderPage();
+    await waitFor(() => {
+      expect(screen.getByText(/Custom viewer domains require Business/)).toBeInTheDocument();
+    });
+    expect(screen.getByRole("button", { name: "Add domain" })).toBeDisabled();
+  });
+
+  it("surfaces plan_feature_custom_domain when add races past the client gate", async () => {
+    const { ApiError } = await import("@/lib/apiClient");
+    // Stale client billing still shows entitled; server denies.
+    getBillingInfoMock.mockResolvedValue({
+      plan: "free",
+      period: "monthly",
+      trialExpired: false,
+      storageUsed: 0,
+      storageLimit: 1 << 30,
+      linksUsed: 0,
+      linksLimit: 20,
+      roomsUsed: 0,
+      roomsLimit: 1,
+      seatsUsed: 1,
+      seatsLimit: 1,
+      customDomainEnabled: true,
+      watermarkEnabled: false,
+      ndaEnabled: false,
+      visitorAskAiEnabled: false,
+    });
+    getWorkspaceSettingsMock.mockResolvedValue({
+      logoUrl: "",
+      brandColor: "#0055ff",
+      viewerDomain: "",
+    });
+    getWorkspaceViewerDomainMock.mockResolvedValue({
+      hostname: "",
+      status: "",
+      cnameHost: "",
+      cnameTarget: "cname.dealsignal.com",
+    });
+    putWorkspaceViewerDomainMock.mockRejectedValue(
+      new ApiError({
+        status: 403,
+        code: "plan_feature_custom_domain",
+        message: "custom domain not available",
+        requestId: "r1",
+      }),
+    );
+
+    await renderPage();
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText("invest.yourdomain.com")).toBeInTheDocument();
+    });
+    fireEvent.change(screen.getByPlaceholderText("invest.yourdomain.com"), {
+      target: { value: "view.example.com" },
+    });
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Add domain" })).toBeEnabled();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add domain" }));
+
+    await waitFor(() => {
+      expect(putWorkspaceViewerDomainMock).toHaveBeenCalledWith("view.example.com");
+      expect(toast.error).toHaveBeenCalled();
+    });
+    const [[message]] = vi.mocked(toast.error).mock.calls;
+    expect(String(message)).toMatch(/Custom viewer domains|not available|Failed to save/i);
   });
 
   it("normalizes stored hex for the native color input", () => {

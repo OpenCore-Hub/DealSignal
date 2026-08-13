@@ -18,15 +18,19 @@ import type { DealRoom } from "@/types";
 interface ActiveRoomsSectionProps {
   rooms: DealRoom[];
   workspaceSlug: string;
+  /** When true, hide create-data-room empty CTA (plan room quota exhausted). */
+  roomsAtCap?: boolean;
 }
 
 export function ActiveRoomsSection({
   rooms,
   workspaceSlug,
+  roomsAtCap = false,
 }: ActiveRoomsSectionProps) {
   const { t } = useTranslation("dashboard");
   const { t: tCommon } = useTranslation("common");
   const { canWrite } = useWorkspaceAccess(workspaceSlug);
+  const canCreateDealRoom = canWrite && !roomsAtCap;
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -85,7 +89,7 @@ export function ActiveRoomsSection({
             title={t("empty.rooms.title")}
             description={t("empty.rooms.description")}
             action={
-              canWrite
+              canCreateDealRoom
                 ? {
                     label: t("empty.rooms.action"),
                     onClick: () => navigate(`/${workspaceSlug}/deal-rooms/new`),

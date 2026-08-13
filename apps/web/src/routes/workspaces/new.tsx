@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
 import { ApiError } from "@/lib/apiClient";
 import { apiErrorMessage } from "@/lib/apiErrors";
+import { useUIStore } from "@/stores/uiStore";
 import { useTranslation } from "react-i18next";
 
 function slugify(name: string): string {
@@ -20,6 +21,7 @@ function slugify(name: string): string {
 export function CreateWorkspacePage() {
   const { t } = useTranslation("common");
   const navigate = useNavigate();
+  const setCurrentWorkspace = useUIStore((s) => s.setCurrentWorkspace);
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
   const [brandColor, setBrandColor] = useState("#0055ff");
@@ -47,6 +49,7 @@ export function CreateWorkspacePage() {
         slug: slug.trim(),
         brand_color: brandColor,
       });
+      setCurrentWorkspace(workspace);
       navigate(`/${workspace.slug}/dashboard`, { replace: true });
     } catch (err) {
       if (

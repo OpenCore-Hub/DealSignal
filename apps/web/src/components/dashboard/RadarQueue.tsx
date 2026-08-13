@@ -42,6 +42,8 @@ interface RadarQueueProps {
     snoozeHours?: SnoozeHours,
     outcome?: RadarOutcome,
   ) => void;
+  /** When true, hide create-data-room CTAs (plan room quota exhausted). */
+  roomsAtCap?: boolean;
 }
 
 export function RadarQueue({
@@ -51,9 +53,11 @@ export function RadarQueue({
   onSelect,
   onPrimary,
   onStatusChange,
+  roomsAtCap = false,
 }: RadarQueueProps) {
   const { t } = useTranslation("dashboard");
   const { canWrite } = useWorkspaceAccess(workspaceSlug);
+  const canCreateDealRoom = canWrite && !roomsAtCap;
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const filter = parseRadarFilter(searchParams.get("filter"));
@@ -302,10 +306,11 @@ export function RadarQueue({
                 <ChartLine size={16} />
                 {t("radar.analyzeInInsights")}
               </Button>
-              {canWrite ? (
+              {canCreateDealRoom ? (
                 <Button
                   variant="ghost"
                   onClick={() => navigate(`/${workspaceSlug}/deal-rooms/new`)}
+                  data-testid="radar-create-deal-room"
                 >
                   {t("empty.actions.createDealRoom")}
                 </Button>
@@ -328,7 +333,7 @@ export function RadarQueue({
             }
             action={
               filter === "all"
-                ? canWrite
+                ? canCreateDealRoom
                   ? {
                       label: t("empty.actions.createDealRoom"),
                       onClick: () =>

@@ -15,7 +15,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useShareLinkLocaleSync } from "@/i18n/useShareLinkLocaleSync";
 import { api, type PublicLinkCredentials } from "@/lib/api";
 import { ApiError, setLinkSessionRefreshHandler } from "@/lib/apiClient";
-import { apiErrorMessage } from "@/lib/apiErrors";
+import { apiErrorMessage, LINK_UNAVAILABLE_CODES } from "@/lib/apiErrors";
 import { cn } from "@/lib/utils";
 import { CanvasViewer } from "./CanvasViewer";
 import { VisitorWorkspacePanel } from "./VisitorWorkspacePanel";
@@ -480,15 +480,8 @@ export function PublicViewerPage() {
       }
 
       const unavailableCodes = new Set([
-        "link_not_found",
-        "link_expired",
-        "link_revoked",
-        "link_disabled",
-        "link_max_access_reached",
+        ...LINK_UNAVAILABLE_CODES,
         "blocked_email",
-        "invite_expired",
-        "invite_revoked",
-        "invite_already_used",
       ]);
       const gateErrorCodes = new Set([
         "invalid_password",

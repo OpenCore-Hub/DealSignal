@@ -76,6 +76,29 @@ describe("KnowledgeOpsStrip", () => {
     );
   });
 
+  it("renders free desk quota as 0 not unlimited", async () => {
+    getOps.mockResolvedValue({
+      scope: "workspace",
+      windowHours: 24,
+      turnsTotal: 0,
+      turnsByStatus: {},
+      answersQuota: { used: 0, limit: 0, included: false, windowHours: 24 },
+      coldArchiveCount: 0,
+      retentionDays: 90,
+    });
+    const i18n = await createTestI18n({ dealRooms });
+    render(
+      <I18nextProvider i18n={i18n}>
+        <KnowledgeOpsStrip roomId="room-1" />
+      </I18nextProvider>,
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId("deal-room-knowledge-ops-quota")).toHaveTextContent(
+        "quota 0/0",
+      );
+    });
+  });
+
   it("shows unavailable when ops fetch fails", async () => {
     getOps.mockRejectedValue(new Error("boom"));
     const i18n = await createTestI18n({ dealRooms });

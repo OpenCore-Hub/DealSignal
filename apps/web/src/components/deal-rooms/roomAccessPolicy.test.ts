@@ -49,6 +49,22 @@ describe("roomAccessPolicy", () => {
     expect(draft.visitorAskExperience).toBe("ai_supervised");
   });
 
+  it("create hydration defaults to host_only when visitor Ask AI is not on the plan", () => {
+    const draft = hydrateCreateDraftFromRoomPolicy(policy, { visitorAskAiEnabled: false });
+    expect(draft.visitorAskExperience).toBe("host_only");
+  });
+
+  it("create hydration clears watermark and NDA when those features are not on the plan", () => {
+    const draft = hydrateCreateDraftFromRoomPolicy(policy, {
+      watermarkEnabled: false,
+      ndaEnabled: false,
+    });
+    expect(draft.watermarkEnabled).toBe(false);
+    expect(draft.enableScreenshotProtection).toBe(false);
+    // Room NDA floor still wins via clamp.
+    expect(draft.requireNda).toBe(true);
+  });
+
   it("clamp refuses turning floors off before save", () => {
     const draft = buildDraft(null, []);
     draft.requireEmailVerification = false;

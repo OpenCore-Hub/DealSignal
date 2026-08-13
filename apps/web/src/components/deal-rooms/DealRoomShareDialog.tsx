@@ -14,9 +14,12 @@ import {
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { ApiError } from "@/lib/apiClient";
+import { apiErrorMessage } from "@/lib/apiErrors";
+import { usageAtCap } from "@/lib/planQuota";
 import { api } from "@/lib/api";
 import type {
   AccessRule,
+  BillingInfo,
   DealRoomAccessPolicy,
   DealRoomFolder,
   DealRoomFolderDocs,
@@ -74,15 +77,17 @@ interface DialogData {
   documents: DealRoomFolderDocs[];
   policy: DealRoomAccessPolicy | null;
   viewerDomain: WorkspaceViewerDomain | null;
+  billing: BillingInfo | null;
 }
 
 async function fetchDialogData(roomId: string, linkId?: string): Promise<DialogData> {
-  const [linksRes, docsRes, foldersRes, policyRes, viewerDomain] = await Promise.all([
+  const [linksRes, docsRes, foldersRes, policyRes, viewerDomain, billing] = await Promise.all([
     api.getDealRoomLinks(roomId),
     api.getDealRoomDocuments(roomId),
     api.getDealRoomFolders(roomId),
     api.getDealRoomAccessPolicy(roomId),
     api.getWorkspaceViewerDomain().catch(() => null),
+    api.getBillingInfo().catch(() => null),
   ]);
   const loadedLinks = linksRes.data;
   const documents = docsRes.data ?? [];
@@ -99,6 +104,7 @@ async function fetchDialogData(roomId: string, linkId?: string): Promise<DialogD
       documents,
       policy,
       viewerDomain,
+      billing,
     };
   }
 
@@ -127,6 +133,7 @@ async function fetchDialogData(roomId: string, linkId?: string): Promise<DialogD
       documents,
       policy,
       viewerDomain,
+      billing,
     };
   }
 
@@ -140,6 +147,7 @@ async function fetchDialogData(roomId: string, linkId?: string): Promise<DialogD
     documents,
     policy,
     viewerDomain,
+    billing,
   };
 }
 
@@ -174,11 +182,30 @@ function DealRoomShareDialogContent({
     [data?.viewerDomain],
   );
   const brandSettingsHref = workspaceSlug ? `/${workspaceSlug}/settings/brand` : undefined;
+  const planFeatures = useMemo(() => {
+    const billing = data?.billing;
+    if (!billing) return undefined;
+    return {
+      watermarkEnabled: billing.watermarkEnabled,
+      ndaEnabled: billing.ndaEnabled,
+      visitorAskAiEnabled: billing.visitorAskAiEnabled,
+      accessControlsEnabled: billing.accessControlsEnabled,
+    };
+  }, [data?.billing]);
+  const linksAtCap = Boolean(
+    data?.billing && usageAtCap(data.billing.linksUsed, data.billing.linksLimit),
+  );
+
   const [draft, setDraft] = useState<DraftLink>(() => {
     if (data?.selectedLink) {
       return hydrateEditDraftFromRoomPolicy(data.selectedLink, data.rules, data.policy);
     }
-    return hydrateCreateDraftFromRoomPolicy(data?.policy);
+    return hydrateCreateDraftFromRoomPolicy(data?.policy, {
+      visitorAskAiEnabled: data?.billing?.visitorAskAiEnabled,
+      watermarkEnabled: data?.billing?.watermarkEnabled,
+      ndaEnabled: data?.billing?.ndaEnabled,
+      accessControlsEnabled: data?.billing?.accessControlsEnabled,
+    });
   });
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -236,7 +263,12 @@ function DealRoomShareDialogContent({
     if (keyChanged) {
       const nextDraft = data?.selectedLink
         ? hydrateEditDraftFromRoomPolicy(data.selectedLink, data.rules, data.policy)
-        : hydrateCreateDraftFromRoomPolicy(data?.policy);
+        : hydrateCreateDraftFromRoomPolicy(data?.policy, {
+            visitorAskAiEnabled: data?.billing?.visitorAskAiEnabled,
+            watermarkEnabled: data?.billing?.watermarkEnabled,
+            ndaEnabled: data?.billing?.ndaEnabled,
+            accessControlsEnabled: data?.billing?.accessControlsEnabled,
+          });
       setDraft(nextDraft);
       setHighlightedFields([]);
       hasUnsavedChangesRef.current = false;
@@ -330,7 +362,12 @@ function DealRoomShareDialogContent({
       if (err instanceof ApiError && err.code === "duplicate_name") {
         toast.error(lt("share.linkNameDuplicate"));
       } else {
-        toast.error(t("common:error.saveFailed"));
+        toast.error(
+          apiErrorMessage(err, {
+            fallback: "saveFailed",
+            messageKey: "common:error.saveFailed",
+          }),
+        );
       }
       return null;
     } finally {
@@ -339,6 +376,10 @@ function DealRoomShareDialogContent({
   };
 
   const handleSave = async () => {
+    if (isNew && linksAtCap) {
+      toast.error(t("share.linkLimitReached"));
+      return;
+    }
     const payloadDraft = clampDraftToRoomPolicy(draft, data?.policy);
     if (payloadDraft !== draft) {
       setDraft(payloadDraft);
@@ -370,8 +411,8 @@ function DealRoomShareDialogContent({
         await api.updateLink(selectedLink.id, { status: checked ? "active" : "revoked" });
         await refetch();
         await onChanged?.();
-      } catch {
-        toast.error(t("common:error.saveFailed"));
+      } catch (err) {
+        toast.error(apiErrorMessage(err, { fallback: "saveFailed" }));
       }
     };
     if (!checked) {
@@ -486,11 +527,17 @@ function DealRoomShareDialogContent({
               ndaTemplates={ndaTemplates}
               documents={resolveNdaDocumentFallback(agreementDocs)}
               linkId={selectedLink?.id}
+              planFeatures={planFeatures}
             />
           </>
         )}
       </div>
 
+      {isNew && linksAtCap ? (
+        <p className="px-1 text-xs text-muted-foreground" data-testid="share-link-limit-hint">
+          {t("share.linkLimitReached")}
+        </p>
+      ) : null}
       <DialogFooter>
         <Button variant="outline" onClick={handleConditionalClose}>
           {t("common:cancel")}
@@ -499,7 +546,11 @@ function DealRoomShareDialogContent({
           className="min-w-[140px]"
           onClick={handleSave}
           disabled={
-            saving || loadingData || !data || Object.keys(validationErrors).length > 0
+            saving ||
+            loadingData ||
+            !data ||
+            Object.keys(validationErrors).length > 0 ||
+            (isNew && linksAtCap)
           }
         >
           {saving ? (
@@ -568,7 +619,9 @@ export function DealRoomShareDialog({
     [open, roomId, linkId]
   );
 
-  const dataKey = linkId ?? data?.selectedLink?.id ?? "new";
+  const dataKey = data
+    ? (linkId ?? data.selectedLink?.id ?? "new")
+    : "loading";
 
   // Close guard: the content registers a function that returns true when
   // unsaved changes exist. The wrapper's onOpenChange defers to it.

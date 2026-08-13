@@ -4,11 +4,14 @@ import { render, screen, waitFor, fireEvent, within } from "@testing-library/rea
 import { UploadDialog } from "./UploadDialog";
 
 const uploadDocumentMock = vi.hoisted(() => vi.fn());
+const getBillingInfoMock = vi.hoisted(() => vi.fn());
 const setUploadDialogOpen = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/api", () => ({
   api: {
     uploadDocument: uploadDocumentMock,
+    checkDocumentExists: vi.fn().mockResolvedValue({ exists: false }),
+    getBillingInfo: getBillingInfoMock,
   },
 }));
 
@@ -67,6 +70,8 @@ vi.mock("sonner", () => ({
 describe("UploadDialog nested conflict prompt", () => {
   beforeEach(() => {
     uploadDocumentMock.mockReset();
+    getBillingInfoMock.mockReset();
+    getBillingInfoMock.mockResolvedValue(null);
     setUploadDialogOpen.mockReset();
   });
 

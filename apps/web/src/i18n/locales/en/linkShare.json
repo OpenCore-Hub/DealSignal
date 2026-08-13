@@ -76,6 +76,7 @@
       "requireVerificationDescription": "Send a one-time code; identity comes from the code (no email field on the visitor page)",
       "verificationDisabledForDocuments": "Email verification requires contacts and is only available for data room links",
       "verificationFloorLocked": "Required by access policy — cannot be turned off on this link",
+      "accessControlsPlanRequired": "Email verification and allow/block lists require Business or higher",
       "requirePassword": "Require password to view",
       "requirePasswordDescription": "Viewer must enter a password",
       "passwordPlaceholder": "Enter password",
@@ -99,8 +100,10 @@
       "description": "Reduce leakage risk with watermarks, NDA gates, and download controls.",
       "watermark": "Apply watermark",
       "watermarkDescription": "Overlay viewer email on documents",
+      "watermarkPlanRequired": "Watermark requires Pro or higher",
       "requireNda": "Require NDA to view",
       "requireNdaDescription": "Viewer must agree to NDA before access",
+      "ndaPlanRequired": "NDA requires Business or higher",
       "ndaFloorLocked": "Required by access policy — select the NDA document below",
       "ndaDocument": "NDA agreement document",
       "ndaDocumentPlaceholder": "Select a document",
@@ -108,6 +111,7 @@
       "allowDownloadingDescription": "Allow viewers to download documents",
       "screenshotProtection": "Screenshot protection",
       "screenshotProtectionDescription": "Reduce leak risk",
+      "screenshotPlanRequired": "Screenshot protection requires Pro or higher",
       "comingSoon": "Coming soon"
     },
     "advanced": {
@@ -123,7 +127,8 @@
         "aiSupervised": "AI first, host fallback",
         "aiSelfServe": "AI replies",
         "formal": "Review & publish",
-        "formalNotEntitled": "Formal Q&A requires an entitled plan (Enterprise or trial)."
+        "formalNotEntitled": "Formal Q&A requires an entitled plan (Enterprise or trial).",
+        "askAiPlanRequired": "Visitor Ask AI requires Pro or higher"
       },
       "fileRequests": "Enable file requests",
       "fileRequestsDescription": "Allow viewers to request additional files",

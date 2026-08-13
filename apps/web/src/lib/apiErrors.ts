@@ -43,11 +43,12 @@ const VIEWER_INLINE_KEYS: Record<string, string> = {
   blocked_email: "documents:viewer.emailBlocked",
 };
 
-const LINK_UNAVAILABLE_CODES = new Set([
+export const LINK_UNAVAILABLE_CODES = new Set([
   "link_not_found",
   "link_expired",
   "link_revoked",
   "link_disabled",
+  "link_archived",
   "link_max_access_reached",
   "invite_expired",
   "invite_revoked",
@@ -119,6 +120,9 @@ export function apiErrorMessage(
   if (options.context === "acceptInvitation") {
     if (code === "invitation_email_mismatch" || code === "email_mismatch") {
       return translate("auth:acceptInvitation.emailMismatch");
+    }
+    if (code === "plan_limit_seats" && hasKey("auth:acceptInvitation.planLimitSeats")) {
+      return translate("auth:acceptInvitation.planLimitSeats");
     }
   }
 

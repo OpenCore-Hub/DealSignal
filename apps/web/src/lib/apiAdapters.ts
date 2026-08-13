@@ -1,4 +1,7 @@
 import type {
+  BillingInfo,
+  BillingPlanOffer,
+  BillingPlansResponse,
   IntegrationStatus,
   OutboundWebhookConfig,
   PermissionConfig,
@@ -365,4 +368,230 @@ export function toWorkspaceMembers(
 ): WorkspaceMember[] {
   const rows = Array.isArray(backend) ? backend : (backend?.data ?? []);
   return rows.map((row) => toWorkspaceMember(row));
+}
+
+/** GET /billing — backend uses snake_case bytes/counts; UI uses BillingInfo. */
+export type BackendBillingInfo = {
+  plan?: string;
+  period?: string;
+  trial_expired?: boolean;
+  trialExpired?: boolean;
+  trial_ends_at?: string;
+  trialEndsAt?: string;
+  storage_used?: number;
+  storageUsed?: number;
+  storage_limit?: number;
+  storageLimit?: number;
+  links_used?: number;
+  linksUsed?: number;
+  links_limit?: number;
+  linksLimit?: number;
+  rooms_used?: number;
+  roomsUsed?: number;
+  rooms_limit?: number;
+  roomsLimit?: number;
+  seats_used?: number;
+  seatsUsed?: number;
+  seats_limit?: number;
+  seatsLimit?: number;
+  documents_used?: number;
+  documentsUsed?: number;
+  documents_limit?: number;
+  documentsLimit?: number;
+  ask_ai_used?: number;
+  askAiUsed?: number;
+  ask_ai_limit?: number;
+  askAiLimit?: number;
+  knowledge_answers_used?: number;
+  knowledgeAnswersUsed?: number;
+  knowledge_answers_limit?: number;
+  knowledgeAnswersLimit?: number;
+  max_upload_bytes?: number;
+  maxUploadBytes?: number;
+  custom_domain_enabled?: boolean;
+  customDomainEnabled?: boolean;
+  watermark_enabled?: boolean;
+  watermarkEnabled?: boolean;
+  nda_enabled?: boolean;
+  ndaEnabled?: boolean;
+  visitor_ask_ai_enabled?: boolean;
+  visitorAskAiEnabled?: boolean;
+  branding_enabled?: boolean;
+  brandingEnabled?: boolean;
+  access_controls_enabled?: boolean;
+  accessControlsEnabled?: boolean;
+  knowledge_desk_enabled?: boolean;
+  knowledgeDeskEnabled?: boolean;
+  webhooks_enabled?: boolean;
+  webhooksEnabled?: boolean;
+  hubspot_enabled?: boolean;
+  hubspotEnabled?: boolean;
+  daily_digest_enabled?: boolean;
+  dailyDigestEnabled?: boolean;
+  slack_alerts_enabled?: boolean;
+  slackAlertsEnabled?: boolean;
+  room_analytics_enabled?: boolean;
+  roomAnalyticsEnabled?: boolean;
+  room_insights_enabled?: boolean;
+  roomInsightsEnabled?: boolean;
+  formal_ask_enabled?: boolean;
+  formalAskEnabled?: boolean;
+  billing_status?: string;
+  billingStatus?: string;
+  has_stripe_subscription?: boolean;
+  hasStripeSubscription?: boolean;
+  current_period_end?: string;
+  currentPeriodEnd?: string;
+  data?: BackendBillingInfo;
+};
+
+function asFiniteNumber(value: unknown, fallback = 0): number {
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+export function toBillingInfo(backend: BackendBillingInfo | null | undefined): BillingInfo {
+  const src = backend?.data ?? backend ?? {};
+  const trialEndsAtRaw = src.trial_ends_at ?? src.trialEndsAt;
+  const trialEndsAt =
+    typeof trialEndsAtRaw === "string" && trialEndsAtRaw.trim() ? trialEndsAtRaw.trim() : undefined;
+  return {
+    plan: (src.plan ?? "free").trim() || "free",
+    period: (src.period ?? "monthly").trim() || "monthly",
+    trialExpired: Boolean(src.trial_expired ?? src.trialExpired),
+    ...(trialEndsAt ? { trialEndsAt } : {}),
+    storageUsed: asFiniteNumber(src.storage_used ?? src.storageUsed),
+    storageLimit: asFiniteNumber(src.storage_limit ?? src.storageLimit),
+    linksUsed: asFiniteNumber(src.links_used ?? src.linksUsed),
+    linksLimit: asFiniteNumber(src.links_limit ?? src.linksLimit),
+    roomsUsed: asFiniteNumber(src.rooms_used ?? src.roomsUsed),
+    roomsLimit: asFiniteNumber(src.rooms_limit ?? src.roomsLimit),
+    seatsUsed: asFiniteNumber(src.seats_used ?? src.seatsUsed),
+    seatsLimit: asFiniteNumber(src.seats_limit ?? src.seatsLimit),
+    documentsUsed: asFiniteNumber(src.documents_used ?? src.documentsUsed),
+    documentsLimit: asFiniteNumber(src.documents_limit ?? src.documentsLimit),
+    askAiUsed: asFiniteNumber(src.ask_ai_used ?? src.askAiUsed),
+    askAiLimit: asFiniteNumber(src.ask_ai_limit ?? src.askAiLimit),
+    knowledgeAnswersUsed: asFiniteNumber(src.knowledge_answers_used ?? src.knowledgeAnswersUsed),
+    knowledgeAnswersLimit: asFiniteNumber(src.knowledge_answers_limit ?? src.knowledgeAnswersLimit),
+    maxUploadBytes: asFiniteNumber(src.max_upload_bytes ?? src.maxUploadBytes),
+    customDomainEnabled: Boolean(src.custom_domain_enabled ?? src.customDomainEnabled),
+    watermarkEnabled: Boolean(src.watermark_enabled ?? src.watermarkEnabled),
+    ndaEnabled: Boolean(src.nda_enabled ?? src.ndaEnabled),
+    visitorAskAiEnabled: Boolean(src.visitor_ask_ai_enabled ?? src.visitorAskAiEnabled),
+    brandingEnabled: Boolean(src.branding_enabled ?? src.brandingEnabled),
+    accessControlsEnabled: Boolean(src.access_controls_enabled ?? src.accessControlsEnabled),
+    knowledgeDeskEnabled: Boolean(src.knowledge_desk_enabled ?? src.knowledgeDeskEnabled),
+    webhooksEnabled: Boolean(src.webhooks_enabled ?? src.webhooksEnabled),
+    hubspotEnabled: Boolean(src.hubspot_enabled ?? src.hubspotEnabled),
+    dailyDigestEnabled: Boolean(src.daily_digest_enabled ?? src.dailyDigestEnabled),
+    slackAlertsEnabled: Boolean(src.slack_alerts_enabled ?? src.slackAlertsEnabled),
+    roomAnalyticsEnabled: Boolean(src.room_analytics_enabled ?? src.roomAnalyticsEnabled),
+    roomInsightsEnabled: Boolean(src.room_insights_enabled ?? src.roomInsightsEnabled),
+    formalAskEnabled: Boolean(src.formal_ask_enabled ?? src.formalAskEnabled),
+    hasStripeSubscription: Boolean(src.has_stripe_subscription ?? src.hasStripeSubscription),
+    ...(typeof (src.billing_status ?? src.billingStatus) === "string" &&
+    String(src.billing_status ?? src.billingStatus).trim()
+      ? { billingStatus: String(src.billing_status ?? src.billingStatus).trim() }
+      : {}),
+    ...(typeof (src.current_period_end ?? src.currentPeriodEnd) === "string" &&
+    String(src.current_period_end ?? src.currentPeriodEnd).trim()
+      ? { currentPeriodEnd: String(src.current_period_end ?? src.currentPeriodEnd).trim() }
+      : {}),
+  };
+}
+
+export type BackendBillingPlanOffer = {
+  code?: string;
+  internal_seats?: number;
+  internalSeats?: number;
+  storage_bytes?: number;
+  storageBytes?: number;
+  documents?: number;
+  links?: number;
+  rooms?: number;
+  max_upload_bytes?: number;
+  maxUploadBytes?: number;
+  visitor_ask_ai_monthly?: number;
+  visitorAskAiMonthly?: number;
+  custom_domain?: boolean;
+  customDomain?: boolean;
+  watermark?: boolean;
+  nda?: boolean;
+  visitor_ask_ai?: boolean;
+  visitorAskAi?: boolean;
+  branding?: boolean;
+  access_controls?: boolean;
+  accessControls?: boolean;
+  formal_ask?: boolean;
+  formalAsk?: boolean;
+  price_monthly_usd?: number;
+  priceMonthlyUsd?: number;
+  custom_pricing?: boolean;
+  customPricing?: boolean;
+  highlighted?: boolean;
+};
+
+export type BackendBillingPlansResponse = {
+  current_plan?: string;
+  currentPlan?: string;
+  current_period?: string;
+  currentPeriod?: string;
+  trial_expired?: boolean;
+  trialExpired?: boolean;
+  trial_ends_at?: string;
+  trialEndsAt?: string;
+  billing_status?: string;
+  billingStatus?: string;
+  has_stripe_subscription?: boolean;
+  hasStripeSubscription?: boolean;
+  plans?: BackendBillingPlanOffer[];
+  data?: BackendBillingPlansResponse;
+};
+
+export function toBillingPlanOffer(raw: BackendBillingPlanOffer | null | undefined): BillingPlanOffer {
+  const src = raw ?? {};
+  return {
+    code: (src.code ?? "free").trim().toLowerCase() || "free",
+    internalSeats: asFiniteNumber(src.internal_seats ?? src.internalSeats),
+    storageBytes: asFiniteNumber(src.storage_bytes ?? src.storageBytes),
+    documents: asFiniteNumber(src.documents),
+    links: asFiniteNumber(src.links),
+    rooms: asFiniteNumber(src.rooms),
+    maxUploadBytes: asFiniteNumber(src.max_upload_bytes ?? src.maxUploadBytes),
+    visitorAskAiMonthly: asFiniteNumber(src.visitor_ask_ai_monthly ?? src.visitorAskAiMonthly),
+    customDomain: Boolean(src.custom_domain ?? src.customDomain),
+    watermark: Boolean(src.watermark),
+    nda: Boolean(src.nda),
+    visitorAskAi: Boolean(src.visitor_ask_ai ?? src.visitorAskAi),
+    branding: Boolean(src.branding),
+    accessControls: Boolean(src.access_controls ?? src.accessControls),
+    formalAsk: Boolean(src.formal_ask ?? src.formalAsk),
+    priceMonthlyUsd: asFiniteNumber(src.price_monthly_usd ?? src.priceMonthlyUsd),
+    customPricing: Boolean(src.custom_pricing ?? src.customPricing),
+    highlighted: Boolean(src.highlighted),
+  };
+}
+
+export function toBillingPlansResponse(
+  backend: BackendBillingPlansResponse | null | undefined,
+): BillingPlansResponse {
+  const src = backend?.data ?? backend ?? {};
+  const trialEndsAtRaw = src.trial_ends_at ?? src.trialEndsAt;
+  const trialEndsAt =
+    typeof trialEndsAtRaw === "string" && trialEndsAtRaw.trim() ? trialEndsAtRaw.trim() : undefined;
+  const plans = Array.isArray(src.plans) ? src.plans.map((p) => toBillingPlanOffer(p)) : [];
+  return {
+    currentPlan: (src.current_plan ?? src.currentPlan ?? "free").trim().toLowerCase() || "free",
+    currentPeriod:
+      (src.current_period ?? src.currentPeriod ?? "monthly").trim().toLowerCase() || "monthly",
+    trialExpired: Boolean(src.trial_expired ?? src.trialExpired),
+    ...(trialEndsAt ? { trialEndsAt } : {}),
+    billingStatus:
+      typeof (src.billing_status ?? src.billingStatus) === "string"
+        ? String(src.billing_status ?? src.billingStatus).trim() || undefined
+        : undefined,
+    hasStripeSubscription: Boolean(src.has_stripe_subscription ?? src.hasStripeSubscription),
+    plans,
+  };
 }

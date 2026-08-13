@@ -7,6 +7,7 @@ import { api } from "@/lib/api";
 import { ApiError } from "@/lib/apiClient";
 import type { Link, LinkAnalytics } from "@/types";
 import { AnalyticsTab } from "./AnalyticsTab";
+import { useWorkspaceAccess } from "@/hooks/useWorkspaceAccess";
 import enLinkShare from "@/i18n/locales/en/linkShare.json";
 import { toast } from "sonner";
 
@@ -678,5 +679,35 @@ describe("AnalyticsTab", () => {
     expect(screen.getByText("Refuse rate")).toBeInTheDocument();
     expect(screen.getByText("Escalation rate")).toBeInTheDocument();
     expect(screen.getAllByText("33%").length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("does not fetch management data or toast for read-only guests", async () => {
+    vi.mocked(useWorkspaceAccess).mockReturnValue({
+      role: "guest",
+      loading: false,
+      canRead: true,
+      canWrite: false,
+      canManage: false,
+      isGuest: true,
+    });
+    vi.mocked(api.getLinkAnalytics).mockResolvedValue({ data: emptyAnalytics });
+    vi.mocked(api.listLinkAsk).mockRejectedValue(
+      new ApiError({ status: 403, code: "forbidden", message: "forbidden", requestId: "r1" }),
+    );
+
+    render(
+      <Wrapper>
+        <AnalyticsTab link={baseLink} logs={[]} />
+      </Wrapper>,
+    );
+
+    await waitFor(() => {
+      expect(api.getLinkAnalytics).toHaveBeenCalledWith("link-1");
+    });
+    expect(api.listLinkAsk).not.toHaveBeenCalled();
+    expect(api.listLinkFileRequests).not.toHaveBeenCalled();
+    expect(toast.error).not.toHaveBeenCalled();
+    expect(screen.queryByRole("tab", { name: /Engage/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /Visitors/i })).toBeInTheDocument();
   });
 });

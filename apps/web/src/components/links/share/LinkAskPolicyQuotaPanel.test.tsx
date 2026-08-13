@@ -112,4 +112,26 @@ describe("LinkAskPolicyQuotaPanel", () => {
       ).toBeInTheDocument();
     });
   });
+
+  it("shows paywall when plan does not include visitor Ask AI", async () => {
+    vi.mocked(api.getLinkAskPolicy).mockResolvedValue({
+      data: {
+        id: "link-1",
+        askMode: "supervised",
+        askAiEnabled: true,
+        askAiMonthlyQuota: null,
+        askAiMonthlyUsed: 3,
+        askAiMonthlyLimit: 0,
+        askAiQuotaExceeded: true,
+        askAiEntitled: true,
+        formalEntitled: false,
+      },
+    });
+
+    renderPanel("ai_supervised");
+
+    await waitFor(() => {
+      expect(screen.getByText(/Monthly AI quota reached/i)).toBeInTheDocument();
+    });
+  });
 });

@@ -76,6 +76,9 @@ i18nInstance.use(initReactI18next).init({
         delete: "Delete",
         retry: "Retry",
         emDash: "—",
+        "error.saveFailed": "Save failed",
+        "error.codes.plan_limit_links":
+          "You've reached the share link limit for your plan. Upgrade to create more.",
       },
       linkShare: {
         activity: { title: "Link activity" },
@@ -350,5 +353,40 @@ describe("FolderPermissionsSection refresh", () => {
     await waitFor(() => {
       expect(api.deleteLink).toHaveBeenCalledWith("link-2");
     });
+  });
+
+  it("toggles Active via updateLink and surfaces plan_limit_links on reactivate denial", async () => {
+    const { toast } = await import("sonner");
+    const { ApiError } = await import("@/lib/apiClient");
+    vi.mocked(api.getDealRoomLinks).mockResolvedValue(
+      pageResponse([makeLink({ id: "link-1", name: "Investor pack", isActive: false })]),
+    );
+    vi.mocked(api.getPendingLinkAccessRequests).mockResolvedValue({ data: [] });
+    vi.mocked(api.updateLink).mockRejectedValue(
+      new ApiError({
+        status: 403,
+        code: "plan_limit_links",
+        message: "share link limit reached for this plan",
+        requestId: "r1",
+      }),
+    );
+
+    render(
+      <I18nextProvider i18n={i18nInstance}>
+        <FolderPermissionsSection roomId="room-1" />
+      </I18nextProvider>,
+    );
+
+    await screen.findByTestId("deal-room-link-row-link-1");
+    const toggle = screen.getByRole("switch", { name: "Active" });
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+    fireEvent.click(toggle);
+
+    await waitFor(() => {
+      expect(api.updateLink).toHaveBeenCalledWith("link-1", { status: "active" });
+      expect(toast.error).toHaveBeenCalled();
+    });
+    const [[message]] = vi.mocked(toast.error).mock.calls;
+    expect(String(message)).toMatch(/share link limit/i);
   });
 });

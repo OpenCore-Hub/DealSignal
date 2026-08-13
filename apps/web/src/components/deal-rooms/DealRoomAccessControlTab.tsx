@@ -49,6 +49,10 @@ export function DealRoomAccessControlTab({
     () => api.getDealRoomAccessPolicy(roomId).then((res) => res.data),
     [roomId],
   );
+  const { data: billing } = useAsyncData(
+    () => (canWrite ? api.getBillingInfo().catch(() => null) : Promise.resolve(null)),
+    [canWrite],
+  );
 
   const setDirtyState = useCallback(
     (next: boolean) => {
@@ -89,6 +93,14 @@ export function DealRoomAccessControlTab({
     },
     [setDirtyState],
   );
+
+  const verifyEnableBlocked =
+    billing != null && billing.accessControlsEnabled === false && !draft.requireEmailVerification;
+  const blocklistEnableBlocked =
+    billing != null &&
+    billing.accessControlsEnabled === false &&
+    draft.blockedViewers.length === 0;
+  const ndaEnableBlocked = billing != null && billing.ndaEnabled === false && !draft.requireNda;
 
   const handleSave = async () => {
     setSaving(true);
@@ -134,10 +146,17 @@ export function DealRoomAccessControlTab({
             <CardContent>
               <ContactEmailTagInput
                 values={draft.blockedViewers}
-                onChange={(values) => updateDraft({ blockedViewers: values })}
+                onChange={(values) => {
+                  if (blocklistEnableBlocked && values.length > 0) return;
+                  updateDraft({ blockedViewers: values });
+                }}
                 placeholder={lt("accessRules.blockedViewers.placeholder")}
-                hint={lt("accessRules.blockedViewers.roomHint")}
-                disabled={!canWrite}
+                hint={
+                  blocklistEnableBlocked
+                    ? t("accessControl.accessControlsPlanRequired")
+                    : lt("accessRules.blockedViewers.roomHint")
+                }
+                disabled={!canWrite || blocklistEnableBlocked}
               />
             </CardContent>
           </Card>
@@ -149,32 +168,48 @@ export function DealRoomAccessControlTab({
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              <div className="flex items-center justify-between gap-4">
-                <Label className="text-xs font-normal text-foreground/80">
-                  {t("accessControl.floorMustVerify")}
-                </Label>
-                <Switch
-                  checked={draft.requireEmailVerification}
-                  onCheckedChange={(checked) =>
-                    updateDraft({
-                      requireEmailVerification: checked,
-                      requireEmail: checked ? false : draft.requireEmail,
-                    })
-                  }
-                  disabled={!canWrite}
-                  aria-label={t("accessControl.floorMustVerify")}
-                />
+              <div className="space-y-1">
+                <div className="flex items-center justify-between gap-4">
+                  <Label className="text-xs font-normal text-foreground/80">
+                    {t("accessControl.floorMustVerify")}
+                  </Label>
+                  <Switch
+                    checked={draft.requireEmailVerification}
+                    onCheckedChange={(checked) => {
+                      if (checked && verifyEnableBlocked) return;
+                      updateDraft({
+                        requireEmailVerification: checked,
+                        requireEmail: checked ? false : draft.requireEmail,
+                      });
+                    }}
+                    disabled={!canWrite || verifyEnableBlocked}
+                    aria-label={t("accessControl.floorMustVerify")}
+                  />
+                </div>
+                {verifyEnableBlocked ? (
+                  <p className="text-xs text-muted-foreground">
+                    {t("accessControl.accessControlsPlanRequired")}
+                  </p>
+                ) : null}
               </div>
-              <div className="flex items-center justify-between gap-4">
-                <Label className="text-xs font-normal text-foreground/80">
-                  {t("accessControl.floorMustNda")}
-                </Label>
-                <Switch
-                  checked={draft.requireNda}
-                  onCheckedChange={(checked) => updateDraft({ requireNda: checked })}
-                  disabled={!canWrite}
-                  aria-label={t("accessControl.floorMustNda")}
-                />
+              <div className="space-y-1">
+                <div className="flex items-center justify-between gap-4">
+                  <Label className="text-xs font-normal text-foreground/80">
+                    {t("accessControl.floorMustNda")}
+                  </Label>
+                  <Switch
+                    checked={draft.requireNda}
+                    onCheckedChange={(checked) => {
+                      if (checked && ndaEnableBlocked) return;
+                      updateDraft({ requireNda: checked });
+                    }}
+                    disabled={!canWrite || ndaEnableBlocked}
+                    aria-label={t("accessControl.floorMustNda")}
+                  />
+                </div>
+                {ndaEnableBlocked ? (
+                  <p className="text-xs text-muted-foreground">{t("accessControl.ndaPlanRequired")}</p>
+                ) : null}
               </div>
             </CardContent>
           </Card>

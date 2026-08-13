@@ -4,6 +4,7 @@ import { render, screen, waitFor, fireEvent, act } from "@testing-library/react"
 import { I18nextProvider } from "react-i18next";
 import { createTestI18n } from "@/i18n/test-utils";
 import { DealRoomAccessRequestsPanel } from "./DealRoomAccessRequestsPanel";
+import { useWorkspaceAccess } from "@/hooks/useWorkspaceAccess";
 
 const {
   getDealRoomAccessRequestsMock,
@@ -77,6 +78,14 @@ async function renderPanel(opts?: { focusLinkId?: string }) {
 
 describe("DealRoomAccessRequestsPanel", () => {
   beforeEach(() => {
+    vi.mocked(useWorkspaceAccess).mockReturnValue({
+      role: "member",
+      loading: false,
+      canRead: true,
+      canWrite: true,
+      canManage: false,
+      isGuest: false,
+    });
     getDealRoomAccessRequestsMock.mockReset();
     getPendingLinkAccessRequestsMock.mockReset();
     approveLinkAccessRequestMock.mockReset();
@@ -112,6 +121,22 @@ describe("DealRoomAccessRequestsPanel", () => {
       scope: "deal_room",
       dealRoomId: "room-1",
     });
+  });
+
+  it("does not fetch or show an error for read-only guests", async () => {
+    vi.mocked(useWorkspaceAccess).mockReturnValue({
+      role: "guest",
+      loading: false,
+      canRead: true,
+      canWrite: false,
+      canManage: false,
+      isGuest: false,
+    });
+    await renderPanel();
+    expect(getDealRoomAccessRequestsMock).not.toHaveBeenCalled();
+    expect(getPendingLinkAccessRequestsMock).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("deal-room-access-requests-error")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("deal-room-access-requests-panel")).not.toBeInTheDocument();
   });
 
   it("approves via the link access-request API", async () => {

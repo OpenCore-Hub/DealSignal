@@ -187,6 +187,40 @@ describe("PublicViewerPage", () => {
     expect(screen.queryByText("common:error.loadFailed")).not.toBeInTheDocument();
   });
 
+  it("shows a dedicated unavailable screen for archived share links", async () => {
+    accessPublicLinkMock.mockRejectedValue(
+      new ApiError({
+        status: 410,
+        code: "link_archived",
+        message: "link archived",
+        requestId: "req-archived",
+      })
+    );
+    const i18n = await createTestI18n({
+      documents: {
+        viewer: {
+          link_archivedTitle: "Link inactive",
+          link_archivedDescription:
+            "This share link is no longer active. Please contact the sender if you need access.",
+        },
+      },
+      common: { backToHome: "Back to home" },
+    });
+
+    await renderPage("archived-token", i18n);
+
+    await waitFor(() => {
+      expect(screen.getByText("Link inactive")).toBeInTheDocument();
+    });
+    expect(
+      screen.getByText(
+        "This share link is no longer active. Please contact the sender if you need access.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("viewer.gateTitle")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /continue/i })).not.toBeInTheDocument();
+  });
+
   it("renders only access code input for modern document link verification (requiresEmail=false)", async () => {
     accessPublicLinkMock.mockRejectedValue(
       new ApiError({

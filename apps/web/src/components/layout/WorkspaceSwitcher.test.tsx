@@ -16,6 +16,10 @@ const mockWorkspaces: Workspace[] = [
   { id: "ws_2", name: "mock.workspaces.ventura.name", slug: "ventura-fund" },
 ];
 
+const storeState = vi.hoisted(() => ({
+  currentWorkspace: null as Workspace | null,
+}));
+
 const { apiMock, resolveGetWorkspaces } = vi.hoisted(() => {
   let resolve: (value: { data: Workspace[] }) => void = () => {};
   return {
@@ -33,7 +37,7 @@ vi.mock("@/lib/api", () => ({ api: apiMock }));
 vi.mock("@/stores/uiStore", () => ({
   useUIStore: (selector?: (state: { currentWorkspace: Workspace | null; setCurrentWorkspace: (w: Workspace) => void }) => unknown) => {
     const state = {
-      currentWorkspace: null,
+      currentWorkspace: storeState.currentWorkspace,
       setCurrentWorkspace: setCurrentWorkspaceMock,
     };
     return selector ? selector(state) : state;
@@ -60,6 +64,7 @@ describe("WorkspaceSwitcher", () => {
     navigateMock.mockClear();
     toastInfoMock.mockClear();
     apiMock.getWorkspaces.mockClear();
+    storeState.currentWorkspace = null;
   });
 
   const renderWithProviders = async (initialRoute = "/acme-capital/dashboard") => {
@@ -108,6 +113,23 @@ describe("WorkspaceSwitcher", () => {
       expect(setCurrentWorkspaceMock).toHaveBeenCalledWith(mockWorkspaces[1]);
     });
     expect(navigateMock).toHaveBeenCalledWith("/ventura-fund/dashboard");
+  });
+
+  it("marks the URL workspace when persisted store still holds another tenant", async () => {
+    storeState.currentWorkspace = mockWorkspaces[0];
+    await renderWithProviders("/ventura-fund/dashboard");
+    await loadWorkspaces();
+
+    expect(await screen.findByText("Ventura Fund")).toBeInTheDocument();
+
+    fireEvent.click(await screen.findByRole("button", { name: /Switch workspace/i }));
+    const venturaItem = await screen.findByRole("menuitem", { name: /Ventura Fund/i });
+    const acmeItem = await screen.findByRole("menuitem", { name: /Acme Capital/i });
+    expect(venturaItem).toHaveAttribute("aria-current", "true");
+    expect(acmeItem).not.toHaveAttribute("aria-current");
+    await waitFor(() => {
+      expect(setCurrentWorkspaceMock).toHaveBeenCalledWith(mockWorkspaces[1]);
+    });
   });
 
   it("navigates to create workspace page", async () => {

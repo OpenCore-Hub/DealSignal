@@ -21,7 +21,11 @@
     "replaceConfirm": "Overwrite",
     "replaceCancel": "Discard",
     "replaceCancelled": "Upload discarded",
-    "blockedFilesSkipped": "Skipped hidden, empty, or temporary files. Close open workbooks and try again."
+    "blockedFilesSkipped": "Skipped hidden, empty, or temporary files. Close open workbooks and try again.",
+    "storageUsage": "Storage",
+    "storageLimitReached": "You've reached the storage limit for your plan. Remove files or upgrade to upload more. Replacing an existing file with a smaller one is still allowed.",
+    "documentsUsage": "Documents",
+    "documentsLimitReached": "You've reached the document limit for your plan. Remove files or upgrade to upload more. Replacing an existing file does not count as a new document."
   },
   "category": {
     "agreement": "Agreement",
@@ -70,7 +74,8 @@
     "downloadFailed": "Failed to download document",
     "deleteBusy": "Wait until upload or processing finishes before deleting",
     "archived": "Document archived",
-    "unarchived": "Document unarchived",
+    "unarchived": "Document restored. Share links stay inactive until you renew them.",
+    "unarchivedRenewAction": "Open Links",
     "archiveFailed": "Failed to update document status",
     "archiveDisabled": "Only ready documents can be archived",
     "archivedActionDisabled": "Unarchive the document to use this action"
@@ -93,6 +98,7 @@
     "title": "Archive document?",
     "description": "“{{name}}” will move to Archived in your library.",
     "visitorRevoke": "Visitors will no longer be able to open this document through existing share links.",
+    "unarchiveDoesNotRestore": "Unarchiving later will not automatically reactivate those share links. Renew them from Links.",
     "withLinks_one": "This document is on {{count}} active share link.",
     "withLinks_other": "This document is on {{count}} active share links.",
     "confirmLoading": "Archiving…"
@@ -287,6 +293,8 @@
     "link_revokedDescription": "This share link has been disabled. Please contact the sender for a new link.",
     "link_disabledTitle": "Link inactive",
     "link_disabledDescription": "This share link is currently inactive. Please contact the sender to check if it can be re-enabled.",
+    "link_archivedTitle": "Link inactive",
+    "link_archivedDescription": "This share link is no longer active. Please contact the sender if you need access.",
     "link_max_access_reachedTitle": "Access limit reached",
     "link_max_access_reachedDescription": "This link has reached its access limit. Please contact the sender.",
     "blocked_emailTitle": "Access unavailable",

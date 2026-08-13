@@ -29,9 +29,9 @@ export function isDocumentExistsError(err: unknown): boolean {
 }
 
 /**
- * Shared upload helper: on 409 document_exists, ask Replace/Cancel once,
- * then retry with replace=true. Serializes concurrent prompts so multi-file
- * uploads never stack dialogs.
+ * Shared upload helper: preflight same-name conflict, ask Replace/Cancel,
+ * then upload bytes once. 409 document_exists remains a race fallback.
+ * Serializes concurrent prompts so multi-file uploads never stack dialogs.
  */
 export function useDocumentUploadConflict(opts?: {
   onAwaitingConflictChange?: (awaiting: boolean) => void;
@@ -94,17 +94,31 @@ export function useDocumentUploadConflict(opts?: {
 
   const uploadDocument = useCallback(
     async (file: File, category?: string): Promise<Document> => {
+      const confirmReplace = async () => {
+        const decision = await askReplace(file.name);
+        if (decision === "cancel") {
+          throw new UploadCancelledError(t("upload.replaceCancelled"));
+        }
+        return api.uploadDocument(file, category, { replace: true });
+      };
+
+      let knownConflict = false;
+      try {
+        const check = await api.checkDocumentExists(file.name);
+        knownConflict = Boolean(check.exists);
+      } catch {
+        // Preflight is best-effort; upload still handles 409 document_exists.
+      }
+      if (knownConflict) {
+        return confirmReplace();
+      }
       try {
         return await api.uploadDocument(file, category);
       } catch (err) {
         if (!isDocumentExistsError(err)) {
           throw err;
         }
-        const decision = await askReplace(file.name);
-        if (decision === "cancel") {
-          throw new UploadCancelledError(t("upload.replaceCancelled"));
-        }
-        return api.uploadDocument(file, category, { replace: true });
+        return confirmReplace();
       }
     },
     [askReplace, t],

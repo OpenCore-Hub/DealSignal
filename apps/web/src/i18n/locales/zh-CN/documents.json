@@ -21,7 +21,11 @@
     "replaceConfirm": "覆盖",
     "replaceCancel": "放弃",
     "replaceCancelled": "已放弃上传",
-    "blockedFilesSkipped": "已跳过隐藏、空文件或临时文件。请先关闭已打开的工作簿后再试。"
+    "blockedFilesSkipped": "已跳过隐藏、空文件或临时文件。请先关闭已打开的工作簿后再试。",
+    "storageUsage": "存储空间",
+    "storageLimitReached": "已达到当前方案的存储上限，请删除文件或升级后再上传。用更小的文件覆盖已有文档仍可进行。",
+    "documentsUsage": "文档数",
+    "documentsLimitReached": "已达到当前方案的文档数量上限，请删除文件或升级后再上传。覆盖已有文档不计入新文档。"
   },
   "category": {
     "agreement": "协议",
@@ -65,7 +69,8 @@
     "downloadFailed": "下载文档失败",
     "deleteBusy": "请等待上传或解析完成后再删除",
     "archived": "文档已归档",
-    "unarchived": "文档已取消归档",
+    "unarchived": "文档已取消归档。分享链接仍未激活，请在「链接」中重新启用。",
+    "unarchivedRenewAction": "前往链接",
     "archiveFailed": "更新文档状态失败",
     "archiveDisabled": "仅已完成文档可归档",
     "archivedActionDisabled": "请先取消归档后再使用此操作"
@@ -88,6 +93,7 @@
     "title": "归档文档？",
     "description": "“{{name}}” 将移至文档库的「已归档」。",
     "visitorRevoke": "访客将无法再通过现有分享链接打开此文档。",
+    "unarchiveDoesNotRestore": "之后取消归档不会自动恢复这些分享链接，请到「链接」中重新启用。",
     "withLinks_one": "此文档在 {{count}} 条有效分享链接中。",
     "withLinks_other": "此文档在 {{count}} 条有效分享链接中。",
     "confirmLoading": "归档中…"
@@ -282,6 +288,8 @@
     "link_revokedDescription": "该分享链接已被停用，如需查看请联系分享者获取新链接。",
     "link_disabledTitle": "链接已停用",
     "link_disabledDescription": "该分享链接当前处于停用状态，请联系分享者确认是否重新启用。",
+    "link_archivedTitle": "链接已停用",
+    "link_archivedDescription": "该分享链接当前不可用。如需查看，请联系分享者。",
     "link_max_access_reachedTitle": "访问次数已达上限",
     "link_max_access_reachedDescription": "该链接的访问次数已达上限，请联系分享者。",
     "blocked_emailTitle": "无法访问",

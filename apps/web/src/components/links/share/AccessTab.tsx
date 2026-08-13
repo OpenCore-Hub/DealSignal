@@ -74,6 +74,16 @@ interface AccessTabProps {
   roomBlockedEmails?: string[];
   /** Existing link id — enables read-only AI quota on edit. */
   linkId?: string;
+  /**
+   * Workspace plan feature flags from GET /billing.
+   * When omitted, toggles stay unrestricted (tests / legacy callers).
+   */
+  planFeatures?: {
+    watermarkEnabled?: boolean;
+    ndaEnabled?: boolean;
+    visitorAskAiEnabled?: boolean;
+    accessControlsEnabled?: boolean;
+  };
 }
 
 function OptionSwitch({
@@ -273,6 +283,7 @@ export function AccessTab({
   roomSecurityFloors,
   roomBlockedEmails = [],
   linkId,
+  planFeatures,
 }: AccessTabProps) {
   const { t } = useTranslation("linkShare");
   const sections = layout === "sections";
@@ -280,6 +291,40 @@ export function AccessTab({
   const showBlock = audienceMode === "full" || audienceMode === "block-only";
   // Fail closed until Ask policy loads — never flash Formal as selectable.
   const [formalEntitled, setFormalEntitled] = useState(false);
+
+  const watermarkEnableBlocked =
+    planFeatures != null &&
+    planFeatures.watermarkEnabled === false &&
+    !draft.watermarkEnabled;
+  const screenshotEnableBlocked =
+    planFeatures != null &&
+    planFeatures.watermarkEnabled === false &&
+    !draft.enableScreenshotProtection;
+  const ndaEnableBlocked =
+    planFeatures != null &&
+    planFeatures.ndaEnabled === false &&
+    !draft.requireNda &&
+    !roomSecurityFloors?.requireNda;
+  const visitorAskAiBlocked =
+    planFeatures != null && planFeatures.visitorAskAiEnabled === false;
+  const accessControlsEnableBlocked =
+    planFeatures != null &&
+    planFeatures.accessControlsEnabled === false &&
+    !draft.requireEmailVerification &&
+    !roomSecurityFloors?.requireEmailVerification;
+  const accessListsEnableBlocked =
+    planFeatures != null &&
+    planFeatures.accessControlsEnabled === false &&
+    draft.allowedViewers.length === 0 &&
+    draft.blockedViewers.length === 0;
+  // Grandfather: if Ask AI experience is already selected, keep those options selectable.
+  const askAiExperienceAlreadyOn =
+    draft.visitorAskExperience === "ai_supervised" ||
+    draft.visitorAskExperience === "ai_self_serve";
+  const askAiPlanDisabledValues =
+    visitorAskAiBlocked && !askAiExperienceAlreadyOn
+      ? (["ai_supervised", "ai_self_serve"] as VisitorAskExperience[])
+      : [];
 
   useEffect(() => {
     if (!isDealRoomLink || !linkId) {
@@ -357,6 +402,7 @@ export function AccessTab({
   const handleRequireVerificationChange = (checked: boolean) => {
     // Room floor: never allow turning verification off.
     if (verifyFloor) return;
+    if (checked && accessControlsEnableBlocked) return;
     updateDraft({
       requireEmailVerification: checked,
       // Mutually exclusive with email self-report; code resolves the visitor email.
@@ -365,6 +411,7 @@ export function AccessTab({
   };
 
   const handleAllowedViewersChange = (values: string[]) => {
+    if (accessListsEnableBlocked && values.length > 0) return;
     const filtered = showRoomLockedBlocks
       ? values.filter((v) => !roomBlockedSet.has(v.trim().toLowerCase()))
       : values;
@@ -376,6 +423,7 @@ export function AccessTab({
   };
 
   const handleBlockedViewersChange = (values: string[]) => {
+    if (accessListsEnableBlocked && values.length > 0) return;
     const linkOnly = values.filter((v) => !roomBlockedSet.has(v.trim().toLowerCase()));
     updateDraft({
       blockedViewers: showRoomLockedBlocks
@@ -397,6 +445,7 @@ export function AccessTab({
   const handleRequireNdaChange = (checked: boolean) => {
     // Room floor: never allow turning NDA off.
     if (ndaFloor) return;
+    if (checked && ndaEnableBlocked) return;
     updateDraft({
       requireNda: checked,
       ndaDocumentId: checked ? draft.ndaDocumentId : "",
@@ -503,11 +552,13 @@ export function AccessTab({
               ? t("accessRules.authentication.verificationDisabledForDocuments")
               : verifyFloor
                 ? t("accessRules.authentication.verificationFloorLocked")
-                : t("accessRules.authentication.requireVerificationDescription")
+                : accessControlsEnableBlocked
+                  ? t("accessRules.authentication.accessControlsPlanRequired")
+                  : t("accessRules.authentication.requireVerificationDescription")
           }
           checked={verifyFloor ? true : draft.requireEmailVerification}
           onCheckedChange={handleRequireVerificationChange}
-          disabled={verificationDisabledForDocuments}
+          disabled={verificationDisabledForDocuments || accessControlsEnableBlocked}
           locked={verifyFloor}
           highlighted={isHighlighted("requireEmailVerification")}
           testId="access-switch-require-verification"
@@ -587,7 +638,11 @@ export function AccessTab({
         <div className="space-y-3">
           <div className="space-y-1">
             <Label className="text-sm font-medium">{t("accessRules.allowedViewers.title")}</Label>
-            <p className="text-xs text-muted-foreground">{t("accessRules.allowedViewers.hint")}</p>
+            <p className="text-xs text-muted-foreground">
+              {accessListsEnableBlocked
+                ? t("accessRules.authentication.accessControlsPlanRequired")
+                : t("accessRules.allowedViewers.hint")}
+            </p>
           </div>
           <ContactEmailTagInput
             values={draft.allowedViewers}
@@ -596,6 +651,7 @@ export function AccessTab({
             hint={undefined}
             conflictValues={conflicts}
             allowDomains={false}
+            disabled={accessListsEnableBlocked}
           />
           {allowedViewersNeedEmail && (
             <p className="text-xs text-muted-foreground">
@@ -615,7 +671,9 @@ export function AccessTab({
           <div className="space-y-1">
             <Label className="text-sm font-medium">{t("accessRules.blockedViewers.title")}</Label>
             <p className="text-xs text-muted-foreground">
-              {blockedHint}
+              {accessListsEnableBlocked
+                ? t("accessRules.authentication.accessControlsPlanRequired")
+                : blockedHint}
             </p>
           </div>
           <ContactEmailTagInput
@@ -626,6 +684,7 @@ export function AccessTab({
             conflictValues={conflicts}
             lockedValues={showRoomLockedBlocks ? roomBlockedEmails : undefined}
             allowDomains={false}
+            disabled={accessListsEnableBlocked}
           />
           {errors.blockedViewers && (
             <p className="text-xs text-destructive">{errors.blockedViewers}</p>
@@ -646,9 +705,17 @@ export function AccessTab({
       <div className="space-y-1 rounded-lg border border-border/70 bg-muted/20 p-3">
         <OptionSwitch
           label={t("accessRules.additionalProtections.watermark")}
-          description={t("accessRules.additionalProtections.watermarkDescription")}
+          description={
+            watermarkEnableBlocked
+              ? t("accessRules.additionalProtections.watermarkPlanRequired")
+              : t("accessRules.additionalProtections.watermarkDescription")
+          }
           checked={draft.watermarkEnabled}
-          onCheckedChange={(checked) => updateDraft({ watermarkEnabled: checked })}
+          disabled={watermarkEnableBlocked}
+          onCheckedChange={(checked) => {
+            if (checked && watermarkEnableBlocked) return;
+            updateDraft({ watermarkEnabled: checked });
+          }}
           highlighted={isHighlighted("watermarkEnabled")}
         />
         <OptionSwitch
@@ -660,9 +727,17 @@ export function AccessTab({
         />
         <OptionSwitch
           label={t("accessRules.additionalProtections.screenshotProtection")}
-          description={t("accessRules.additionalProtections.screenshotProtectionDescription")}
+          description={
+            screenshotEnableBlocked
+              ? t("accessRules.additionalProtections.screenshotPlanRequired")
+              : t("accessRules.additionalProtections.screenshotProtectionDescription")
+          }
           checked={draft.enableScreenshotProtection}
-          onCheckedChange={(checked) => updateDraft({ enableScreenshotProtection: checked })}
+          disabled={screenshotEnableBlocked}
+          onCheckedChange={(checked) => {
+            if (checked && screenshotEnableBlocked) return;
+            updateDraft({ enableScreenshotProtection: checked });
+          }}
           highlighted={isHighlighted("enableScreenshotProtection")}
         />
       </div>
@@ -679,11 +754,14 @@ export function AccessTab({
           description={
             ndaFloor
               ? t("accessRules.additionalProtections.ndaFloorLocked")
-              : t("accessRules.additionalProtections.requireNdaDescription")
+              : ndaEnableBlocked
+                ? t("accessRules.additionalProtections.ndaPlanRequired")
+                : t("accessRules.additionalProtections.requireNdaDescription")
           }
           checked={ndaFloor ? true : draft.requireNda}
           onCheckedChange={handleRequireNdaChange}
           locked={ndaFloor}
+          disabled={ndaEnableBlocked}
           highlighted={isHighlighted("requireNda")}
           testId="access-switch-require-nda"
         />
@@ -754,11 +832,16 @@ export function AccessTab({
             onChange={(visitorAskExperience: VisitorAskExperience) =>
               updateDraft({ visitorAskExperience })
             }
-            disabledValues={formalEntitled ? [] : ["formal"]}
+            disabledValues={[
+              ...(formalEntitled ? [] : (["formal"] as VisitorAskExperience[])),
+              ...askAiPlanDisabledValues,
+            ]}
             disabledHint={
-              formalEntitled
-                ? undefined
-                : t("accessRules.advanced.visitorAskExperience.formalNotEntitled")
+              askAiPlanDisabledValues.length > 0
+                ? t("accessRules.advanced.visitorAskExperience.askAiPlanRequired")
+                : formalEntitled
+                  ? undefined
+                  : t("accessRules.advanced.visitorAskExperience.formalNotEntitled")
             }
             highlighted={isHighlighted("visitorAskExperience")}
           />
@@ -852,9 +935,14 @@ export function AccessTab({
             values={draft.allowedViewers}
             onChange={handleAllowedViewersChange}
             placeholder={t("accessRules.allowedViewers.placeholder")}
-            hint={t("accessRules.allowedViewers.hint")}
+            hint={
+              accessListsEnableBlocked
+                ? t("accessRules.authentication.accessControlsPlanRequired")
+                : t("accessRules.allowedViewers.hint")
+            }
             conflictValues={conflicts}
             allowDomains={false}
+            disabled={accessListsEnableBlocked}
           />
           {allowedViewersNeedEmail && (
             <p className="text-xs text-muted-foreground">
@@ -873,10 +961,15 @@ export function AccessTab({
             values={draft.blockedViewers}
             onChange={handleBlockedViewersChange}
             placeholder={t("accessRules.blockedViewers.placeholder")}
-            hint={blockedHint}
+            hint={
+              accessListsEnableBlocked
+                ? t("accessRules.authentication.accessControlsPlanRequired")
+                : blockedHint
+            }
             conflictValues={conflicts}
             lockedValues={showRoomLockedBlocks ? roomBlockedEmails : undefined}
             allowDomains={false}
+            disabled={accessListsEnableBlocked}
           />
           {errors.blockedViewers && (
             <p className="text-xs text-destructive">{errors.blockedViewers}</p>

@@ -8,6 +8,7 @@ import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DealRoomDetailPage } from "./detail";
+import { useWorkspaceAccess } from "@/hooks/useWorkspaceAccess";
 import type { DealRoom, DealRoomFolder, DealRoomFolderDocs, DealRoomMember, DealRoomTemplate, Document } from "@/types";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -46,6 +47,7 @@ vi.mock("@/lib/api", () => ({
     getDealRoomTemplates: getDealRoomTemplatesMock,
     getDocuments: getDocumentsMock,
     getDocumentById: getDocumentByIdMock,
+    checkDocumentExists: vi.fn().mockResolvedValue({ exists: false }),
     uploadDocument: uploadDocumentMock,
     addDealRoomDocument: addDealRoomDocumentMock,
     removeDealRoomDocument: vi.fn().mockResolvedValue(undefined),
@@ -262,6 +264,14 @@ Object.defineProperty(window, "matchMedia", {
 
 describe("DealRoomDetailPage", () => {
   beforeEach(() => {
+    vi.mocked(useWorkspaceAccess).mockReturnValue({
+      role: "member",
+      loading: false,
+      canRead: true,
+      canWrite: true,
+      canManage: false,
+      isGuest: false,
+    });
     getDealRoomByIdMock.mockReset();
     getDealRoomTemplatesMock.mockReset();
     getDocumentsMock.mockReset();
@@ -357,6 +367,28 @@ describe("DealRoomDetailPage", () => {
       (el) => el.getAttribute("data-testid"),
     );
     expect(triggers[0]).toBe("deal-room-page-tab-knowledge");
+  });
+
+  it("hides access and knowledge tabs for guests without fetching knowledge", async () => {
+    vi.mocked(useWorkspaceAccess).mockReturnValue({
+      role: "guest",
+      loading: false,
+      canRead: true,
+      canWrite: false,
+      canManage: false,
+      isGuest: true,
+    });
+    getDealRoomByIdMock.mockResolvedValue(mockRoom);
+    await renderPage("/acme/deal-rooms/room-1?tab=knowledge");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("deal-room-page-tabs")).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("deal-room-page-tab-knowledge")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("deal-room-page-tab-access")).not.toBeInTheDocument();
+    expect(screen.getByTestId("deal-room-page-tab-documents")).toBeInTheDocument();
+    expect(getDealRoomKnowledgeMock).not.toHaveBeenCalled();
+    expect(screen.queryByText("Failed to load knowledge base")).not.toBeInTheDocument();
   });
 
   it("migrates legacy participants tab to links", async () => {

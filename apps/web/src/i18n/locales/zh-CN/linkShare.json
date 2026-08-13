@@ -76,6 +76,7 @@
       "requireVerificationDescription": "向访客邮箱发送一次性验证码；身份由验证码绑定（访客页无需再填邮箱）",
       "verificationDisabledForDocuments": "邮箱验证需要指定联系人，且仅适用于数据室链接",
       "verificationFloorLocked": "访问策略已要求开启，此链接上不可关闭",
+      "accessControlsPlanRequired": "邮箱验证与允许/拦截名单需 Business 或更高方案",
       "requirePassword": "要求密码查看",
       "requirePasswordDescription": "访客必须输入密码",
       "passwordPlaceholder": "输入密码",
@@ -99,8 +100,10 @@
       "description": "通过水印、NDA 与下载控制降低泄露风险。",
       "watermark": "应用水印",
       "watermarkDescription": "在文档上叠加访客邮箱水印",
+      "watermarkPlanRequired": "水印需 Pro 或更高方案",
       "requireNda": "要求签署 NDA 查看",
       "requireNdaDescription": "访客必须先同意 NDA 才能访问",
+      "ndaPlanRequired": "NDA 需 Business 或更高方案",
       "ndaFloorLocked": "访问策略已要求开启，请在下方选择 NDA 文档",
       "ndaDocument": "NDA 保密协议文档",
       "ndaDocumentPlaceholder": "选择文档",
@@ -108,6 +111,7 @@
       "allowDownloadingDescription": "允许访客下载文档",
       "screenshotProtection": "防截图保护",
       "screenshotProtectionDescription": "降低泄露风险",
+      "screenshotPlanRequired": "防截图保护需 Pro 或更高方案",
       "comingSoon": "即将上线"
     },
     "advanced": {
@@ -123,7 +127,8 @@
         "aiSupervised": "AI优先，人工兜底",
         "aiSelfServe": "AI回复",
         "formal": "审核公布",
-        "formalNotEntitled": "Formal Q&A 需要具备权益的套餐（Enterprise 或试用）。"
+        "formalNotEntitled": "Formal Q&A 需要具备权益的套餐（Enterprise 或试用）。",
+        "askAiPlanRequired": "访客 Ask AI 需 Pro 或更高方案"
       },
       "fileRequests": "启用文件请求",
       "fileRequestsDescription": "允许访客请求补充文件",

@@ -21,6 +21,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { RowActions } from "@/components/common/RowActions";
+import { UsageBar } from "@/components/common/UsageBar";
 import { api } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/apiErrors";
 import { getCachedAccountEmail } from "@/lib/authAccount";
@@ -46,6 +47,24 @@ function assignableInviteRoles(actorRole: WorkspaceMember["role"] | undefined): 
   return INVITE_ROLES.filter((role) => canManageTargetRole(actorRole, role));
 }
 
+function isInternalSeatRole(role: WorkspaceMember["role"] | InviteRole): boolean {
+  return role === "owner" || role === "admin" || role === "member";
+}
+
+/** Finite seat caps block new internal invites when used >= limit; <=0 means unlimited. */
+export function internalSeatsAtCap(seatsUsed: number, seatsLimit: number): boolean {
+  return Number.isFinite(seatsLimit) && seatsLimit > 0 && seatsUsed >= seatsLimit;
+}
+
+/** Guests never consume seats; only admin/member invites are blocked at cap. */
+export function inviteRoleBlockedBySeats(
+  role: InviteRole,
+  seatsUsed: number,
+  seatsLimit: number,
+): boolean {
+  return internalSeatsAtCap(seatsUsed, seatsLimit) && isInternalSeatRole(role);
+}
+
 export function SettingsMembersPage() {
   const { t } = useTranslation("settings");
   const { t: tc } = useTranslation("common");
@@ -53,6 +72,11 @@ export function SettingsMembersPage() {
     () => api.getWorkspaceMembers().then((res) => res.data),
     []
   );
+  const {
+    data: billing,
+    loading: billingLoading,
+    refetch: refetchBilling,
+  } = useAsyncData(() => api.getBillingInfo().catch(() => null), []);
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<InviteRole>("member");
   const [inviting, setInviting] = useState(false);
@@ -68,9 +92,21 @@ export function SettingsMembersPage() {
   );
   const actorRole = actor?.role ?? (selfEmail ? undefined : "owner");
   const inviteRoles = assignableInviteRoles(actorRole);
+  const inviteBlockedBySeats = billing
+    ? inviteRoleBlockedBySeats(role, billing.seatsUsed, billing.seatsLimit)
+    : false;
 
   const trimmedEmail = email.trim();
-  const canInvite = isValidEmail(trimmedEmail) && !inviting && canManageTargetRole(actorRole, role);
+  const canInvite =
+    isValidEmail(trimmedEmail) &&
+    !inviting &&
+    canManageTargetRole(actorRole, role) &&
+    !inviteBlockedBySeats;
+
+  const refreshMembersAndBilling = () => {
+    void refetch();
+    void refetchBilling();
+  };
 
   const handleInvite = async () => {
     if (!trimmedEmail) return;
@@ -82,6 +118,10 @@ export function SettingsMembersPage() {
       toast.error(t("members.cannotManageMember"));
       return;
     }
+    if (inviteBlockedBySeats) {
+      toast.error(t("members.seatLimitReached"));
+      return;
+    }
 
     setInviting(true);
     try {
@@ -90,7 +130,7 @@ export function SettingsMembersPage() {
       toast.success(t("members.invited", { email: normalizedEmail }));
       setEmail("");
       setRole("member");
-      refetch();
+      refreshMembersAndBilling();
     } catch (err) {
       toast.error(
         apiErrorMessage(err, {
@@ -123,7 +163,7 @@ export function SettingsMembersPage() {
       }
       toast.success(t("members.roleUpdated", { email: editTarget.email }));
       setEditTarget(null);
-      refetch();
+      refreshMembersAndBilling();
     } catch (err) {
       toast.error(
         apiErrorMessage(err, {
@@ -148,7 +188,7 @@ export function SettingsMembersPage() {
         toast.success(t("members.removed", { email: removeTarget.email }));
       }
       setRemoveTarget(null);
-      refetch();
+      refreshMembersAndBilling();
     } catch (err) {
       toast.error(
         apiErrorMessage(err, {
@@ -171,6 +211,15 @@ export function SettingsMembersPage() {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
+          {billing && !billingLoading ? (
+            <div className="max-w-md" data-testid="members-seat-usage">
+              <UsageBar
+                label={t("members.seatsUsage")}
+                current={billing.seatsUsed}
+                max={billing.seatsLimit}
+              />
+            </div>
+          ) : null}
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
             <Input
               type="email"
@@ -204,6 +253,11 @@ export function SettingsMembersPage() {
               {inviting ? t("members.inviting") : t("members.invite")}
             </Button>
           </div>
+          {inviteBlockedBySeats ? (
+            <p className="text-xs text-muted-foreground" data-testid="members-seat-limit-hint">
+              {t("members.seatLimitReached")}
+            </p>
+          ) : null}
 
           {error ? (
             <div className="rounded-lg border border-error-500/20 bg-error-100 p-4">

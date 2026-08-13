@@ -22,6 +22,14 @@ export const DEAL_ROOM_PAGE_TABS = [
 
 export type DealRoomPageTab = (typeof DEAL_ROOM_PAGE_TABS)[number];
 
+/** Access policy + knowledge desk require workspace write (not guest). */
+const GUEST_HIDDEN_PAGE_TABS: ReadonlySet<DealRoomPageTab> = new Set(["access", "knowledge"]);
+
+export function visibleDealRoomPageTabs(canWrite: boolean): DealRoomPageTab[] {
+  if (canWrite) return [...DEAL_ROOM_PAGE_TABS];
+  return DEAL_ROOM_PAGE_TABS.filter((tab) => !GUEST_HIDDEN_PAGE_TABS.has(tab));
+}
+
 /** i18n keys under `dealRooms` for each horizontal page tab. */
 export const DEAL_ROOM_PAGE_TAB_LABEL_KEY: Record<DealRoomPageTab, string> = {
   documents: "pageTabs.resources",
@@ -50,9 +58,13 @@ export function isDealRoomPageTab(tab: DealRoomTab): tab is DealRoomPageTab {
  * Active page tab is always first; remaining tabs keep canonical order.
  * Non-page tabs fall back to the canonical list unchanged.
  */
-export function orderDealRoomPageTabs(active: DealRoomTab): DealRoomPageTab[] {
-  if (!isDealRoomPageTab(active)) return [...DEAL_ROOM_PAGE_TABS];
-  return [active, ...DEAL_ROOM_PAGE_TABS.filter((t) => t !== active)];
+export function orderDealRoomPageTabs(
+  active: DealRoomTab,
+  visible: readonly DealRoomPageTab[] = DEAL_ROOM_PAGE_TABS,
+): DealRoomPageTab[] {
+  const tabs = [...visible];
+  if (!isDealRoomPageTab(active) || !tabs.includes(active)) return tabs;
+  return [active, ...tabs.filter((t) => t !== active)];
 }
 
 export function useDealRoomTab(): { tab: DealRoomTab; setTab: (tab: DealRoomTab) => void } {

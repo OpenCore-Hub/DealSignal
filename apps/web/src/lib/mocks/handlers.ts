@@ -145,6 +145,106 @@ let integrationsStatus = {
   can_manage: true,
 };
 
+/** Mutable billing state for MSW (aligned with apps/api/internal/plan catalog). */
+const gib = 1024 * 1024 * 1024;
+const mockBillingOffers = [
+  {
+    code: "free",
+    internal_seats: 1,
+    storage_bytes: 2 * gib,
+    documents: 50,
+    links: 20,
+    rooms: 1,
+    max_upload_bytes: 25 * 1024 * 1024,
+    visitor_ask_ai_monthly: 0,
+    custom_domain: false,
+    watermark: false,
+    nda: false,
+    visitor_ask_ai: false,
+    branding: false,
+    access_controls: false,
+    price_monthly_usd: 0,
+    custom_pricing: false,
+    highlighted: false,
+  },
+  {
+    code: "pro",
+    internal_seats: 3,
+    storage_bytes: 50 * gib,
+    documents: 200,
+    links: 0,
+    rooms: 5,
+    max_upload_bytes: 100 * 1024 * 1024,
+    visitor_ask_ai_monthly: 200,
+    custom_domain: false,
+    watermark: true,
+    nda: false,
+    visitor_ask_ai: true,
+    branding: true,
+    access_controls: false,
+    price_monthly_usd: 49,
+    custom_pricing: false,
+    highlighted: false,
+  },
+  {
+    code: "business",
+    internal_seats: 10,
+    storage_bytes: 500 * gib,
+    documents: 1000,
+    links: 0,
+    rooms: 0,
+    max_upload_bytes: 250 * 1024 * 1024,
+    visitor_ask_ai_monthly: 1000,
+    custom_domain: true,
+    watermark: true,
+    nda: true,
+    visitor_ask_ai: true,
+    branding: true,
+    access_controls: true,
+    price_monthly_usd: 99,
+    custom_pricing: false,
+    highlighted: true,
+  },
+  {
+    code: "enterprise",
+    internal_seats: 0,
+    storage_bytes: 0,
+    documents: 0,
+    links: 0,
+    rooms: 0,
+    max_upload_bytes: 0,
+    visitor_ask_ai_monthly: 0,
+    custom_domain: true,
+    watermark: true,
+    nda: true,
+    visitor_ask_ai: true,
+    branding: true,
+    access_controls: true,
+    price_monthly_usd: 0,
+    custom_pricing: true,
+    highlighted: false,
+    formal_ask: true,
+  },
+];
+
+let mockBilling = {
+  plan: "free",
+  period: "monthly",
+  storage_limit: 2 * gib,
+  links_limit: 20,
+  rooms_limit: 1,
+  seats_limit: 1,
+  documents_limit: 50,
+  ask_ai_limit: 0,
+  max_upload_bytes: 25 * 1024 * 1024,
+  custom_domain_enabled: false,
+  watermark_enabled: false,
+  nda_enabled: false,
+  visitor_ask_ai_enabled: false,
+  branding_enabled: false,
+  access_controls_enabled: false,
+};
+
 let outboundWebhook = {
   configured: false,
   enabled: false,
@@ -789,6 +889,23 @@ async function resetMockState() {
     verified_at: undefined,
   };
   integrationsStatus = { ...initialState.integrations };
+  mockBilling = {
+    plan: "free",
+    period: "monthly",
+    storage_limit: 2 * gib,
+    links_limit: 20,
+    rooms_limit: 1,
+    seats_limit: 1,
+    documents_limit: 50,
+    ask_ai_limit: 0,
+    max_upload_bytes: 25 * 1024 * 1024,
+    custom_domain_enabled: false,
+    watermark_enabled: false,
+    nda_enabled: false,
+    visitor_ask_ai_enabled: false,
+    branding_enabled: false,
+    access_controls_enabled: false,
+  };
   securitySettings = { ...initialState.security };
   outboundWebhook = {
     configured: false,
@@ -1726,6 +1843,26 @@ export const handlers = [
       docs = docs.filter((d) => !inRoom.has(d.id));
     }
     return HttpResponse.json({ data: docs });
+  }),
+
+  http.get("*/api/workspaces/:workspaceSlug/documents/exists", ({ request }) => {
+    const url = new URL(request.url);
+    const filename = (url.searchParams.get("filename") ?? "").trim();
+    const base = filename.split(/[/\\]/).pop()?.trim() ?? "";
+    if (!base) {
+      return HttpResponse.json(
+        { code: "invalid_file", message: "filename is required" },
+        { status: 400 },
+      );
+    }
+    const existing = mockDocuments.find((d) => d.title === base || d.fileName === base);
+    if (!existing) {
+      return HttpResponse.json({ exists: false });
+    }
+    return HttpResponse.json({
+      exists: true,
+      document: { id: existing.id, title: existing.title },
+    });
   }),
 
   http.get("*/api/workspaces/:workspaceSlug/documents/:id", ({ params }) => {
@@ -5207,17 +5344,123 @@ export const handlers = [
 
   http.get("*/api/workspaces/:workspaceSlug/billing", () => {
     const totalStorage = mockDocuments.reduce((sum, d) => sum + d.fileSize, 0);
+    const activeLinks = mockLinks.filter((l) => l.status !== "deleted" && l.status !== "disabled");
     return HttpResponse.json({
-      data: {
-        plan: "Pro",
-        period: "Annual",
-        storageUsed: Math.round((totalStorage / 1024 / 1024) * 10) / 10,
-        storageLimit: 50,
-        linksUsed: mockLinks.length,
-        linksLimit: 100,
-        roomsUsed: mockDealRooms.length,
-        roomsLimit: 10,
-      },
+      plan: mockBilling.plan,
+      period: mockBilling.period,
+      trial_expired: false,
+      storage_used: totalStorage,
+      storage_limit: mockBilling.storage_limit,
+      links_used: activeLinks.length,
+      links_limit: mockBilling.links_limit,
+      rooms_used: mockDealRooms.length,
+      rooms_limit: mockBilling.rooms_limit,
+      seats_used: 1,
+      seats_limit: mockBilling.seats_limit,
+      documents_used: mockDocuments.length,
+      documents_limit: mockBilling.documents_limit,
+      ask_ai_used: 0,
+      ask_ai_limit: mockBilling.ask_ai_limit,
+      max_upload_bytes: mockBilling.max_upload_bytes,
+      custom_domain_enabled: mockBilling.custom_domain_enabled,
+      watermark_enabled: mockBilling.watermark_enabled,
+      nda_enabled: mockBilling.nda_enabled,
+      visitor_ask_ai_enabled: mockBilling.visitor_ask_ai_enabled,
+      branding_enabled: mockBilling.branding_enabled,
+      access_controls_enabled: mockBilling.access_controls_enabled,
+      knowledge_desk_enabled: mockBilling.knowledge_desk_enabled ?? false,
+      webhooks_enabled: mockBilling.webhooks_enabled ?? false,
+      hubspot_enabled: mockBilling.hubspot_enabled ?? false,
+      daily_digest_enabled: mockBilling.daily_digest_enabled ?? false,
+      slack_alerts_enabled: mockBilling.slack_alerts_enabled ?? false,
+      room_analytics_enabled: mockBilling.room_analytics_enabled ?? false,
+      room_insights_enabled: mockBilling.room_insights_enabled ?? false,
+      formal_ask_enabled: mockBilling.formal_ask_enabled ?? false,
+      knowledge_answers_used: 0,
+      knowledge_answers_limit: mockBilling.knowledge_answers_limit ?? 0,
+    });
+  }),
+
+  http.get("*/api/workspaces/:workspaceSlug/billing/plans", () => {
+    return HttpResponse.json({
+      current_plan: mockBilling.plan,
+      current_period: mockBilling.period,
+      trial_expired: false,
+      has_stripe_subscription: false,
+      plans: mockBillingOffers,
+    });
+  }),
+
+  http.post("*/api/workspaces/:workspaceSlug/billing/checkout", async ({ request }) => {
+    const body = (await request.json()) as { plan_code?: string };
+    const code = (body.plan_code ?? "").toLowerCase();
+    if (code === "enterprise") {
+      return HttpResponse.json(
+        { code: "plan_sales_assisted", message: "enterprise is sales-assisted" },
+        { status: 403 },
+      );
+    }
+    return HttpResponse.json({ url: `https://checkout.stripe.test/${code || "pro"}` });
+  }),
+
+  http.post("*/api/workspaces/:workspaceSlug/billing/portal", () => {
+    return HttpResponse.json({ url: "https://billing.stripe.test/session" });
+  }),
+
+  http.put("*/api/workspaces/:workspaceSlug/billing/plan", async ({ request }) => {
+    const body = (await request.json()) as { plan_code?: string; period?: string };
+    const code = (body.plan_code ?? "free").toLowerCase();
+    const offer = mockBillingOffers.find((p) => p.code === code) ?? mockBillingOffers[0];
+    mockBilling = {
+      plan: offer.code,
+      period: body.period === "yearly" ? "yearly" : "monthly",
+      storage_limit: offer.storage_bytes,
+      links_limit: offer.links,
+      rooms_limit: offer.rooms,
+      seats_limit: offer.internal_seats <= 0 ? 999 : offer.internal_seats,
+      documents_limit: offer.documents,
+      ask_ai_limit: offer.visitor_ask_ai_monthly,
+      max_upload_bytes: offer.max_upload_bytes,
+      custom_domain_enabled: offer.custom_domain,
+      watermark_enabled: offer.watermark,
+      nda_enabled: offer.nda,
+      visitor_ask_ai_enabled: offer.visitor_ask_ai,
+      branding_enabled: offer.branding,
+      access_controls_enabled: offer.access_controls,
+    };
+    return HttpResponse.json({
+      plan: mockBilling.plan,
+      period: mockBilling.period,
+      trial_expired: false,
+      storage_used: 0,
+      storage_limit: mockBilling.storage_limit,
+      links_used: 0,
+      links_limit: mockBilling.links_limit,
+      rooms_used: 0,
+      rooms_limit: mockBilling.rooms_limit,
+      seats_used: 1,
+      seats_limit: mockBilling.seats_limit,
+      documents_used: 0,
+      documents_limit: mockBilling.documents_limit,
+      ask_ai_used: 0,
+      ask_ai_limit: mockBilling.ask_ai_limit,
+      max_upload_bytes: mockBilling.max_upload_bytes,
+      custom_domain_enabled: mockBilling.custom_domain_enabled,
+      watermark_enabled: mockBilling.watermark_enabled,
+      nda_enabled: mockBilling.nda_enabled,
+      visitor_ask_ai_enabled: mockBilling.visitor_ask_ai_enabled,
+      branding_enabled: mockBilling.branding_enabled,
+      access_controls_enabled: mockBilling.access_controls_enabled,
+      knowledge_desk_enabled: mockBilling.knowledge_desk_enabled ?? false,
+      webhooks_enabled: mockBilling.webhooks_enabled ?? false,
+      hubspot_enabled: mockBilling.hubspot_enabled ?? false,
+      daily_digest_enabled: mockBilling.daily_digest_enabled ?? false,
+      slack_alerts_enabled: mockBilling.slack_alerts_enabled ?? false,
+      room_analytics_enabled: mockBilling.room_analytics_enabled ?? false,
+      room_insights_enabled: mockBilling.room_insights_enabled ?? false,
+      formal_ask_enabled: mockBilling.formal_ask_enabled ?? false,
+      knowledge_answers_used: 0,
+      knowledge_answers_limit: mockBilling.knowledge_answers_limit ?? 0,
     });
   }),
 
