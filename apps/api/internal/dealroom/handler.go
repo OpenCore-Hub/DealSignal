@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/action"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
@@ -34,6 +35,7 @@ func (h *Handler) RegisterWorkspaceRoutes(r *gin.RouterGroup) {
 	g.GET("", h.List)
 	g.POST("", h.Create)
 	g.GET("/:roomId", h.Get)
+	g.DELETE("/:roomId", h.Delete)
 
 	g.GET("/:roomId/folders", h.ListFolders)
 	g.POST("/:roomId/folders", h.CreateFolder)
@@ -51,6 +53,7 @@ func (h *Handler) RegisterWorkspaceRoutes(r *gin.RouterGroup) {
 	g.GET("/:roomId/members", h.ListMembers)
 	g.POST("/:roomId/members", h.AddMember)
 	g.DELETE("/:roomId/members/:memberId", h.RemoveMember)
+	g.PATCH("/:roomId/nda-agreement", h.SetMemberNDAAgreement)
 
 	g.GET("/:roomId/access-requests", h.ListAccessRequests)
 	g.POST("/:roomId/access-requests/:requestId/approve", h.ApproveRequest)
@@ -73,12 +76,13 @@ func (h *Handler) RegisterPublicRoutes(r *gin.RouterGroup) {
 // CreateRequest is the JSON body for creating a room.
 type CreateRequest struct {
 	Slug             string                 `json:"slug" binding:"required"`
-	Name             string                 `json:"name" binding:"required"`
+	Name             string                 `json:"name"`
 	Description      string                 `json:"description,omitempty"`
 	TemplateType     string                 `json:"template_type,omitempty"`
 	Settings         map[string]interface{} `json:"settings,omitempty"`
 	RequiresNDA      bool                   `json:"requires_nda,omitempty"`
 	RequiresApproval bool                   `json:"requires_approval,omitempty"`
+	Folders          []Folder               `json:"folders,omitempty"`
 }
 
 // List returns deal rooms in the workspace.
@@ -115,6 +119,7 @@ func (h *Handler) List(c *gin.Context) {
 		for i, r := range rooms {
 			out[i] = roomSummaryResponse(r)
 		}
+		h.overlayListIsAdmin(c, out, rooms)
 		c.JSON(http.StatusOK, gin.H{"data": out})
 		return
 	}
@@ -143,6 +148,7 @@ func (h *Handler) List(c *gin.Context) {
 	for i, r := range result.Items {
 		out[i] = roomSummaryResponse(r)
 	}
+	h.overlayListIsAdmin(c, out, result.Items)
 	c.JSON(http.StatusOK, gin.H{
 		"data": out,
 		"pagination": gin.H{
@@ -195,8 +201,12 @@ func (h *Handler) Create(c *gin.Context) {
 			return
 		}
 		switch {
+		case errors.Is(err, ErrInvalidName):
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_name", "message": httpx.SafeMessage("invalid_name", err)})
 		case errors.Is(err, ErrInvalidSlug):
 			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_slug", "message": httpx.SafeMessage("invalid_slug", err)})
+		case errors.Is(err, ErrInvalidFolder):
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
 		case errors.Is(err, ErrDuplicateSlug):
 			c.JSON(http.StatusConflict, gin.H{"code": "duplicate_slug", "message": httpx.SafeMessage("duplicate_slug", err)})
 		default:
@@ -257,6 +267,28 @@ func (h *Handler) Get(c *gin.Context) {
 	c.JSON(http.StatusOK, roomDetailResponse(detail, h.memberEmails(c)))
 }
 
+// Delete soft-deletes a data room.
+func (h *Handler) Delete(c *gin.Context) {
+	err := h.service.DeleteRoom(
+		c.Request.Context(),
+		c.Param("roomId"),
+		middleware.WorkspaceIDFrom(c),
+		middleware.UserIDFrom(c),
+	)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrRoomNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"code": "room_not_found", "message": httpx.SafeMessage("room_not_found", err)})
+		case errors.Is(err, ErrNotRoomAdmin):
+			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", err)})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+		}
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
 // AddMemberRequest invites a member.
 type AddMemberRequest struct {
 	Email string `json:"email" binding:"required,email"`
@@ -280,12 +312,51 @@ func (h *Handler) AddMember(c *gin.Context) {
 			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", err)})
 		case errors.Is(err, ErrInvalidEmail):
 			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_email", "message": httpx.SafeMessage("invalid_email", err)})
+		case errors.Is(err, ErrNDAAgreementRequired):
+			c.JSON(http.StatusBadRequest, gin.H{"code": "nda_agreement_required", "message": httpx.SafeMessage("nda_agreement_required", err)})
 		default:
 			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		}
 		return
 	}
 	c.JSON(http.StatusCreated, memberResponse(member))
+}
+
+// SetMemberNDAAgreementRequest binds the room-level NDA members must sign.
+type SetMemberNDAAgreementRequest struct {
+	NDATemplateID string `json:"nda_template_id"`
+	NDADocumentID string `json:"nda_document_id"`
+}
+
+// SetMemberNDAAgreement persists which agreement invited members sign.
+func (h *Handler) SetMemberNDAAgreement(c *gin.Context) {
+	var req SetMemberNDAAgreementRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
+		return
+	}
+	room, err := h.service.SetMemberNDAAgreement(
+		c.Request.Context(),
+		c.Param("roomId"),
+		middleware.WorkspaceIDFrom(c),
+		middleware.UserIDFrom(c),
+		req.NDATemplateID,
+		req.NDADocumentID,
+	)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrNotRoomAdmin):
+			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", err)})
+		case errors.Is(err, ErrRoomNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"code": "room_not_found", "message": httpx.SafeMessage("room_not_found", err)})
+		case errors.Is(err, ErrNDAAgreementRequired):
+			c.JSON(http.StatusBadRequest, gin.H{"code": "nda_agreement_required", "message": httpx.SafeMessage("nda_agreement_required", err)})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+		}
+		return
+	}
+	c.JSON(http.StatusOK, roomResponse(room))
 }
 
 // ApproveRequest handles access request approval.
@@ -310,6 +381,17 @@ func (h *Handler) PublicView(c *gin.Context) {
 	email := c.Query("email")
 	room, member, err := h.service.PublicAccess(c.Request.Context(), c.Param("slug"), email)
 	if err != nil {
+		if errors.Is(err, ErrNDARequired) {
+			payload := gin.H{"code": "nda_required", "message": httpx.SafeMessage("nda_required", err)}
+			if id := uuidString(room.NdaTemplateID); id != "" {
+				payload["ndaTemplateId"] = id
+			}
+			if id := uuidString(room.NdaDocumentID); id != "" {
+				payload["ndaDocumentId"] = id
+			}
+			c.JSON(http.StatusForbidden, payload)
+			return
+		}
 		mapPublicError(c, err)
 		return
 	}
@@ -809,6 +891,17 @@ func roomSummaryResponse(r RoomSummary) gin.H {
 	return resp
 }
 
+func (h *Handler) overlayListIsAdmin(c *gin.Context, out []gin.H, rooms []RoomSummary) {
+	adminIDs, err := h.service.AdminRoomIDsForUser(c.Request.Context(), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c))
+	if err != nil {
+		adminIDs = map[string]struct{}{}
+	}
+	for i, r := range rooms {
+		_, ok := adminIDs[uuid.UUID(r.Room.ID.Bytes).String()]
+		out[i]["isAdmin"] = ok
+	}
+}
+
 func roomDetailResponse(r RoomDetail, internal action.MemberEmailSet) gin.H {
 	resp := baseRoomResponse(r.Room)
 	resp["documentCount"] = r.DocumentCount
@@ -841,6 +934,12 @@ func baseRoomResponse(r db.DealRoom) gin.H {
 	}
 	if r.Description.Valid {
 		resp["description"] = r.Description.String
+	}
+	if id := uuidString(r.NdaTemplateID); id != "" {
+		resp["ndaTemplateId"] = id
+	}
+	if id := uuidString(r.NdaDocumentID); id != "" {
+		resp["ndaDocumentId"] = id
 	}
 	return resp
 }
@@ -996,4 +1095,11 @@ func (h *Handler) memberEmails(c *gin.Context) action.MemberEmailSet {
 		return action.MemberEmailSet{}
 	}
 	return set
+}
+
+func uuidString(id pgtype.UUID) string {
+	if !id.Valid {
+		return ""
+	}
+	return uuid.UUID(id.Bytes).String()
 }

@@ -27,23 +27,25 @@ import (
 var (
 	slugRegex = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 
-	ErrRoomNotFound        = errors.New("room not found")
-	ErrInvalidSlug         = errors.New("the data room URL can only contain lowercase letters, numbers, and hyphens")
-	ErrDuplicateSlug       = errors.New("a data room with this URL already exists. please choose a different name")
-	ErrNotRoomAdmin        = errors.New("not a room admin")
-	ErrMemberNotFound      = errors.New("member not found")
-	ErrRequestNotFound     = errors.New("access request not found")
-	ErrNDARequired         = errors.New("nda required")
-	ErrApprovalRequired    = errors.New("access not approved")
-	ErrFolderAccessDenied  = errors.New("folder access denied")
-	ErrInvalidEmail        = errors.New("invalid email")
-	ErrFolderNotEmpty      = errors.New("folder is not empty")
-	ErrFolderNotFound      = errors.New("folder not found")
-	ErrFolderExists        = errors.New("folder already exists")
-	ErrResourceLocked      = errors.New("resource is locked")
-	ErrNDANotRequired      = errors.New("nda is not required for this room")
-	ErrAccessRequestExists = errors.New("access request already exists")
-	ErrRateLimited         = errors.New("too many requests")
+	ErrRoomNotFound         = errors.New("room not found")
+	ErrInvalidSlug          = errors.New("the data room URL can only contain lowercase letters, numbers, and hyphens")
+	ErrDuplicateSlug        = errors.New("a data room with this URL already exists. please choose a different name")
+	ErrNotRoomAdmin         = errors.New("not a room admin")
+	ErrMemberNotFound       = errors.New("member not found")
+	ErrRequestNotFound      = errors.New("access request not found")
+	ErrNDARequired          = errors.New("nda required")
+	ErrApprovalRequired     = errors.New("access not approved")
+	ErrFolderAccessDenied   = errors.New("folder access denied")
+	ErrInvalidEmail         = errors.New("invalid email")
+	ErrFolderNotEmpty       = errors.New("folder is not empty")
+	ErrFolderNotFound       = errors.New("folder not found")
+	ErrFolderExists         = errors.New("folder already exists")
+	ErrInvalidFolder        = errors.New("invalid folder")
+	ErrResourceLocked       = errors.New("resource is locked")
+	ErrNDANotRequired       = errors.New("nda is not required for this room")
+	ErrNDAAgreementRequired = errors.New("nda agreement is required")
+	ErrAccessRequestExists  = errors.New("access request already exists")
+	ErrRateLimited          = errors.New("too many requests")
 	// ErrAgreementNotAllowedInDealRoom blocks attaching agreement-library docs to rooms.
 	ErrAgreementNotAllowedInDealRoom = errors.New("agreement documents cannot be added to a data room")
 )
@@ -136,6 +138,7 @@ type CreateRoomRequest struct {
 	Settings         map[string]interface{} `json:"settings,omitempty"`
 	RequiresNDA      bool                   `json:"requires_nda,omitempty"`
 	RequiresApproval bool                   `json:"requires_approval,omitempty"`
+	Folders          []Folder               `json:"folders,omitempty"`
 }
 
 // Folder describes a folder stored in deal_rooms.settings.
@@ -217,9 +220,11 @@ type RoomDetail struct {
 
 // CreateRoom creates a data room in a workspace.
 func (s *Service) CreateRoom(ctx context.Context, userID, workspaceID string, req CreateRoomRequest) (db.DealRoom, error) {
-	if strings.TrimSpace(req.Name) == "" {
-		return db.DealRoom{}, errors.New("name is required")
+	name, err := ValidateDealRoomName(req.Name)
+	if err != nil {
+		return db.DealRoom{}, err
 	}
+	req.Name = name
 	if !slugRegex.MatchString(req.Slug) {
 		return db.DealRoom{}, ErrInvalidSlug
 	}
@@ -235,7 +240,7 @@ func (s *Service) CreateRoom(ctx context.Context, userID, workspaceID string, re
 	var room db.DealRoom
 	insert := func(ctx context.Context) error {
 		var err error
-		room, err = s.insertDealRoom(ctx, userID, workspaceID, req)
+		room, err = s.insertDealRoomUniqueSlug(ctx, userID, workspaceID, req)
 		return err
 	}
 	if s.planChecker != nil {
@@ -247,6 +252,32 @@ func (s *Service) CreateRoom(ctx context.Context, userID, workspaceID string, re
 	}
 	s.invalidateListCache(ctx, workspaceID)
 	return room, nil
+}
+
+func (s *Service) insertDealRoomUniqueSlug(ctx context.Context, userID, workspaceID string, req CreateRoomRequest) (db.DealRoom, error) {
+	base := req.Slug
+	var last error
+	for attempt := 0; attempt < slugCollisionAttempts; attempt++ {
+		next := req
+		if attempt > 0 {
+			next.Slug = fmt.Sprintf("%s-%d", base, attempt+1)
+			if !slugRegex.MatchString(next.Slug) {
+				continue
+			}
+		}
+		room, err := s.insertDealRoom(ctx, userID, workspaceID, next)
+		if err == nil {
+			return room, nil
+		}
+		last = err
+		if !errors.Is(err, ErrDuplicateSlug) {
+			return db.DealRoom{}, err
+		}
+	}
+	if last == nil {
+		last = ErrDuplicateSlug
+	}
+	return db.DealRoom{}, last
 }
 
 func (s *Service) insertDealRoom(ctx context.Context, userID, workspaceID string, req CreateRoomRequest) (db.DealRoom, error) {
@@ -264,7 +295,14 @@ func (s *Service) insertDealRoom(ctx context.Context, userID, workspaceID string
 	}
 
 	folders := defaultFolders()
-	if req.TemplateType != "" {
+	// Client `folders` replace the template. Template structure is only a create-dialog preset.
+	if req.Folders != nil {
+		normalized, normErr := normalizeCreateFolders(req.Folders)
+		if normErr != nil {
+			return db.DealRoom{}, normErr
+		}
+		folders = normalized
+	} else if req.TemplateType != "" {
 		if tmplFolders := templateFolders(req.TemplateType); len(tmplFolders) > 0 {
 			for _, f := range tmplFolders {
 				folders = append(folders, Folder{
@@ -359,9 +397,10 @@ func (s *Service) ListRooms(ctx context.Context, workspaceID string) ([]RoomSumm
 func (s *Service) ListRoomsPage(ctx context.Context, workspaceID string, page, pageSize int, query string) (RoomListPage, error) {
 	wsUUID := pgUUID(workspaceID)
 	query = strings.TrimSpace(query)
+	likeQuery := escapeILIKEPattern(query)
 	total, err := s.queries.CountDealRoomsByWorkspace(ctx, db.CountDealRoomsByWorkspaceParams{
 		WorkspaceID: wsUUID,
-		Query:       query,
+		Query:       likeQuery,
 	})
 	if err != nil {
 		return RoomListPage{}, err
@@ -399,7 +438,7 @@ func (s *Service) ListRoomsPage(ctx context.Context, workspaceID string, page, p
 		WorkspaceID: wsUUID,
 		Limit:       int32(pageSize),
 		Offset:      int32(offset),
-		Query:       query,
+		Query:       likeQuery,
 	})
 	if err != nil {
 		return RoomListPage{}, err
@@ -581,6 +620,121 @@ func (s *Service) GetRoom(ctx context.Context, roomID, workspaceID string) (db.D
 		return db.DealRoom{}, err
 	}
 	return room, nil
+}
+
+// DeleteRoom soft-deletes a data room. Only active room owner/admin members may delete
+// (workspace owner/admin is not sufficient unless they also hold that room role).
+// Documents are detached and returned to the library as general when orphaned.
+// Share links are marked deleted; knowledge Q&A rows are removed. External KB
+// document deletes are enqueued only after the transaction commits.
+func (s *Service) DeleteRoom(ctx context.Context, roomID, workspaceID, userID string) error {
+	room, err := s.GetRoom(ctx, roomID, workspaceID)
+	if err != nil {
+		return err
+	}
+	if err := s.requireRoomOwnerOrAdmin(ctx, room.ID, userID); err != nil {
+		return err
+	}
+	docs, err := s.queries.ListDealRoomDocuments(ctx, room.ID)
+	if err != nil {
+		return err
+	}
+
+	roomIDStr := uuid.UUID(room.ID.Bytes).String()
+	wsIDStr := uuid.UUID(room.WorkspaceID.Bytes).String()
+
+	if err := s.runInTx(ctx, func(q *db.Queries) error {
+		for _, d := range docs {
+			if delErr := q.DeleteDealRoomDocument(ctx, db.DeleteDealRoomDocumentParams{
+				DocumentID: d.DocumentID,
+				RoomID:     room.ID,
+			}); delErr != nil {
+				return delErr
+			}
+			if delErr := q.DeleteLinkDocumentsByDealRoomDocument(ctx, db.DeleteLinkDocumentsByDealRoomDocumentParams{
+				DocumentID: d.DocumentID,
+				DealRoomID: room.ID,
+			}); delErr != nil {
+				return delErr
+			}
+			if demoteErr := demoteDealRoomCategoryIfOrphanedQ(ctx, q, d.DocumentID, room.WorkspaceID); demoteErr != nil {
+				return demoteErr
+			}
+		}
+		if disErr := q.DisableLinksByDealRoom(ctx, db.DisableLinksByDealRoomParams{
+			DealRoomID:  room.ID,
+			WorkspaceID: room.WorkspaceID,
+		}); disErr != nil {
+			return disErr
+		}
+		if evalErr := q.DeleteKnowledgeQAEvalCandidatesByRoom(ctx, room.ID); evalErr != nil {
+			return evalErr
+		}
+		if qaErr := q.DeleteKnowledgeQASessionsByRoom(ctx, room.ID); qaErr != nil {
+			return qaErr
+		}
+		if archErr := q.DeleteKnowledgeQASessionArchivesByRoom(ctx, room.ID); archErr != nil {
+			return archErr
+		}
+		if missionErr := q.DeleteKnowledgeQARoomMissionsByRoom(ctx, room.ID); missionErr != nil {
+			return missionErr
+		}
+		if cancelErr := q.CancelPendingKnowledgeJobsForDeletedRoom(ctx, room.ID); cancelErr != nil {
+			return cancelErr
+		}
+		n, delErr := q.SoftDeleteDealRoom(ctx, db.SoftDeleteDealRoomParams{
+			ID:          room.ID,
+			WorkspaceID: room.WorkspaceID,
+		})
+		if delErr != nil {
+			return delErr
+		}
+		if n == 0 {
+			return ErrRoomNotFound
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	// Enqueue after commit so a rolled-back delete cannot purge a live room KB.
+	if s.knowledgeEnqueuer != nil {
+		for _, d := range docs {
+			if kerr := s.knowledgeEnqueuer.EnqueueDeleteDocument(
+				ctx,
+				roomIDStr,
+				wsIDStr,
+				uuid.UUID(d.DocumentID.Bytes).String(),
+			); kerr != nil {
+				logger.ErrorCtx(ctx, "enqueue knowledge delete after delete room", kerr,
+					logger.Attr("document_id", uuid.UUID(d.DocumentID.Bytes).String()),
+				)
+			}
+		}
+	}
+	s.invalidateListCache(ctx, workspaceID)
+	return nil
+}
+
+// AdminRoomIDsForUser returns room IDs in the workspace where the user is an
+// active owner or admin. Used to overlay isAdmin on list responses without
+// putting per-user flags into the workspace list cache.
+func (s *Service) AdminRoomIDsForUser(ctx context.Context, workspaceID, userID string) (map[string]struct{}, error) {
+	if strings.TrimSpace(workspaceID) == "" || strings.TrimSpace(userID) == "" {
+		return map[string]struct{}{}, nil
+	}
+	ids, err := s.queries.ListAdminRoomIDsForUserInWorkspace(ctx, db.ListAdminRoomIDsForUserInWorkspaceParams{
+		WorkspaceID: pgUUID(workspaceID),
+		UserID:      pgUUID(userID),
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		out[uuid.UUID(id.Bytes).String()] = struct{}{}
+	}
+	return out, nil
 }
 
 const dealRoomRecentVisitorsLimit = 20
@@ -817,6 +971,10 @@ func (s *Service) AddMember(ctx context.Context, roomID, workspaceID, inviterUse
 	})
 	if existing.ID.Valid {
 		return db.RoomMember{}, errors.New("member already exists")
+	}
+
+	if ndaStatusForRole(room.RequiresNda, role) == "pending" && !roomHasMemberNDA(room) {
+		return db.RoomMember{}, ErrNDAAgreementRequired
 	}
 
 	member, err := s.queries.AddRoomMember(ctx, db.AddRoomMemberParams{
@@ -1167,7 +1325,7 @@ func (s *Service) PublicAccess(ctx context.Context, slug, email string) (db.Deal
 		return db.DealRoom{}, db.RoomMember{}, ErrApprovalRequired
 	}
 	if room.RequiresNda && member.NdaStatus != "signed" {
-		return db.DealRoom{}, db.RoomMember{}, ErrNDARequired
+		return room, member, ErrNDARequired
 	}
 	return room, member, nil
 }
@@ -1200,10 +1358,11 @@ func (s *Service) RecordNDA(ctx context.Context, roomSlug, email, ip, ua string)
 	}
 
 	if err := s.queries.CreateNDAAgreement(ctx, db.CreateNDAAgreementParams{
-		RoomID:    room.ID,
-		Email:     email,
-		Ip:        hashIPText(s.cfg.IPHashKey, ip),
-		UserAgent: pgtype.Text{String: ua, Valid: ua != ""},
+		RoomID:        room.ID,
+		Email:         email,
+		Ip:            hashIPText(s.cfg.IPHashKey, ip),
+		UserAgent:     pgtype.Text{String: ua, Valid: ua != ""},
+		NdaTemplateID: room.NdaTemplateID,
 	}); err != nil {
 		return fmt.Errorf("record nda: %w", err)
 	}
@@ -1482,14 +1641,18 @@ func (s *Service) RemoveDocument(ctx context.Context, roomID, workspaceID, userI
 
 // demoteDealRoomCategoryIfOrphaned sets deal_room → general when no room membership remains.
 func (s *Service) demoteDealRoomCategoryIfOrphaned(ctx context.Context, documentID, workspaceID pgtype.UUID) error {
-	n, err := s.queries.CountDealRoomMembershipsByDocument(ctx, documentID)
+	return demoteDealRoomCategoryIfOrphanedQ(ctx, s.queries, documentID, workspaceID)
+}
+
+func demoteDealRoomCategoryIfOrphanedQ(ctx context.Context, q *db.Queries, documentID, workspaceID pgtype.UUID) error {
+	n, err := q.CountDealRoomMembershipsByDocument(ctx, documentID)
 	if err != nil {
 		return err
 	}
 	if n > 0 {
 		return nil
 	}
-	doc, err := s.queries.GetDocumentByID(ctx, db.GetDocumentByIDParams{
+	doc, err := q.GetDocumentByID(ctx, db.GetDocumentByIDParams{
 		ID:          documentID,
 		WorkspaceID: workspaceID,
 	})
@@ -1502,7 +1665,7 @@ func (s *Service) demoteDealRoomCategoryIfOrphaned(ctx context.Context, document
 	if !strings.EqualFold(doc.Category, upload.CategoryDealRoom) {
 		return nil
 	}
-	return s.queries.UpdateDocumentCategory(ctx, db.UpdateDocumentCategoryParams{
+	return q.UpdateDocumentCategory(ctx, db.UpdateDocumentCategoryParams{
 		Category:    upload.CategoryGeneral,
 		ID:          documentID,
 		WorkspaceID: workspaceID,
@@ -2286,15 +2449,24 @@ func (s *Service) requireRoomAdmin(ctx context.Context, workspaceID, roomID pgty
 	} else if ok {
 		return nil
 	}
-	members, err := s.queries.ListRoomMembers(ctx, roomID)
+	return s.requireRoomOwnerOrAdmin(ctx, roomID, userID)
+}
+
+// requireRoomOwnerOrAdmin allows only an active room owner/admin member.
+// Workspace owner/admin without that room role is rejected.
+func (s *Service) requireRoomOwnerOrAdmin(ctx context.Context, roomID pgtype.UUID, userID string) error {
+	member, err := s.queries.GetRoomMemberByUserID(ctx, db.GetRoomMemberByUserIDParams{
+		RoomID: roomID,
+		UserID: pgUUID(userID),
+	})
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotRoomAdmin
+		}
 		return err
 	}
-	uid := pgUUID(userID)
-	for _, m := range members {
-		if m.UserID == uid && (m.Role == "owner" || m.Role == "admin") && m.Status == "active" {
-			return nil
-		}
+	if member.Status == "active" && (member.Role == "owner" || member.Role == "admin") {
+		return nil
 	}
 	return ErrNotRoomAdmin
 }
@@ -2332,6 +2504,47 @@ func (s *Service) getTenantForWorkspace(ctx context.Context, workspaceID pgtype.
 
 func defaultFolders() []Folder {
 	return []Folder{}
+}
+
+const maxCreateFolders = 40
+
+func normalizeCreateFolders(input []Folder) ([]Folder, error) {
+	out := make([]Folder, 0, len(input))
+	used := make(map[string]bool, len(input))
+	for _, f := range input {
+		name := strings.TrimSpace(f.Name)
+		if name == "" {
+			continue
+		}
+		if strings.Contains(name, "/") {
+			return nil, fmt.Errorf("%w: folder name cannot contain slashes", ErrInvalidFolder)
+		}
+		path := normalizeFolderPath(f.Path)
+		if path == "/" {
+			slug := slugify(name)
+			if slug == "" {
+				slug = fmt.Sprintf("folder-%d", len(out)+1)
+			}
+			path = "/" + slug
+		}
+		base := path
+		n := 2
+		for used[path] {
+			path = fmt.Sprintf("%s-%d", base, n)
+			n++
+		}
+		used[path] = true
+		out = append(out, Folder{
+			Path:        path,
+			Name:        name,
+			Description: strings.TrimSpace(f.Description),
+			SortOrder:   len(out),
+		})
+		if len(out) >= maxCreateFolders {
+			break
+		}
+	}
+	return out, nil
 }
 
 func generalFolder() Folder {
@@ -2441,6 +2654,85 @@ func ndaStatusFor(required bool) string {
 		return "pending"
 	}
 	return "not_required"
+}
+
+func roomHasMemberNDA(room db.DealRoom) bool {
+	return room.NdaTemplateID.Valid || room.NdaDocumentID.Valid
+}
+
+// SetMemberNDAAgreement binds the room-level NDA that invited members must sign.
+func (s *Service) SetMemberNDAAgreement(ctx context.Context, roomID, workspaceID, adminUserID, templateID, documentID string) (db.DealRoom, error) {
+	room, err := s.GetRoom(ctx, roomID, workspaceID)
+	if err != nil {
+		return db.DealRoom{}, err
+	}
+	if err := s.requireRoomAdmin(ctx, room.WorkspaceID, room.ID, adminUserID); err != nil {
+		return db.DealRoom{}, err
+	}
+	tplID, docID, err := s.resolveRoomNDABinding(ctx, room.WorkspaceID, templateID, documentID)
+	if err != nil {
+		return db.DealRoom{}, err
+	}
+	if room.RequiresNda && !tplID.Valid && !docID.Valid {
+		return db.DealRoom{}, ErrNDAAgreementRequired
+	}
+	updated, err := s.queries.UpdateDealRoomNDAAgreement(ctx, db.UpdateDealRoomNDAAgreementParams{
+		NdaTemplateID: tplID,
+		NdaDocumentID: docID,
+		ID:            room.ID,
+		WorkspaceID:   room.WorkspaceID,
+	})
+	if err != nil {
+		return db.DealRoom{}, fmt.Errorf("update room nda agreement: %w", err)
+	}
+	s.invalidateListCache(ctx, workspaceID)
+	return updated, nil
+}
+
+func (s *Service) resolveRoomNDABinding(ctx context.Context, workspaceID pgtype.UUID, templateID, documentID string) (pgtype.UUID, pgtype.UUID, error) {
+	templateID = strings.TrimSpace(templateID)
+	documentID = strings.TrimSpace(documentID)
+	if templateID == "" && documentID == "" {
+		return pgtype.UUID{}, pgtype.UUID{}, nil
+	}
+	if templateID != "" {
+		id := pgUUID(templateID)
+		if !id.Valid {
+			return pgtype.UUID{}, pgtype.UUID{}, ErrNDAAgreementRequired
+		}
+		tpl, err := s.queries.GetNDATemplateByID(ctx, db.GetNDATemplateByIDParams{
+			ID:          id,
+			WorkspaceID: workspaceID,
+		})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return pgtype.UUID{}, pgtype.UUID{}, ErrNDAAgreementRequired
+			}
+			return pgtype.UUID{}, pgtype.UUID{}, fmt.Errorf("get nda template: %w", err)
+		}
+		if tpl.Status != "active" {
+			return pgtype.UUID{}, pgtype.UUID{}, ErrNDAAgreementRequired
+		}
+		return tpl.ID, tpl.SourceDocumentID, nil
+	}
+	docID := pgUUID(documentID)
+	if !docID.Valid {
+		return pgtype.UUID{}, pgtype.UUID{}, ErrNDAAgreementRequired
+	}
+	tpl, err := s.queries.GetNDATemplateBySourceDocument(ctx, db.GetNDATemplateBySourceDocumentParams{
+		WorkspaceID:      workspaceID,
+		SourceDocumentID: docID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return pgtype.UUID{}, pgtype.UUID{}, ErrNDAAgreementRequired
+		}
+		return pgtype.UUID{}, pgtype.UUID{}, fmt.Errorf("get nda template by document: %w", err)
+	}
+	if tpl.Status != "active" {
+		return pgtype.UUID{}, pgtype.UUID{}, ErrNDAAgreementRequired
+	}
+	return tpl.ID, tpl.SourceDocumentID, nil
 }
 
 // ndaStatusForRole: room operators never owe a visitor NDA; external roles do

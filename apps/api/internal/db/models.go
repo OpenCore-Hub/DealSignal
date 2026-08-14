@@ -134,6 +134,8 @@ type DealRoom struct {
 	UpdatedAt        pgtype.Timestamptz
 	DeletedAt        pgtype.Timestamptz
 	ExpiresAt        pgtype.Timestamptz
+	NdaTemplateID    pgtype.UUID
+	NdaDocumentID    pgtype.UUID
 }
 
 type DealRoomAccessPolicy struct {
@@ -837,12 +839,13 @@ type RoomMemberFolderPermission struct {
 }
 
 type RoomNdaAgreement struct {
-	ID        pgtype.UUID
-	RoomID    pgtype.UUID
-	Email     string
-	Ip        pgtype.Text
-	UserAgent pgtype.Text
-	AgreedAt  pgtype.Timestamptz
+	ID            pgtype.UUID
+	RoomID        pgtype.UUID
+	Email         string
+	Ip            pgtype.Text
+	UserAgent     pgtype.Text
+	AgreedAt      pgtype.Timestamptz
+	NdaTemplateID pgtype.UUID
 }
 
 type SecurityEvent struct {

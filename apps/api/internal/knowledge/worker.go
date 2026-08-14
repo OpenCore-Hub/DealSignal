@@ -115,16 +115,33 @@ func (w *Worker) process(ctx context.Context) {
 }
 
 func (w *Worker) handleJob(ctx context.Context, job db.KnowledgeSyncJob) error {
-	room, err := w.service.queries.GetDealRoomByID(ctx, db.GetDealRoomByIDParams{
+	room, err := w.service.queries.GetDealRoomByIDIncludingDeleted(ctx, db.GetDealRoomByIDIncludingDeletedParams{
 		ID:          job.RoomID,
 		WorkspaceID: job.WorkspaceID,
 	})
 	if err != nil {
 		return err
 	}
-	cred, err := w.service.ensureProvisioned(ctx, room)
-	if err != nil {
-		return err
+	roomDeleted := room.DeletedAt.Valid || room.Status == "deleted"
+	if roomDeleted && job.JobType != "delete_doc" {
+		return nil
+	}
+	var cred ragCredentials
+	if roomDeleted {
+		existing, ok, credErr := w.service.existingRagCredentials(ctx, room)
+		if credErr != nil {
+			return credErr
+		}
+		if !ok {
+			return nil
+		}
+		cred = existing
+	} else {
+		var provErr error
+		cred, provErr = w.service.ensureProvisioned(ctx, room)
+		if provErr != nil {
+			return provErr
+		}
 	}
 
 	switch job.JobType {

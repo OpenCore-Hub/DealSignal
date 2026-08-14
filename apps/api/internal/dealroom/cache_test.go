@@ -227,3 +227,77 @@ func TestListRoomsPageFiltersByQuery(t *testing.T) {
 		t.Fatalf("unexpected items: %+v", page.Items)
 	}
 }
+
+func TestListRoomsPageTreatsPercentAndUnderscoreLiterally(t *testing.T) {
+	fake := newFakeDB(t)
+	svc := NewService(db.New(fake), nil, testCfg())
+	ownerID := uuid.NewString()
+	wsID := uuid.NewString()
+	fake.workspace = db.Workspace{
+		ID:       pgUUID(wsID),
+		TenantID: pgUUID(uuid.NewString()),
+		Name:     "Query Workspace",
+		Slug:     "query-workspace",
+	}
+	if _, err := svc.CreateRoom(context.Background(), ownerID, wsID, CreateRoomRequest{
+		Slug: "percent-room",
+		Name: "100% Club",
+	}); err != nil {
+		t.Fatalf("create percent: %v", err)
+	}
+	if _, err := svc.CreateRoom(context.Background(), ownerID, wsID, CreateRoomRequest{
+		Slug: "ops-room",
+		Name: "Beta Ops",
+	}); err != nil {
+		t.Fatalf("create ops: %v", err)
+	}
+
+	page, err := svc.ListRoomsPage(context.Background(), wsID, 1, 24, "%")
+	if err != nil {
+		t.Fatalf("list page: %v", err)
+	}
+	if page.Total != 1 || len(page.Items) != 1 || page.Items[0].Room.Name != "100% Club" {
+		t.Fatalf("percent search = %+v", page)
+	}
+
+	wide, err := svc.ListRoomsPage(context.Background(), wsID, 1, 24, "_")
+	if err != nil {
+		t.Fatalf("underscore search: %v", err)
+	}
+	if wide.Total != 0 {
+		t.Fatalf("underscore search matched %d rooms, want 0", wide.Total)
+	}
+}
+
+func TestCreateRoomRetriesDuplicateSlug(t *testing.T) {
+	fake := newFakeDB(t)
+	svc := NewService(db.New(fake), nil, testCfg())
+	ownerID := uuid.NewString()
+	wsID := uuid.NewString()
+	fake.workspace = db.Workspace{
+		ID:       pgUUID(wsID),
+		TenantID: pgUUID(uuid.NewString()),
+		Name:     "Slug Workspace",
+		Slug:     "slug-workspace",
+	}
+	first, err := svc.CreateRoom(context.Background(), ownerID, wsID, CreateRoomRequest{
+		Slug: "shared-room",
+		Name: "First",
+	})
+	if err != nil {
+		t.Fatalf("create first: %v", err)
+	}
+	if first.Slug != "shared-room" {
+		t.Fatalf("first slug = %q", first.Slug)
+	}
+	second, err := svc.CreateRoom(context.Background(), ownerID, wsID, CreateRoomRequest{
+		Slug: "shared-room",
+		Name: "Second",
+	})
+	if err != nil {
+		t.Fatalf("create second: %v", err)
+	}
+	if second.Slug != "shared-room-2" {
+		t.Fatalf("second slug = %q, want shared-room-2", second.Slug)
+	}
+}

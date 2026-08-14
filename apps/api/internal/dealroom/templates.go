@@ -195,6 +195,16 @@ var roomTemplates = []Template{
 			{Path: "/security-and-compliance", Name: "Security & Compliance", Description: "Security, compliance and certifications", SortOrder: 5},
 		},
 	},
+	{
+		ID:                     "tmpl_custom",
+		Name:                   "Completely Custom",
+		Description:            "Start with an empty room and add your own folders.",
+		Scenario:               "custom",
+		DefaultPermissionLevel: "standard",
+		NDAEnabled:             false,
+		RecommendedFiles:       []string{},
+		FolderStructure:        []FolderTemplate{},
+	},
 }
 
 func templateFolders(templateType string) []FolderTemplate {

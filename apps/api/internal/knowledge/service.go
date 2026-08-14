@@ -475,15 +475,31 @@ func (s *Service) EnqueueIngestDocument(ctx context.Context, roomID, workspaceID
 // EnqueueDeleteDocument queues deletion from the external KB.
 // Always creates/updates a local binding so the worker can resolve the remote
 // document by stable external_name even if ingest mapping was missing.
+// Soft-deleted rooms are allowed so DeleteRoom can enqueue after commit;
+// an unprovisioned deleted room is a no-op (do not mint a corpus just to delete).
 func (s *Service) EnqueueDeleteDocument(ctx context.Context, roomID, workspaceID, documentID string) error {
 	if !s.Enabled() {
 		return nil
 	}
-	room, err := s.access.GetRoom(ctx, roomID, workspaceID)
+	room, err := s.queries.GetDealRoomByIDIncludingDeleted(ctx, db.GetDealRoomByIDIncludingDeletedParams{
+		ID:          pgUUID(roomID),
+		WorkspaceID: pgUUID(workspaceID),
+	})
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
 		return err
 	}
-	if err := s.ensureLocalCorpusRow(ctx, room); err != nil {
+	roomDeleted := room.DeletedAt.Valid || room.Status == "deleted"
+	if roomDeleted {
+		if _, corpusErr := s.queries.GetDealRoomRagCorpus(ctx, room.ID); corpusErr != nil {
+			if errors.Is(corpusErr, pgx.ErrNoRows) {
+				return nil
+			}
+			return corpusErr
+		}
+	} else if err := s.ensureLocalCorpusRow(ctx, room); err != nil {
 		logger.ErrorCtx(ctx, "knowledge ensure local corpus for delete", err)
 		return err
 	}
@@ -897,6 +913,37 @@ func (s *Service) ensureProvisioned(ctx context.Context, room db.DealRoom) (ragC
 		return ragCredentials{}, err
 	}
 	return ragCredentials{tenantSlug: tenantSlug, kbSlug: kbSlug, apiKey: apiKey}, nil
+}
+
+// existingRagCredentials returns already-stored RAG credentials without minting
+// a tenant, API key, or knowledge base. Used for delete_doc after room soft-delete.
+func (s *Service) existingRagCredentials(ctx context.Context, room db.DealRoom) (ragCredentials, bool, error) {
+	corpus, err := s.queries.GetDealRoomRagCorpus(ctx, room.ID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ragCredentials{}, false, nil
+		}
+		return ragCredentials{}, false, err
+	}
+	tenantRow, err := s.queries.GetWorkspaceRagTenant(ctx, room.WorkspaceID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ragCredentials{}, false, nil
+		}
+		return ragCredentials{}, false, err
+	}
+	opened, oerr := openSecret(s.secretKey, tenantRow.TenantApiKey)
+	if oerr != nil {
+		return ragCredentials{}, false, fmt.Errorf("decrypt tenant api key: %w", oerr)
+	}
+	if opened == "" || tenantRow.ExternalTenantSlug == "" || corpus.ExternalKbSlug == "" {
+		return ragCredentials{}, false, nil
+	}
+	return ragCredentials{
+		tenantSlug: tenantRow.ExternalTenantSlug,
+		kbSlug:     corpus.ExternalKbSlug,
+		apiKey:     opened,
+	}, true, nil
 }
 
 func (s *Service) alignRoomDocuments(ctx context.Context, room db.DealRoom) error {

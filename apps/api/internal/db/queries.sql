@@ -1774,14 +1774,21 @@ ORDER BY session_id, page_number ASC;
 -- name: CreateDealRoom :one
 INSERT INTO deal_rooms (
     tenant_id, workspace_id, slug, name, description, template_type, settings,
-    requires_nda, requires_approval, status, created_by
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+    requires_nda, requires_approval, status, created_by,
+    nda_template_id, nda_document_id
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 RETURNING *;
 
 -- name: GetDealRoomByID :one
 SELECT *
 FROM deal_rooms
 WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL
+LIMIT 1;
+
+-- name: GetDealRoomByIDIncludingDeleted :one
+SELECT *
+FROM deal_rooms
+WHERE id = $1 AND workspace_id = $2
 LIMIT 1;
 
 -- name: GetDealRoomBySlug :one
@@ -1797,25 +1804,27 @@ WHERE workspace_id = $1 AND deleted_at IS NULL
 ORDER BY created_at DESC;
 
 -- name: CountDealRoomsByWorkspace :one
+-- query is ILIKE-escaped by dealroom.escapeILIKEPattern.
 SELECT COUNT(*)::bigint AS count
 FROM deal_rooms
 WHERE workspace_id = $1
   AND deleted_at IS NULL
   AND (
     sqlc.arg(query)::text = ''
-    OR name ILIKE '%' || sqlc.arg(query) || '%'
-    OR COALESCE(description, '') ILIKE '%' || sqlc.arg(query) || '%'
+    OR name ILIKE '%' || sqlc.arg(query) || '%' ESCAPE '\'
+    OR COALESCE(description, '') ILIKE '%' || sqlc.arg(query) || '%' ESCAPE '\'
   );
 
 -- name: ListDealRoomsByWorkspacePage :many
+-- query is ILIKE-escaped by dealroom.escapeILIKEPattern.
 SELECT *
 FROM deal_rooms
 WHERE workspace_id = $1
   AND deleted_at IS NULL
   AND (
     sqlc.arg(query)::text = ''
-    OR name ILIKE '%' || sqlc.arg(query) || '%'
-    OR COALESCE(description, '') ILIKE '%' || sqlc.arg(query) || '%'
+    OR name ILIKE '%' || sqlc.arg(query) || '%' ESCAPE '\'
+    OR COALESCE(description, '') ILIKE '%' || sqlc.arg(query) || '%' ESCAPE '\'
   )
 ORDER BY created_at DESC
 LIMIT $2 OFFSET $3;
@@ -1958,6 +1967,52 @@ UPDATE deal_rooms
 SET settings = $1::jsonb, updated_at = now()
 WHERE id = $2 AND workspace_id = $3;
 
+-- name: UpdateDealRoomNDAAgreement :one
+UPDATE deal_rooms
+SET nda_template_id = $1,
+    nda_document_id = $2,
+    updated_at = now()
+WHERE id = $3 AND workspace_id = $4 AND deleted_at IS NULL
+RETURNING *;
+
+-- name: SoftDeleteDealRoom :execrows
+UPDATE deal_rooms
+SET deleted_at = now(),
+    status = 'deleted',
+    slug = slug || '-deleted-' || replace(id::text, '-', ''),
+    updated_at = now()
+WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL;
+
+-- name: DisableLinksByDealRoom :exec
+UPDATE links
+SET status = 'deleted', updated_at = now()
+WHERE deal_room_id = $1 AND workspace_id = $2 AND status <> 'deleted';
+
+-- name: DeleteKnowledgeQASessionsByRoom :exec
+DELETE FROM knowledge_qa_sessions
+WHERE room_id = $1;
+
+-- name: DeleteKnowledgeQASessionArchivesByRoom :exec
+DELETE FROM knowledge_qa_session_archives
+WHERE room_id = $1;
+
+-- name: DeleteKnowledgeQARoomMissionsByRoom :exec
+DELETE FROM knowledge_qa_room_missions
+WHERE room_id = $1;
+
+-- name: DeleteKnowledgeQAEvalCandidatesByRoom :exec
+DELETE FROM knowledge_qa_eval_candidates
+WHERE room_id = $1;
+
+-- name: CancelPendingKnowledgeJobsForDeletedRoom :exec
+UPDATE knowledge_sync_jobs
+SET status = 'done',
+    last_error = 'room deleted',
+    updated_at = now()
+WHERE room_id = $1
+  AND status = 'pending'
+  AND job_type IN ('ingest_doc', 'sync_room');
+
 -- name: DeleteDealRoomDocument :exec
 DELETE FROM deal_room_documents
 WHERE document_id = $1 AND room_id = $2;
@@ -2012,6 +2067,14 @@ SELECT id, tenant_id, workspace_id, room_id, email, user_id, role, nda_status, n
 FROM room_members
 WHERE room_id = $1 AND user_id = $2
 LIMIT 1;
+
+-- name: ListAdminRoomIDsForUserInWorkspace :many
+SELECT room_id
+FROM room_members
+WHERE workspace_id = $1
+  AND user_id = $2
+  AND status = 'active'
+  AND role IN ('owner', 'admin');
 
 -- name: ListRoomMembersWithUser :many
 SELECT
@@ -2214,8 +2277,8 @@ FROM room_member_folder_permissions
 WHERE room_id = $1 AND email = $2;
 
 -- name: CreateNDAAgreement :exec
-INSERT INTO room_nda_agreements (room_id, email, ip, user_agent)
-VALUES ($1, $2, $3, $4)
+INSERT INTO room_nda_agreements (room_id, email, ip, user_agent, nda_template_id)
+VALUES ($1, $2, $3, $4, $5)
 ON CONFLICT (room_id, email) DO NOTHING;
 
 -- name: HasNDAAgreement :one
@@ -3309,6 +3372,7 @@ FROM link_ask_turns t
 JOIN link_ask_sessions s ON s.id = t.session_id
 JOIN links l ON l.id = t.link_id
 WHERE t.workspace_id = $1
+  AND l.status <> 'deleted'
   AND t.lane IN ('host', 'hybrid')
   AND t.status IN ('host_pending', 'host_escalated')
   AND (t.formal_status IS NULL OR t.formal_status NOT IN ('pending_review', 'scheduled'))
@@ -3332,6 +3396,7 @@ FROM link_ask_turns t
 JOIN link_ask_sessions s ON s.id = t.session_id
 JOIN links l ON l.id = t.link_id
 WHERE t.workspace_id = $1
+  AND l.status <> 'deleted'
   AND t.lane IN ('host', 'hybrid')
   AND t.status IN ('host_pending', 'host_escalated')
   AND t.formal_status IN ('pending_review', 'scheduled')
@@ -3353,6 +3418,7 @@ SELECT f.id, f.original_filename, f.link_id, l.name AS link_name
 FROM link_uploaded_files f
 JOIN links l ON l.id = f.link_id
 WHERE f.workspace_id = $1 AND f.status = 'pending_review'
+  AND l.status <> 'deleted'
 ORDER BY f.created_at DESC;
 
 -- name: ListAskQARecordsByLink :many

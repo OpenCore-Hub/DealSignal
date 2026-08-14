@@ -531,6 +531,21 @@ func (q *Queries) CancelPendingKnowledgeIngestJobs(ctx context.Context, arg Canc
 	return err
 }
 
+const cancelPendingKnowledgeJobsForDeletedRoom = `-- name: CancelPendingKnowledgeJobsForDeletedRoom :exec
+UPDATE knowledge_sync_jobs
+SET status = 'done',
+    last_error = 'room deleted',
+    updated_at = now()
+WHERE room_id = $1
+  AND status = 'pending'
+  AND job_type IN ('ingest_doc', 'sync_room')
+`
+
+func (q *Queries) CancelPendingKnowledgeJobsForDeletedRoom(ctx context.Context, roomID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, cancelPendingKnowledgeJobsForDeletedRoom, roomID)
+	return err
+}
+
 const claimKnowledgeSyncJob = `-- name: ClaimKnowledgeSyncJob :one
 UPDATE knowledge_sync_jobs
 SET status = 'running',
@@ -800,8 +815,8 @@ WHERE workspace_id = $1
   AND deleted_at IS NULL
   AND (
     $2::text = ''
-    OR name ILIKE '%' || $2 || '%'
-    OR COALESCE(description, '') ILIKE '%' || $2 || '%'
+    OR name ILIKE '%' || $2 || '%' ESCAPE '\'
+    OR COALESCE(description, '') ILIKE '%' || $2 || '%' ESCAPE '\'
   )
 `
 
@@ -810,6 +825,7 @@ type CountDealRoomsByWorkspaceParams struct {
 	Query       string
 }
 
+// query is ILIKE-escaped by dealroom.escapeILIKEPattern.
 func (q *Queries) CountDealRoomsByWorkspace(ctx context.Context, arg CountDealRoomsByWorkspaceParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countDealRoomsByWorkspace, arg.WorkspaceID, arg.Query)
 	var count int64
@@ -1313,6 +1329,19 @@ func (q *Queries) CountOtherLinkVisitors(ctx context.Context, arg CountOtherLink
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
+}
+
+const countOwnedWorkspacesByUser = `-- name: CountOwnedWorkspacesByUser :one
+SELECT COUNT(*)::bigint AS count
+FROM workspace_members
+WHERE user_id = $1 AND role = 'owner'
+`
+
+func (q *Queries) CountOwnedWorkspacesByUser(ctx context.Context, userID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countOwnedWorkspacesByUser, userID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
 }
 
 const countPendingFileRequests = `-- name: CountPendingFileRequests :one
@@ -2191,19 +2220,6 @@ func (q *Queries) CountWorkspaceLinkOpensInRange(ctx context.Context, arg CountW
 	return opens, err
 }
 
-const countOwnedWorkspacesByUser = `-- name: CountOwnedWorkspacesByUser :one
-SELECT COUNT(*)::bigint AS count
-FROM workspace_members
-WHERE user_id = $1 AND role = 'owner'
-`
-
-func (q *Queries) CountOwnedWorkspacesByUser(ctx context.Context, userID pgtype.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countOwnedWorkspacesByUser, userID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const createAccessLog = `-- name: CreateAccessLog :exec
 INSERT INTO access_logs (tenant_id, workspace_id, link_id, visitor_id, visitor_email, event_type, ip, user_agent)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -2491,9 +2507,10 @@ func (q *Queries) CreateDeal(ctx context.Context, arg CreateDealParams) (Deal, e
 const createDealRoom = `-- name: CreateDealRoom :one
 INSERT INTO deal_rooms (
     tenant_id, workspace_id, slug, name, description, template_type, settings,
-    requires_nda, requires_approval, status, created_by
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-RETURNING id, tenant_id, workspace_id, slug, name, description, template_type, settings, requires_nda, requires_approval, status, created_by, created_at, updated_at, deleted_at, expires_at
+    requires_nda, requires_approval, status, created_by,
+    nda_template_id, nda_document_id
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+RETURNING id, tenant_id, workspace_id, slug, name, description, template_type, settings, requires_nda, requires_approval, status, created_by, created_at, updated_at, deleted_at, expires_at, nda_template_id, nda_document_id
 `
 
 type CreateDealRoomParams struct {
@@ -2508,6 +2525,8 @@ type CreateDealRoomParams struct {
 	RequiresApproval bool
 	Status           string
 	CreatedBy        pgtype.UUID
+	NdaTemplateID    pgtype.UUID
+	NdaDocumentID    pgtype.UUID
 }
 
 func (q *Queries) CreateDealRoom(ctx context.Context, arg CreateDealRoomParams) (DealRoom, error) {
@@ -2523,6 +2542,8 @@ func (q *Queries) CreateDealRoom(ctx context.Context, arg CreateDealRoomParams) 
 		arg.RequiresApproval,
 		arg.Status,
 		arg.CreatedBy,
+		arg.NdaTemplateID,
+		arg.NdaDocumentID,
 	)
 	var i DealRoom
 	err := row.Scan(
@@ -2542,6 +2563,8 @@ func (q *Queries) CreateDealRoom(ctx context.Context, arg CreateDealRoomParams) 
 		&i.UpdatedAt,
 		&i.DeletedAt,
 		&i.ExpiresAt,
+		&i.NdaTemplateID,
+		&i.NdaDocumentID,
 	)
 	return i, err
 }
@@ -3620,16 +3643,17 @@ func (q *Queries) CreateLinkNDAAgreement(ctx context.Context, arg CreateLinkNDAA
 }
 
 const createNDAAgreement = `-- name: CreateNDAAgreement :exec
-INSERT INTO room_nda_agreements (room_id, email, ip, user_agent)
-VALUES ($1, $2, $3, $4)
+INSERT INTO room_nda_agreements (room_id, email, ip, user_agent, nda_template_id)
+VALUES ($1, $2, $3, $4, $5)
 ON CONFLICT (room_id, email) DO NOTHING
 `
 
 type CreateNDAAgreementParams struct {
-	RoomID    pgtype.UUID
-	Email     string
-	Ip        pgtype.Text
-	UserAgent pgtype.Text
+	RoomID        pgtype.UUID
+	Email         string
+	Ip            pgtype.Text
+	UserAgent     pgtype.Text
+	NdaTemplateID pgtype.UUID
 }
 
 func (q *Queries) CreateNDAAgreement(ctx context.Context, arg CreateNDAAgreementParams) error {
@@ -3638,6 +3662,7 @@ func (q *Queries) CreateNDAAgreement(ctx context.Context, arg CreateNDAAgreement
 		arg.Email,
 		arg.Ip,
 		arg.UserAgent,
+		arg.NdaTemplateID,
 	)
 	return err
 }
@@ -4613,6 +4638,26 @@ func (q *Queries) DeleteIntegrationToken(ctx context.Context, arg DeleteIntegrat
 	return err
 }
 
+const deleteKnowledgeQAEvalCandidatesByRoom = `-- name: DeleteKnowledgeQAEvalCandidatesByRoom :exec
+DELETE FROM knowledge_qa_eval_candidates
+WHERE room_id = $1
+`
+
+func (q *Queries) DeleteKnowledgeQAEvalCandidatesByRoom(ctx context.Context, roomID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteKnowledgeQAEvalCandidatesByRoom, roomID)
+	return err
+}
+
+const deleteKnowledgeQARoomMissionsByRoom = `-- name: DeleteKnowledgeQARoomMissionsByRoom :exec
+DELETE FROM knowledge_qa_room_missions
+WHERE room_id = $1
+`
+
+func (q *Queries) DeleteKnowledgeQARoomMissionsByRoom(ctx context.Context, roomID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteKnowledgeQARoomMissionsByRoom, roomID)
+	return err
+}
+
 const deleteKnowledgeQASession = `-- name: DeleteKnowledgeQASession :execrows
 DELETE FROM knowledge_qa_sessions
 WHERE id = $1
@@ -4624,6 +4669,26 @@ func (q *Queries) DeleteKnowledgeQASession(ctx context.Context, id pgtype.UUID) 
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const deleteKnowledgeQASessionArchivesByRoom = `-- name: DeleteKnowledgeQASessionArchivesByRoom :exec
+DELETE FROM knowledge_qa_session_archives
+WHERE room_id = $1
+`
+
+func (q *Queries) DeleteKnowledgeQASessionArchivesByRoom(ctx context.Context, roomID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteKnowledgeQASessionArchivesByRoom, roomID)
+	return err
+}
+
+const deleteKnowledgeQASessionsByRoom = `-- name: DeleteKnowledgeQASessionsByRoom :exec
+DELETE FROM knowledge_qa_sessions
+WHERE room_id = $1
+`
+
+func (q *Queries) DeleteKnowledgeQASessionsByRoom(ctx context.Context, roomID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteKnowledgeQASessionsByRoom, roomID)
+	return err
 }
 
 const deleteLink = `-- name: DeleteLink :execrows
@@ -4915,6 +4980,22 @@ WHERE workspace_id = $1
 
 func (q *Queries) DeleteWorkspaceViewerDomain(ctx context.Context, workspaceID pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, deleteWorkspaceViewerDomain, workspaceID)
+	return err
+}
+
+const disableLinksByDealRoom = `-- name: DisableLinksByDealRoom :exec
+UPDATE links
+SET status = 'deleted', updated_at = now()
+WHERE deal_room_id = $1 AND workspace_id = $2 AND status <> 'deleted'
+`
+
+type DisableLinksByDealRoomParams struct {
+	DealRoomID  pgtype.UUID
+	WorkspaceID pgtype.UUID
+}
+
+func (q *Queries) DisableLinksByDealRoom(ctx context.Context, arg DisableLinksByDealRoomParams) error {
+	_, err := q.db.Exec(ctx, disableLinksByDealRoom, arg.DealRoomID, arg.WorkspaceID)
 	return err
 }
 
@@ -6054,7 +6135,7 @@ func (q *Queries) GetDealRoomAnalytics(ctx context.Context, arg GetDealRoomAnaly
 }
 
 const getDealRoomByID = `-- name: GetDealRoomByID :one
-SELECT id, tenant_id, workspace_id, slug, name, description, template_type, settings, requires_nda, requires_approval, status, created_by, created_at, updated_at, deleted_at, expires_at
+SELECT id, tenant_id, workspace_id, slug, name, description, template_type, settings, requires_nda, requires_approval, status, created_by, created_at, updated_at, deleted_at, expires_at, nda_template_id, nda_document_id
 FROM deal_rooms
 WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL
 LIMIT 1
@@ -6085,12 +6166,52 @@ func (q *Queries) GetDealRoomByID(ctx context.Context, arg GetDealRoomByIDParams
 		&i.UpdatedAt,
 		&i.DeletedAt,
 		&i.ExpiresAt,
+		&i.NdaTemplateID,
+		&i.NdaDocumentID,
+	)
+	return i, err
+}
+
+const getDealRoomByIDIncludingDeleted = `-- name: GetDealRoomByIDIncludingDeleted :one
+SELECT id, tenant_id, workspace_id, slug, name, description, template_type, settings, requires_nda, requires_approval, status, created_by, created_at, updated_at, deleted_at, expires_at, nda_template_id, nda_document_id
+FROM deal_rooms
+WHERE id = $1 AND workspace_id = $2
+LIMIT 1
+`
+
+type GetDealRoomByIDIncludingDeletedParams struct {
+	ID          pgtype.UUID
+	WorkspaceID pgtype.UUID
+}
+
+func (q *Queries) GetDealRoomByIDIncludingDeleted(ctx context.Context, arg GetDealRoomByIDIncludingDeletedParams) (DealRoom, error) {
+	row := q.db.QueryRow(ctx, getDealRoomByIDIncludingDeleted, arg.ID, arg.WorkspaceID)
+	var i DealRoom
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.Slug,
+		&i.Name,
+		&i.Description,
+		&i.TemplateType,
+		&i.Settings,
+		&i.RequiresNda,
+		&i.RequiresApproval,
+		&i.Status,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.ExpiresAt,
+		&i.NdaTemplateID,
+		&i.NdaDocumentID,
 	)
 	return i, err
 }
 
 const getDealRoomBySlug = `-- name: GetDealRoomBySlug :one
-SELECT id, tenant_id, workspace_id, slug, name, description, template_type, settings, requires_nda, requires_approval, status, created_by, created_at, updated_at, deleted_at, expires_at
+SELECT id, tenant_id, workspace_id, slug, name, description, template_type, settings, requires_nda, requires_approval, status, created_by, created_at, updated_at, deleted_at, expires_at, nda_template_id, nda_document_id
 FROM deal_rooms
 WHERE slug = $1 AND status = 'active' AND deleted_at IS NULL
 LIMIT 1
@@ -6116,6 +6237,8 @@ func (q *Queries) GetDealRoomBySlug(ctx context.Context, slug string) (DealRoom,
 		&i.UpdatedAt,
 		&i.DeletedAt,
 		&i.ExpiresAt,
+		&i.NdaTemplateID,
+		&i.NdaDocumentID,
 	)
 	return i, err
 }
@@ -11771,6 +11894,40 @@ func (q *Queries) ListActiveDealRoomLinkIDs(ctx context.Context, arg ListActiveD
 	return items, nil
 }
 
+const listAdminRoomIDsForUserInWorkspace = `-- name: ListAdminRoomIDsForUserInWorkspace :many
+SELECT room_id
+FROM room_members
+WHERE workspace_id = $1
+  AND user_id = $2
+  AND status = 'active'
+  AND role IN ('owner', 'admin')
+`
+
+type ListAdminRoomIDsForUserInWorkspaceParams struct {
+	WorkspaceID pgtype.UUID
+	UserID      pgtype.UUID
+}
+
+func (q *Queries) ListAdminRoomIDsForUserInWorkspace(ctx context.Context, arg ListAdminRoomIDsForUserInWorkspaceParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listAdminRoomIDsForUserInWorkspace, arg.WorkspaceID, arg.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []pgtype.UUID
+	for rows.Next() {
+		var room_id pgtype.UUID
+		if err := rows.Scan(&room_id); err != nil {
+			return nil, err
+		}
+		items = append(items, room_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAllNDATemplatesByWorkspace = `-- name: ListAllNDATemplatesByWorkspace :many
 SELECT id, tenant_id, workspace_id, name, source_document_id, content_sha256, require_signer_name, status, created_by, created_at, updated_at
 FROM nda_templates
@@ -12563,7 +12720,7 @@ func (q *Queries) ListDealRoomRagDocuments(ctx context.Context, roomID pgtype.UU
 }
 
 const listDealRoomsByIDs = `-- name: ListDealRoomsByIDs :many
-SELECT id, tenant_id, workspace_id, slug, name, description, template_type, settings, requires_nda, requires_approval, status, created_by, created_at, updated_at, deleted_at, expires_at
+SELECT id, tenant_id, workspace_id, slug, name, description, template_type, settings, requires_nda, requires_approval, status, created_by, created_at, updated_at, deleted_at, expires_at, nda_template_id, nda_document_id
 FROM deal_rooms
 WHERE workspace_id = $1
   AND deleted_at IS NULL
@@ -12601,6 +12758,8 @@ func (q *Queries) ListDealRoomsByIDs(ctx context.Context, arg ListDealRoomsByIDs
 			&i.UpdatedAt,
 			&i.DeletedAt,
 			&i.ExpiresAt,
+			&i.NdaTemplateID,
+			&i.NdaDocumentID,
 		); err != nil {
 			return nil, err
 		}
@@ -12613,7 +12772,7 @@ func (q *Queries) ListDealRoomsByIDs(ctx context.Context, arg ListDealRoomsByIDs
 }
 
 const listDealRoomsByWorkspace = `-- name: ListDealRoomsByWorkspace :many
-SELECT id, tenant_id, workspace_id, slug, name, description, template_type, settings, requires_nda, requires_approval, status, created_by, created_at, updated_at, deleted_at, expires_at
+SELECT id, tenant_id, workspace_id, slug, name, description, template_type, settings, requires_nda, requires_approval, status, created_by, created_at, updated_at, deleted_at, expires_at, nda_template_id, nda_document_id
 FROM deal_rooms
 WHERE workspace_id = $1 AND deleted_at IS NULL
 ORDER BY created_at DESC
@@ -12645,6 +12804,8 @@ func (q *Queries) ListDealRoomsByWorkspace(ctx context.Context, workspaceID pgty
 			&i.UpdatedAt,
 			&i.DeletedAt,
 			&i.ExpiresAt,
+			&i.NdaTemplateID,
+			&i.NdaDocumentID,
 		); err != nil {
 			return nil, err
 		}
@@ -12657,14 +12818,14 @@ func (q *Queries) ListDealRoomsByWorkspace(ctx context.Context, workspaceID pgty
 }
 
 const listDealRoomsByWorkspacePage = `-- name: ListDealRoomsByWorkspacePage :many
-SELECT id, tenant_id, workspace_id, slug, name, description, template_type, settings, requires_nda, requires_approval, status, created_by, created_at, updated_at, deleted_at, expires_at
+SELECT id, tenant_id, workspace_id, slug, name, description, template_type, settings, requires_nda, requires_approval, status, created_by, created_at, updated_at, deleted_at, expires_at, nda_template_id, nda_document_id
 FROM deal_rooms
 WHERE workspace_id = $1
   AND deleted_at IS NULL
   AND (
     $4::text = ''
-    OR name ILIKE '%' || $4 || '%'
-    OR COALESCE(description, '') ILIKE '%' || $4 || '%'
+    OR name ILIKE '%' || $4 || '%' ESCAPE '\'
+    OR COALESCE(description, '') ILIKE '%' || $4 || '%' ESCAPE '\'
   )
 ORDER BY created_at DESC
 LIMIT $2 OFFSET $3
@@ -12677,6 +12838,7 @@ type ListDealRoomsByWorkspacePageParams struct {
 	Query       string
 }
 
+// query is ILIKE-escaped by dealroom.escapeILIKEPattern.
 func (q *Queries) ListDealRoomsByWorkspacePage(ctx context.Context, arg ListDealRoomsByWorkspacePageParams) ([]DealRoom, error) {
 	rows, err := q.db.Query(ctx, listDealRoomsByWorkspacePage,
 		arg.WorkspaceID,
@@ -12708,6 +12870,8 @@ func (q *Queries) ListDealRoomsByWorkspacePage(ctx context.Context, arg ListDeal
 			&i.UpdatedAt,
 			&i.DeletedAt,
 			&i.ExpiresAt,
+			&i.NdaTemplateID,
+			&i.NdaDocumentID,
 		); err != nil {
 			return nil, err
 		}
@@ -15532,6 +15696,7 @@ FROM link_ask_turns t
 JOIN link_ask_sessions s ON s.id = t.session_id
 JOIN links l ON l.id = t.link_id
 WHERE t.workspace_id = $1
+  AND l.status <> 'deleted'
   AND t.lane IN ('host', 'hybrid')
   AND t.status IN ('host_pending', 'host_escalated')
   AND (t.formal_status IS NULL OR t.formal_status NOT IN ('pending_review', 'scheduled'))
@@ -15916,6 +16081,7 @@ FROM link_ask_turns t
 JOIN link_ask_sessions s ON s.id = t.session_id
 JOIN links l ON l.id = t.link_id
 WHERE t.workspace_id = $1
+  AND l.status <> 'deleted'
   AND t.lane IN ('host', 'hybrid')
   AND t.status IN ('host_pending', 'host_escalated')
   AND t.formal_status IN ('pending_review', 'scheduled')
@@ -16248,6 +16414,7 @@ SELECT f.id, f.original_filename, f.link_id, l.name AS link_name
 FROM link_uploaded_files f
 JOIN links l ON l.id = f.link_id
 WHERE f.workspace_id = $1 AND f.status = 'pending_review'
+  AND l.status <> 'deleted'
 ORDER BY f.created_at DESC
 `
 
@@ -20175,6 +20342,28 @@ func (q *Queries) SnoozeSuggestion(ctx context.Context, arg SnoozeSuggestionPara
 	return i, err
 }
 
+const softDeleteDealRoom = `-- name: SoftDeleteDealRoom :execrows
+UPDATE deal_rooms
+SET deleted_at = now(),
+    status = 'deleted',
+    slug = slug || '-deleted-' || replace(id::text, '-', ''),
+    updated_at = now()
+WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL
+`
+
+type SoftDeleteDealRoomParams struct {
+	ID          pgtype.UUID
+	WorkspaceID pgtype.UUID
+}
+
+func (q *Queries) SoftDeleteDealRoom(ctx context.Context, arg SoftDeleteDealRoomParams) (int64, error) {
+	result, err := q.db.Exec(ctx, softDeleteDealRoom, arg.ID, arg.WorkspaceID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const softDeleteDocument = `-- name: SoftDeleteDocument :exec
 UPDATE documents
 SET deleted_at = now(), updated_at = now()
@@ -20527,6 +20716,53 @@ type UpdateDealRoomDocumentsFolderPathParams struct {
 func (q *Queries) UpdateDealRoomDocumentsFolderPath(ctx context.Context, arg UpdateDealRoomDocumentsFolderPathParams) error {
 	_, err := q.db.Exec(ctx, updateDealRoomDocumentsFolderPath, arg.FolderPath, arg.RoomID, arg.FolderPath_2)
 	return err
+}
+
+const updateDealRoomNDAAgreement = `-- name: UpdateDealRoomNDAAgreement :one
+UPDATE deal_rooms
+SET nda_template_id = $1,
+    nda_document_id = $2,
+    updated_at = now()
+WHERE id = $3 AND workspace_id = $4 AND deleted_at IS NULL
+RETURNING id, tenant_id, workspace_id, slug, name, description, template_type, settings, requires_nda, requires_approval, status, created_by, created_at, updated_at, deleted_at, expires_at, nda_template_id, nda_document_id
+`
+
+type UpdateDealRoomNDAAgreementParams struct {
+	NdaTemplateID pgtype.UUID
+	NdaDocumentID pgtype.UUID
+	ID            pgtype.UUID
+	WorkspaceID   pgtype.UUID
+}
+
+func (q *Queries) UpdateDealRoomNDAAgreement(ctx context.Context, arg UpdateDealRoomNDAAgreementParams) (DealRoom, error) {
+	row := q.db.QueryRow(ctx, updateDealRoomNDAAgreement,
+		arg.NdaTemplateID,
+		arg.NdaDocumentID,
+		arg.ID,
+		arg.WorkspaceID,
+	)
+	var i DealRoom
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.Slug,
+		&i.Name,
+		&i.Description,
+		&i.TemplateType,
+		&i.Settings,
+		&i.RequiresNda,
+		&i.RequiresApproval,
+		&i.Status,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.ExpiresAt,
+		&i.NdaTemplateID,
+		&i.NdaDocumentID,
+	)
+	return i, err
 }
 
 const updateDealRoomRagCorpusStatus = `-- name: UpdateDealRoomRagCorpusStatus :one
