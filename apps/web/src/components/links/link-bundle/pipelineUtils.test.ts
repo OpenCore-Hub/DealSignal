@@ -4,6 +4,7 @@ import {
   buildEditModeDocumentLists,
   validateBundleSecurityConfig,
   resolveExpiryDaysFromExpiresAt,
+  resolveMaxViewsFromAccessCount,
 } from "./pipelineUtils";
 import { PRESET_TEMPLATES } from "../smart-link/levelConfig";
 import type { Document, DocumentSummary, PermissionPreset } from "@/types";
@@ -180,6 +181,33 @@ describe("validateBundleSecurityConfig", () => {
     });
     expect(validateBundleSecurityConfig(config)).toEqual({ ok: true });
   });
+
+  it("blocks custom max views without a count", () => {
+    const config = buildConfigFromPreset("public", { maxViews: "custom" });
+    expect(validateBundleSecurityConfig(config)).toEqual({
+      ok: false,
+      reason: "customMaxViewsRequired",
+    });
+  });
+
+  it("blocks custom max views that are not a positive integer", () => {
+    const config = buildConfigFromPreset("public", {
+      maxViews: "custom",
+      _editMaxViews: 0,
+    });
+    expect(validateBundleSecurityConfig(config)).toEqual({
+      ok: false,
+      reason: "customMaxViewsInvalid",
+    });
+  });
+
+  it("passes custom max views with a valid count", () => {
+    const config = buildConfigFromPreset("public", {
+      maxViews: "custom",
+      _editMaxViews: 25,
+    });
+    expect(validateBundleSecurityConfig(config)).toEqual({ ok: true });
+  });
 });
 
 describe("resolveExpiryDaysFromExpiresAt", () => {
@@ -201,6 +229,26 @@ describe("resolveExpiryDaysFromExpiresAt", () => {
     const resolved = resolveExpiryDaysFromExpiresAt(in12.toISOString(), now);
     expect(resolved.expiryDays).toBe("custom");
     expect(resolved._editExpiresAt).toBe(in12.toISOString());
+  });
+});
+
+describe("resolveMaxViewsFromAccessCount", () => {
+  it("defaults to unlimited when missing or zero", () => {
+    expect(resolveMaxViewsFromAccessCount(undefined).maxViews).toBe("unlimited");
+    expect(resolveMaxViewsFromAccessCount(0).maxViews).toBe("unlimited");
+  });
+
+  it("snaps 10 / 50 / 100 to presets", () => {
+    expect(resolveMaxViewsFromAccessCount(10)).toEqual({ maxViews: 10 });
+    expect(resolveMaxViewsFromAccessCount(50)).toEqual({ maxViews: 50 });
+    expect(resolveMaxViewsFromAccessCount(100)).toEqual({ maxViews: 100 });
+  });
+
+  it("uses custom for non-preset counts", () => {
+    expect(resolveMaxViewsFromAccessCount(25)).toEqual({
+      maxViews: "custom",
+      _editMaxViews: 25,
+    });
   });
 });
 

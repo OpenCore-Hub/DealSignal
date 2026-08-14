@@ -272,9 +272,17 @@ export function calculateFrictionScore(
     config.expiryDays <= 7
   )
     score += 1;
-  if (config.maxViews !== "unlimited" && typeof config.maxViews === "number")
-    score += 2;
+  if (hasCappedMaxViews(config)) score += 2;
   return Math.min(100, score);
+}
+
+function hasCappedMaxViews(
+  config: Omit<PermissionConfig, "level" | "isCustomized">,
+): boolean {
+  if (config.maxViews === "custom") {
+    return typeof config._editMaxViews === "number" && config._editMaxViews > 0;
+  }
+  return typeof config.maxViews === "number";
 }
 
 export function calculateSecurityScore(
@@ -285,8 +293,7 @@ export function calculateSecurityScore(
   if (config.ndaEnabled) score += 2;
   if (config.watermarkEnabled) score += 2;
   if (!config.allowDownload) score += 1;
-  if (config.maxViews !== "unlimited" && typeof config.maxViews === "number")
-    score += 1;
+  if (hasCappedMaxViews(config)) score += 1;
   if (
     config.expiryDays !== "custom" &&
     typeof config.expiryDays === "number" &&

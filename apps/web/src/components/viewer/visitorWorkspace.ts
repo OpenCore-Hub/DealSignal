@@ -40,12 +40,15 @@ export function resolveShowVisitorWorkspace(args: {
   );
 }
 
-/** Deal-room share links open the workspace panel by default on first entry. */
+/** Deal-room links and multi-file shares open the workspace panel on first entry. */
 export function shouldDefaultVisitorWorkspaceOpen(args: {
   dealRoomId?: string;
   showWorkspace: boolean;
+  documentCount?: number;
 }): boolean {
-  return Boolean(args.dealRoomId && args.showWorkspace);
+  if (!args.showWorkspace) return false;
+  if (args.dealRoomId) return true;
+  return (args.documentCount ?? 0) > 1;
 }
 
 export function defaultVisitorWorkspaceTab(args: {

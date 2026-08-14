@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { AnimatePresence, motion } from "motion/react";
-import { ShareNetwork } from "@phosphor-icons/react";
+import { motion } from "motion/react";
+import { CopySimple } from "@phosphor-icons/react";
 import {
   Dialog,
   DialogContent,
@@ -13,7 +13,10 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { BundleSecurityOptions } from "@/components/links/link-bundle/BundleSecurityOptions";
-import { validateBundleSecurityConfig } from "@/components/links/link-bundle/pipelineUtils";
+import {
+  bundleSecurityGuardI18nKey,
+  validateBundleSecurityConfig,
+} from "@/components/links/link-bundle/pipelineUtils";
 import { ContactSelector } from "@/components/links/smart-link/ContactSelector";
 import { api } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/apiErrors";
@@ -21,6 +24,8 @@ import { copyToClipboard } from "@/lib/clipboard";
 import { createDefaultLinkPermissionConfig } from "@/lib/defaultLinkPermissionConfig";
 import { cn } from "@/lib/utils";
 import type { PermissionConfig } from "@/types";
+
+const enterEase = [0.32, 0.72, 0, 1] as const;
 
 export interface DocumentShareDialogProps {
   open: boolean;
@@ -31,6 +36,12 @@ export interface DocumentShareDialogProps {
   /** When not ready, Create & copy stays disabled (processing uploads). */
   documentStatus?: string;
   onCreated?: () => void;
+}
+
+function fileExtension(name: string): string {
+  const i = name.lastIndexOf(".");
+  if (i <= 0 || i === name.length - 1) return "";
+  return name.slice(i + 1).toUpperCase();
 }
 
 export function DocumentShareDialog({
@@ -44,7 +55,6 @@ export function DocumentShareDialog({
 }: DocumentShareDialogProps) {
   const { t } = useTranslation(["documents", "common", "links"]);
   const [creating, setCreating] = useState(false);
-  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [config, setConfig] = useState<PermissionConfig>(createDefaultLinkPermissionConfig);
   const shareReady = documentStatus === "ready";
   const securityGuard = validateBundleSecurityConfig(config);
@@ -54,11 +64,10 @@ export function DocumentShareDialog({
       : !securityGuard.ok
         ? securityGuard.reason
         : null;
+  const extension = fileExtension(documentTitle);
 
-  // Reset panel + defaults whenever the dialog opens for a document.
   useEffect(() => {
     if (!open) return;
-    setAdvancedOpen(false);
     setConfig(createDefaultLinkPermissionConfig());
     setCreating(false);
   }, [open, documentId]);
@@ -67,12 +76,7 @@ export function DocumentShareDialog({
     if (!shareReady) return;
     const guard = validateBundleSecurityConfig(config);
     if (!guard.ok) {
-      toast.error(
-        guard.reason === "ndaDocumentRequired"
-          ? t("links:creator.ndaDocumentRequired")
-          : t("links:creator.contactRequired"),
-      );
-      if (!advancedOpen) setAdvancedOpen(true);
+      toast.error(t(`links:${bundleSecurityGuardI18nKey(guard.reason)}`));
       return;
     }
     setCreating(true);
@@ -102,86 +106,118 @@ export function DocumentShareDialog({
       <DialogContent
         data-testid="document-share-dialog"
         className={cn(
-          "gap-0 overflow-hidden p-0 sm:max-w-md",
-          advancedOpen && "sm:max-w-lg",
+          "gap-0 overflow-hidden border-0 bg-transparent p-[5px] shadow-none sm:max-w-[34rem]",
+          "rounded-[1.65rem]",
+          "ring-1 ring-foreground/[0.06]",
+          "bg-[color-mix(in_oklch,var(--muted)_72%,var(--background))]",
+          "[&_[data-slot=dialog-close]]:top-4 [&_[data-slot=dialog-close]]:right-4",
         )}
       >
-        <div className="space-y-5 p-5 sm:p-6">
-          <DialogHeader className="space-y-3 text-left">
-            <DialogTitle className="flex items-center gap-2.5 text-[1.2rem] font-semibold tracking-tight">
-              <span className="flex size-9 items-center justify-center rounded-xl bg-foreground text-background shadow-[inset_0_1px_0_rgba(255,255,255,0.18)]">
-                <ShareNetwork size={18} weight="bold" />
-              </span>
-              {t("documents:share.title")}
-            </DialogTitle>
-            <DialogDescription className="space-y-2 break-words text-[13px] leading-relaxed">
-              <span className="block text-foreground/85">
-                {t("documents:share.description", { name: documentTitle })}
-              </span>
-              {!advancedOpen ? (
-                <span className="block text-muted-foreground">
-                  {t("documents:share.defaultsHint")}
-                </span>
-              ) : null}
-              {!shareReady ? (
-                <span className="block text-amber-700 dark:text-amber-400">
-                  {t("documents:share.notReady")}
-                </span>
-              ) : null}
-            </DialogDescription>
-          </DialogHeader>
-
-          <AnimatePresence initial={false}>
-            {advancedOpen ? (
-              <motion.div
-                key="advanced-card"
-                initial={{ opacity: 0, y: -6, height: 0 }}
-                animate={{ opacity: 1, y: 0, height: "auto" }}
-                exit={{ opacity: 0, y: -4, height: 0 }}
-                transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
-                className="overflow-hidden"
-              >
-                <div
-                  data-testid="document-share-advanced-card"
-                  className={cn(
-                    "rounded-2xl border border-border/70 bg-card/90 p-4",
-                    "shadow-[0_18px_40px_-28px_rgba(15,23,42,0.45),inset_0_1px_0_rgba(255,255,255,0.55)]",
-                    "ring-1 ring-foreground/[0.03]",
-                  )}
-                >
-                  <BundleSecurityOptions
-                    config={config}
-                    onChange={setConfig}
-                    excludeNdaDocumentIds={[documentId]}
-                    contactSelector={
-                      (config.requireEmailVerification || config.ndaEnabled) &&
-                      workspaceSlug ? (
-                        <div className="animate-in fade-in-0 slide-in-from-top-1 duration-200">
-                          <ContactSelector
-                            workspaceSlug={workspaceSlug}
-                            value={config.contactIds}
-                            onChange={(contactIds) =>
-                              setConfig((prev) => ({ ...prev, contactIds }))
-                            }
-                          />
-                        </div>
-                      ) : null
-                    }
-                  />
-                </div>
-              </motion.div>
-            ) : null}
-          </AnimatePresence>
-        </div>
-
-        <DialogFooter
+        <div
           className={cn(
-            "!mx-0 !mb-0 !grid grid-cols-3 items-center gap-2",
-            "border-t border-border/60 bg-gradient-to-b from-muted/30 via-muted/45 to-muted/60",
-            "px-5 py-4 sm:px-6 sm:!justify-stretch sm:space-x-0",
+            "overflow-hidden rounded-[calc(1.65rem-5px)] bg-background",
+            "shadow-[inset_0_1px_0_rgba(255,255,255,0.72)]",
+            "dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]",
           )}
         >
-          <div className="justify-self-start">
+          <div className="space-y-6 px-6 pb-2 pt-6 sm:px-7 sm:pt-7">
+            <DialogHeader className="space-y-4 pr-8 text-left">
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.55, ease: enterEase }}
+                className="space-y-3"
+              >
+                <p className="font-mono text-[10px] font-medium uppercase tracking-[0.22em] text-muted-foreground/70">
+                  {t("documents:share.eyebrow")}
+                </p>
+                <DialogTitle className="text-[1.35rem] font-semibold leading-[1.15] tracking-[-0.03em]">
+                  {t("documents:share.title")}
+                </DialogTitle>
+                <div className="flex items-start gap-2.5">
+                  {extension ? (
+                    <span className="mt-0.5 shrink-0 rounded-md px-1.5 py-0.5 font-mono text-[10px] tracking-[0.14em] text-muted-foreground ring-1 ring-foreground/[0.08]">
+                      {extension}
+                    </span>
+                  ) : null}
+                  <p className="min-w-0 break-words text-[13px] leading-snug text-foreground/90">
+                    {documentTitle}
+                  </p>
+                </div>
+                <DialogDescription className="space-y-2 text-[13px] leading-relaxed text-muted-foreground">
+                  <span className="block max-w-[42ch]">{t("documents:share.lead")}</span>
+                  {!shareReady ? (
+                    <span className="block text-amber-700 dark:text-amber-400">
+                      {t("documents:share.notReady")}
+                    </span>
+                  ) : null}
+                </DialogDescription>
+              </motion.div>
+            </DialogHeader>
+
+            <motion.div
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.6, delay: 0.06, ease: enterEase }}
+              data-testid="document-share-advanced-card"
+              className={cn(
+                "rounded-[1.15rem] p-4 sm:p-5",
+                "bg-[color-mix(in_oklch,var(--muted)_38%,var(--background))]",
+                "ring-1 ring-foreground/[0.05]",
+                "shadow-[inset_0_1px_0_rgba(255,255,255,0.55)]",
+                "dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]",
+              )}
+            >
+              <BundleSecurityOptions
+                variant="atelier"
+                advancedCollapsible={false}
+                config={config}
+                onChange={setConfig}
+                excludeNdaDocumentIds={[documentId]}
+                contactSelector={
+                  (config.requireEmailVerification || config.ndaEnabled) &&
+                  workspaceSlug ? (
+                    <div className="animate-in fade-in-0 slide-in-from-top-1 duration-200">
+                      <ContactSelector
+                        workspaceSlug={workspaceSlug}
+                        value={config.contactIds}
+                        onChange={(contactIds) =>
+                          setConfig((prev) => ({ ...prev, contactIds }))
+                        }
+                      />
+                    </div>
+                  ) : null
+                }
+              />
+            </motion.div>
+          </div>
+
+          <DialogFooter
+            className={cn(
+              "!mx-0 !mb-0 flex-row items-center justify-center gap-8",
+              "border-t border-foreground/[0.06] bg-transparent",
+              "px-6 py-5 sm:px-7 sm:!justify-center sm:space-x-0",
+            )}
+          >
+            <Button
+              type="button"
+              variant="ghost"
+              size="lg"
+              disabled={creating}
+              onClick={() => onOpenChange(false)}
+              data-testid="document-share-cancel"
+              className={cn(
+                "h-11 min-w-[8.5rem] rounded-xl px-6 text-[13px] font-medium tracking-tight",
+                "bg-rose-50 text-rose-950 ring-1 ring-rose-200/70",
+                "hover:bg-rose-100 hover:text-rose-950 hover:ring-rose-300/80",
+                "dark:bg-rose-950/35 dark:text-rose-50 dark:ring-rose-800/50",
+                "dark:hover:bg-rose-950/50 dark:hover:text-rose-50",
+                "active:scale-[0.98]",
+              )}
+            >
+              {t("common:cancel")}
+            </Button>
+
             <Button
               type="button"
               variant="default"
@@ -201,68 +237,18 @@ export function DocumentShareDialog({
               }}
               data-testid="document-share-create"
               className={cn(
-                "min-w-[6.5rem] rounded-xl px-5 font-semibold tracking-tight",
-                "border border-border bg-rose-50 text-rose-950",
-                "shadow-[inset_0_1px_0_rgba(255,255,255,0.7)]",
-                "hover:border-foreground/20 hover:bg-rose-100 hover:text-rose-950",
-                "active:translate-y-px",
-                "animate-pulse-ring",
-                "disabled:animate-none",
+                "h-11 min-w-[8.5rem] gap-2 rounded-xl px-6 text-[13px] font-medium tracking-tight",
+                "shadow-[inset_0_1px_0_rgba(255,255,255,0.12)]",
+                "active:scale-[0.98]",
               )}
             >
               {creating
                 ? t("documents:share.creating")
                 : t("documents:share.createAndCopy")}
+              <CopySimple size={15} weight="light" />
             </Button>
-          </div>
-
-          <div className="justify-self-center">
-            <Button
-              type="button"
-              variant="outline"
-              size="lg"
-              disabled={creating}
-              aria-expanded={advancedOpen}
-              aria-pressed={advancedOpen}
-              onClick={() => setAdvancedOpen((v) => !v)}
-              data-testid="document-share-advanced"
-              className={cn(
-                "min-w-[6.5rem] rounded-xl px-4 font-medium tracking-tight active:translate-y-px",
-                !advancedOpen &&
-                  "border border-border bg-background text-muted-foreground shadow-none",
-                !advancedOpen &&
-                  "hover:border-foreground/20 hover:bg-muted/60 hover:text-foreground",
-                // Solid fill when open — distinct from Create's pale rose wash.
-                advancedOpen &&
-                  "border border-rose-500 !bg-rose-500 font-semibold !text-white",
-                advancedOpen &&
-                  "shadow-[0_1px_0_rgba(255,255,255,0.2)_inset,0_0_0_3px_rgba(244,63,94,0.2)]",
-                advancedOpen &&
-                  "hover:border-rose-600 hover:!bg-rose-600 hover:!text-white",
-              )}
-            >
-              {t("documents:share.advanced")}
-            </Button>
-          </div>
-
-          <div className="justify-self-end">
-            <Button
-              type="button"
-              variant="ghost"
-              size="lg"
-              disabled={creating}
-              onClick={() => onOpenChange(false)}
-              data-testid="document-share-cancel"
-              className={cn(
-                "min-w-[5.5rem] rounded-xl px-4 font-medium tracking-tight",
-                "text-muted-foreground hover:bg-background/70 hover:text-foreground",
-                "active:translate-y-px",
-              )}
-            >
-              {t("common:cancel")}
-            </Button>
-          </div>
-        </DialogFooter>
+          </DialogFooter>
+        </div>
       </DialogContent>
     </Dialog>
   );

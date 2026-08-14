@@ -36,17 +36,12 @@
     "forDocument": "Document: {{title}}"
   },
   "actions": {
-    "viewLog": "View Log",
+    "viewLog": "View Details",
     "editLink": "Edit Link",
     "exportData": "Export Access Data",
     "exportSuccess": "Exported {{count}} access log rows",
     "exportEmpty": "No access logs to export yet",
-    "exportError": "Failed to export access data",
-    "allowDownload": "Allow downloading",
-    "disallowDownload": "Disable downloading",
-    "downloadEnabledSuccess": "Visitors can download files",
-    "downloadDisabledSuccess": "Visitor downloads disabled",
-    "downloadToggleError": "Failed to update download permission"
+    "exportError": "Failed to export access data"
   },
   "export": {
     "csv": {
@@ -162,8 +157,12 @@
       "unlimited": "Unlimited",
       "10": "10 views",
       "50": "50 views",
-      "100": "100 views"
+      "100": "100 views",
+      "custom": "Custom"
     },
+    "customMaxViews": "Custom max views",
+    "customMaxViewsRequired": "Enter a custom view limit",
+    "customMaxViewsInvalid": "Max views must be a whole number from 1 to 1,000,000",
     "securityScore": "Security Strength",
     "frictionScore": "Recipient Friction",
     "requireEmailDesc": "Viewers must verify their email to confirm identity",
@@ -223,7 +222,7 @@
     "nextStep": "Next",
     "prevStep": "Back",
     "cancel": "Cancel",
-    "saveChanges": "Save Changes",
+    "saveChanges": "Save",
     "unsavedConfirmTitle": "Discard changes?",
     "unsavedConfirmDesc": "You have unsaved changes. Are you sure you want to leave?",
     "editingLink": "Editing link",
@@ -256,7 +255,7 @@
       "documentsSection": "Link Bundle Contents",
       "securitySection": "Security Configuration",
       "createButton": "Create Link Bundle",
-      "saveButton": "Save Changes",
+      "saveButton": "Save",
       "submitting": "Saving...",
       "successCreate": "Link bundle created!",
       "successUpdate": "Link updated! Recipients will see the latest changes on refresh.",

@@ -759,7 +759,7 @@ export function DocumentsTable({ category }: DocumentsTableProps) {
           ) : (
             <div
               className={cn(
-                "relative overflow-auto rounded-2xl",
+                "relative overflow-auto scrollbar-auto rounded-2xl",
                 // Header (h-11) + 6 document rows (~4.25rem each: py-3.5*2 + h-10 icon).
                 "max-h-[calc(2.75rem+6*4.25rem)]",
                 "border border-border/45 bg-gradient-to-b from-muted/35 via-background to-background",
@@ -772,7 +772,7 @@ export function DocumentsTable({ category }: DocumentsTableProps) {
                 className="pointer-events-none absolute inset-x-0 top-0 z-20 h-px bg-gradient-to-r from-transparent via-foreground/10 to-transparent"
               />
               {/* Native table so sticky header scrolls with this container (Table wraps overflow-x). */}
-              <table className="w-full caption-bottom text-sm">
+              <table className="w-full min-w-[56rem] caption-bottom text-sm">
                 <TableHeader className="sticky top-0 z-10 [&_tr]:border-border/40">
                   {table.getHeaderGroups().map((headerGroup) => (
                     <TableRow

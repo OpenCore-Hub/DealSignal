@@ -265,22 +265,24 @@ export function LinkDetail() {
         </div>
       </DetailLayout>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-h2 flex items-center gap-2">
-            <ChatTeardropText size={20} />
-            {tShare("management.questionsTitle")}
-          </CardTitle>
-          <CardDescription>{tShare("management.questionsDescription")}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <OwnerAskInboxPanel
-            scope={{ type: "link", linkId: link.id }}
-            i18nNs="linkShare"
-            initialView={askInboxView}
-          />
-        </CardContent>
-      </Card>
+      {link.dealRoomId ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-h2 flex items-center gap-2">
+              <ChatTeardropText size={20} />
+              {tShare("management.questionsTitle")}
+            </CardTitle>
+            <CardDescription>{tShare("management.questionsDescription")}</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <OwnerAskInboxPanel
+              scope={{ type: "link", linkId: link.id }}
+              i18nNs="linkShare"
+              initialView={askInboxView}
+            />
+          </CardContent>
+        </Card>
+      ) : null}
 
       <Card>
         <CardHeader>

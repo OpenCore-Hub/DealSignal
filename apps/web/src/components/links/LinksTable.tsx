@@ -12,7 +12,6 @@ import {
 import {
   Copy,
   Export,
-  DownloadSimple,
   Trash,
   ArrowRight,
   Link as LinkIcon,
@@ -183,25 +182,6 @@ export function LinksTable({
     [t],
   );
 
-  const handleToggleDownload = useCallback(
-    async (link: Link) => {
-      const next = !(link.downloadEnabled ?? false);
-      setBusyLinkId(link.id);
-      try {
-        await api.updateLink(link.id, { downloadEnabled: next });
-        toast.success(
-          next ? t("actions.downloadEnabledSuccess") : t("actions.downloadDisabledSuccess"),
-        );
-        await refetch();
-      } catch {
-        toast.error(t("actions.downloadToggleError"));
-      } finally {
-        setBusyLinkId(null);
-      }
-    },
-    [refetch, t],
-  );
-
   const columns = useMemo<ColumnDef<Link>[]>(
     () => [
       {
@@ -293,7 +273,6 @@ export function LinksTable({
         cell: ({ row }) => {
           const link = row.original;
           const busy = busyLinkId === link.id;
-          const downloadOn = link.downloadEnabled ?? false;
           const actions: RowAction[] = [
             {
               label: t("actions.viewLog"),
@@ -312,14 +291,6 @@ export function LinksTable({
                 label: t("actions.exportData"),
                 icon: <Export size={16} />,
                 onClick: () => { void handleExportAccessData(link); },
-                disabled: busy,
-              },
-              {
-                label: downloadOn
-                  ? t("actions.disallowDownload")
-                  : t("actions.allowDownload"),
-                icon: <DownloadSimple size={16} />,
-                onClick: () => { void handleToggleDownload(link); },
                 disabled: busy,
               },
               {
@@ -346,7 +317,6 @@ export function LinksTable({
       busyLinkId,
       canWrite,
       handleExportAccessData,
-      handleToggleDownload,
       navigate,
       workspaceSlug,
       t,

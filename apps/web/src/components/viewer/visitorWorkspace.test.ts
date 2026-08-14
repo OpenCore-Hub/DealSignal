@@ -60,6 +60,27 @@ describe("visitorWorkspace", () => {
     ).toBe(false);
   });
 
+  it("opens workspace by default for multi-file document shares", () => {
+    expect(
+      shouldDefaultVisitorWorkspaceOpen({
+        showWorkspace: true,
+        documentCount: 2,
+      }),
+    ).toBe(true);
+    expect(
+      shouldDefaultVisitorWorkspaceOpen({
+        showWorkspace: true,
+        documentCount: 1,
+      }),
+    ).toBe(false);
+    expect(
+      shouldDefaultVisitorWorkspaceOpen({
+        showWorkspace: false,
+        documentCount: 3,
+      }),
+    ).toBe(false);
+  });
+
   it("resolves workspace visibility for unified deal-room links", () => {
     expect(
       resolveShowVisitorWorkspace({

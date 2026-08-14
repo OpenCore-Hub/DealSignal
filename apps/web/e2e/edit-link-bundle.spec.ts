@@ -110,7 +110,7 @@ test("edit mode backfills selected documents, security settings and review summa
 
   // Save and confirm.
   await page.locator('[data-testid="review-submit-button"]').click();
-  await page.getByRole("dialog").getByRole("button", { name: /Save changes/i }).click();
+  await page.getByRole("dialog").getByRole("button", { name: /^Save$/i }).click();
   await page.waitForTimeout(2000);
 
   await expect(page).toHaveURL(new RegExp(`/${seed.workspaceSlug}/documents\\?tab=shared`), {
@@ -159,7 +159,7 @@ test("edit mode preserves document order and allows reordering", async ({ page }
   await page.locator('[data-testid="pipeline-nav-forward"]').click();
   await page.locator('[data-testid="pipeline-nav-forward"]').click();
   await page.locator('[data-testid="review-submit-button"]').click();
-  await page.getByRole("dialog").getByRole("button", { name: /Save changes/i }).click();
+  await page.getByRole("dialog").getByRole("button", { name: /^Save$/i }).click();
   await page.waitForTimeout(2000);
 
   await expect(page).toHaveURL(new RegExp(`/${seed.workspaceSlug}/documents\\?tab=shared`), {

@@ -19,6 +19,7 @@ import {
   SHARE_CONTENT_DOCUMENT_CATEGORY,
   buildEditModeDocumentLists,
   resolveExpiryDaysFromExpiresAt,
+  resolveMaxViewsFromAccessCount,
 } from "./pipelineUtils";
 import type { PermissionConfig } from "@/types";
 import { api } from "@/lib/api";
@@ -69,11 +70,9 @@ function BundlePipelineInner() {
           link.documents,
         );
 
-        // Map maxAccessCount to maxViews.
-        const maxViews: number | "unlimited" =
-          typeof link.maxAccessCount === "number" && link.maxAccessCount > 0
-            ? link.maxAccessCount
-            : "unlimited";
+        const { maxViews, _editMaxViews } = resolveMaxViewsFromAccessCount(
+          link.maxAccessCount,
+        );
 
         // Derive security flags from both explicit flag and legacy permission_type.
         const hasEmailVerification = link.requireEmailVerification === true
@@ -116,6 +115,7 @@ function BundlePipelineInner() {
           level,
           isCustomized: customized,
           _editExpiresAt: link.expiresAt ?? resolvedExpiresAt,
+          _editMaxViews,
         };
 
         // Parse publicToken from shortUrl. The token is the last path segment.

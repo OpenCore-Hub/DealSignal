@@ -7,14 +7,11 @@ import {
   CopyIcon,
   CheckIcon,
   EnvelopeIcon,
-  PackageIcon,
-  ShieldCheckIcon,
-  WarningIcon,
   FileTextIcon,
   DownloadIcon,
+  WarningIcon,
 } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -25,16 +22,21 @@ import {
 } from "@/components/ui/dialog";
 import { useBundlePipeline, clearPipelineDraft } from "./BundlePipelineContext";
 import { PipelineProgress } from "./PipelineProgress";
+import { PipelinePaper } from "./PipelinePaper";
 import { copyToClipboard } from "@/lib/clipboard";
 import { api } from "@/lib/api";
 import { toCreateLinkPayload } from "@/lib/apiAdapters";
 import { documentsSharePath } from "@/lib/documentsSharePath";
-import { validateBundleSecurityConfig } from "./pipelineUtils";
+import {
+  bundleSecurityGuardI18nKey,
+  validateBundleSecurityConfig,
+} from "./pipelineUtils";
 import {
   calculateFrictionScore,
   calculateSecurityScore,
   presetDef,
 } from "../smart-link/levelConfig";
+import { ScoreBar } from "../smart-link/ScoreBar";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
@@ -103,15 +105,7 @@ export function StepReview() {
   const handleSubmit = useCallback(() => {
     const guard = validateBundleSecurityConfig(config);
     if (!guard.ok) {
-      const messageKey =
-        guard.reason === "ndaDocumentRequired"
-          ? "creator.ndaDocumentRequired"
-          : guard.reason === "customExpiresAtRequired"
-            ? "creator.customExpiresAtRequired"
-            : guard.reason === "customExpiresAtFuture"
-              ? "creator.customExpiresAtFuture"
-              : "creator.contactRequired";
-      toast.error(t(messageKey));
+      toast.error(t(bundleSecurityGuardI18nKey(guard.reason)));
       return;
     }
     // In edit mode, show a confirmation dialog on the review step so the user
@@ -139,154 +133,160 @@ export function StepReview() {
   };
 
   return (
-    <div className="space-y-8">
-      {/* Header */}
+    <div className="mx-auto w-full max-w-3xl space-y-6">
       <div className="flex justify-center">
         <PipelineProgress />
       </div>
 
-      {/* Success card (create mode only) */}
-      {isSuccess && !isEdit && (
-        <Card data-testid="review-success-card" className="overflow-hidden border-success-500/20 bg-success-500/5 shadow-card">
-          <CardContent className="space-y-5 p-6">
-            <div className="flex items-center gap-2 text-success-500">
-              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-success-500/15">
-                <CheckIcon size={18} weight="bold" />
-              </div>
-              <span className="font-semibold">{t("creator.generatedLabel")}</span>
+      {isSuccess && !isEdit ? (
+        <PipelinePaper>
+          <div data-testid="review-success-card" className="space-y-4 px-6 py-5 sm:px-7 sm:py-6">
+            <div className="flex items-center gap-2">
+              <CheckIcon size={16} weight="light" className="text-foreground" />
+              <span className="text-[15px] font-semibold tracking-[-0.02em]">
+                {t("creator.generatedLabel")}
+              </span>
             </div>
-            <div className="flex items-center gap-2 rounded-lg border border-border bg-background p-3">
-              <code data-testid="generated-link" className="flex-1 truncate text-sm">{state.generatedLink}</code>
-              <Button size="sm" variant="ghost" onClick={handleCopy} className="gap-1">
-                {state.copied ? <CheckIcon size={14} className="text-success-500" /> : <CopyIcon size={14} />}
+            <div className="flex items-center gap-2 rounded-xl px-3 py-2.5 ring-1 ring-foreground/[0.08]">
+              <code data-testid="generated-link" className="min-w-0 flex-1 truncate font-mono text-[12px]">
+                {state.generatedLink}
+              </code>
+              <Button size="sm" variant="ghost" onClick={handleCopy} className="h-8 gap-1.5 rounded-lg px-2.5">
+                {state.copied ? <CheckIcon size={14} weight="light" /> : <CopyIcon size={14} weight="light" />}
                 {state.copied ? tc("copied") : tc("copy")}
               </Button>
             </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Review card */}
-      <Card className="shadow-card">
-        <CardHeader className="border-b border-border pb-4">
-          <CardTitle className="text-h2 flex items-center gap-2">
-            <PackageIcon size={18} className="text-primary" />
-            {t("bundle.review.documentsSection")}
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-6 pt-5">
-          {/* Documents section */}
-          <div className="rounded-lg border border-border">
-            <div className="grid grid-cols-[auto_1fr_auto] items-center gap-3 border-b border-border bg-muted/30 px-3 py-2 text-xs font-medium text-muted-foreground">
-              <span className="w-6 text-center">#</span>
-              <span>{t("bundle.documents.label")}</span>
-              <span className="w-12 text-center">{t("creator.previewDocumentLabel")}</span>
-            </div>
-            {selectedDocuments.map((doc, i) => (
-              <div
-                key={doc.id}
-                className="grid grid-cols-[auto_1fr_auto] items-center gap-3 px-3 py-2.5 transition-colors hover:bg-muted/30"
-              >
-                <span className="w-6 text-center text-sm text-muted-foreground">{i + 1}</span>
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium">{doc.title}</p>
-                  <p className="truncate text-xs text-muted-foreground">{doc.fileName}</p>
-                </div>
-                <span className="w-12 text-center text-xs text-muted-foreground">
-                  {doc.sourceType.toUpperCase()}
-                </span>
-              </div>
-            ))}
           </div>
+        </PipelinePaper>
+      ) : null}
 
-          {/* Security section */}
-          <div>
-            <h3 className="text-h3 mb-3 flex items-center gap-2">
-              <ShieldCheckIcon size={18} className="text-primary" />
-              {t("bundle.review.securitySection")}
+      <PipelinePaper>
+        <div className="space-y-8 px-6 py-5 sm:px-7 sm:py-6">
+          <section className="space-y-3">
+            <h3 className="flex items-baseline gap-2.5">
+              <span className="font-mono text-[10px] tracking-[0.16em] text-muted-foreground/45">
+                01
+              </span>
+              <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/75">
+                {t("bundle.review.documentsSection")}
+              </span>
             </h3>
-            <div className="rounded-lg border border-border p-4 space-y-4">
-              {/* Preset name */}
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-semibold">{t(presetInfo.label)}</span>
-                {config.isCustomized && (
-                  <span className="rounded-full bg-muted px-2 py-0.5 text-caption text-muted-foreground">
-                    {t("preset.customized.label")}
+            <div className="divide-y divide-foreground/[0.06]">
+              {selectedDocuments.map((doc, i) => (
+                <div key={doc.id} className="grid grid-cols-[auto_1fr_auto] items-center gap-3 py-2.5">
+                  <span className="w-5 font-mono text-[10px] tabular-nums text-muted-foreground/50">
+                    {String(i + 1).padStart(2, "0")}
                   </span>
-                )}
-              </div>
-
-              {/* Feature badges */}
-              <div className="flex flex-wrap gap-2">
-                {FEATURE_META.map(({ key, icon: Icon, labelKey, activeClass }) => {
-                  if (!features[key]) return null;
-                  return (
-                    <span
-                      key={key}
-                      className={cn(
-                        "inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs",
-                        activeClass ?? "bg-background"
-                      )}
-                    >
-                      <Icon size={12} />
-                      {t(labelKey)}
-                    </span>
-                  );
-                })}
-                {config.allowDownload ? (
-                  <span className="inline-flex items-center gap-1 rounded-full border bg-background px-2.5 py-1 text-xs">
-                    <DownloadIcon size={12} />
-                    {t("creator.featureDownload")}
+                  <div className="min-w-0">
+                    <p className="truncate text-[13px] font-medium">{doc.title}</p>
+                    <p className="truncate text-[12px] text-muted-foreground">{doc.fileName}</p>
+                  </div>
+                  <span className="rounded-md px-1.5 py-0.5 font-mono text-[10px] tracking-[0.14em] text-muted-foreground ring-1 ring-foreground/[0.08]">
+                    {doc.sourceType.toUpperCase()}
                   </span>
-                ) : (
-                  <span className="inline-flex items-center gap-1 rounded-full border bg-background px-2.5 py-1 text-xs">
-                    <WarningIcon size={12} />
-                    {t("creator.featureNoDownload")}
-                  </span>
-                )}
-              </div>
-
-              {/* Scores */}
-              <div className="flex gap-6 text-caption text-muted-foreground">
-                <span>
-                  {t("creator.securityScore")}: <strong className="text-foreground">{securityScore}/10</strong>
-                </span>
-                <span>
-                  {t("creator.frictionScore")}: <strong className="text-foreground">{frictionScore}/10</strong>
-                </span>
-              </div>
+                </div>
+              ))}
             </div>
-          </div>
-        </CardContent>
-      </Card>
+          </section>
 
-      {/* Bottom action buttons */}
-      {!isSuccess && (
-        <div className="flex items-center justify-center gap-3">
-          <Button variant="outline" onClick={handleCancel} className="w-28">
+          <section className="space-y-4">
+            <h3 className="flex items-baseline gap-2.5">
+              <span className="font-mono text-[10px] tracking-[0.16em] text-muted-foreground/45">
+                02
+              </span>
+              <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/75">
+                {t("bundle.review.securitySection")}
+              </span>
+            </h3>
+
+            <div className="flex items-baseline gap-2">
+              <span className="text-[13px] font-semibold tracking-[-0.01em]">{t(presetInfo.label)}</span>
+              {config.isCustomized ? (
+                <span className="font-mono text-[10px] tracking-[0.12em] text-muted-foreground/70">
+                  {t("preset.customized.label")}
+                </span>
+              ) : null}
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              {FEATURE_META.map(({ key, icon: Icon, labelKey }) => {
+                if (!features[key]) return null;
+                return (
+                  <span
+                    key={key}
+                    className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[12px] ring-1 ring-foreground/[0.08]"
+                  >
+                    <Icon size={13} weight="light" />
+                    {t(labelKey)}
+                  </span>
+                );
+              })}
+              {config.allowDownload ? (
+                <span className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[12px] ring-1 ring-foreground/[0.08]">
+                  <DownloadIcon size={13} weight="light" />
+                  {t("creator.featureDownload")}
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[12px] ring-1 ring-foreground/[0.08]">
+                  <WarningIcon size={13} weight="light" />
+                  {t("creator.featureNoDownload")}
+                </span>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+              <ScoreBar
+                label={t("creator.securityScore")}
+                score={securityScore}
+                variant="security"
+                layout="card"
+              />
+              <ScoreBar
+                label={t("creator.frictionScore")}
+                score={frictionScore}
+                variant="friction"
+                layout="card"
+              />
+            </div>
+          </section>
+        </div>
+      </PipelinePaper>
+
+      {!isSuccess ? (
+        <div className="flex items-center justify-center gap-8">
+          <Button
+            variant="ghost"
+            onClick={handleCancel}
+            className={cn(
+              "h-11 min-w-[8.5rem] rounded-xl px-6 text-[13px] font-medium tracking-tight",
+              "bg-rose-50 text-rose-950 ring-1 ring-rose-200/70",
+              "hover:bg-rose-100 hover:text-rose-950 hover:ring-rose-300/80",
+              "dark:bg-rose-950/35 dark:text-rose-50 dark:ring-rose-800/50",
+              "dark:hover:bg-rose-950/50",
+              "active:scale-[0.98]",
+            )}
+          >
             {t("common:cancel")}
           </Button>
           <Button
             data-testid="review-submit-button"
             onClick={handleSubmit}
             disabled={state.isSubmitting}
-            className="relative w-28 overflow-hidden bg-slate-700 text-white hover:bg-slate-600 animate-pulse-ring"
-          >
-            {!state.isSubmitting && (
-              <span className="pointer-events-none absolute inset-0 animate-shimmer bg-[linear-gradient(110deg,transparent_25%,rgba(255,255,255,0.2)_50%,transparent_75%)] bg-[length:200%_100%]" />
+            className={cn(
+              "h-11 min-w-[8.5rem] rounded-xl px-6 text-[13px] font-medium tracking-tight",
+              "shadow-[inset_0_1px_0_rgba(255,255,255,0.12)]",
+              "active:scale-[0.98]",
             )}
-            <span className="relative z-10">
-              {state.isSubmitting
-                ? t("bundle.review.submitting")
-                : isEdit
-                  ? t("common:save")
-                  : t("common:create")}
-            </span>
+          >
+            {state.isSubmitting
+              ? t("bundle.review.submitting")
+              : isEdit
+                ? t("common:save")
+                : t("common:create")}
           </Button>
         </div>
-      )}
+      ) : null}
 
-      {/* Edit-mode save confirmation */}
       <Dialog open={showSaveConfirm} onOpenChange={setShowSaveConfirm}>
         <DialogContent showCloseButton={false}>
           <DialogHeader>

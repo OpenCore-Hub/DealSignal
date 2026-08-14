@@ -17,6 +17,8 @@
     "uploading": "上传中...",
     "pending": "等待上传",
     "replaceTitle": "文件已存在",
+    "replaceEyebrow": "文档库已有同名文件",
+    "replaceLead": "用本次上传覆盖库中文件，或放弃本次上传。",
     "replaceDescription": "「{{name}}」已在文档库中。覆盖为本次上传的文件，还是放弃本次上传？",
     "replaceConfirm": "覆盖",
     "replaceCancel": "放弃",
@@ -78,6 +80,8 @@
   "share": {
     "cta": "分享",
     "title": "分享文档",
+    "eyebrow": "分享链接",
+    "lead": "创建后立即复制私密链接。",
     "description": "为「{{name}}」创建分享链接并复制到剪贴板。",
     "defaultsHint": "使用与「创建链接」相同的默认设置：公开访问、允许下载、开启水印、30 天后过期。",
     "createAndCopy": "创建",

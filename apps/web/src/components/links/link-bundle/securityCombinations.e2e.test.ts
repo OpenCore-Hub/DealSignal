@@ -143,7 +143,7 @@ function accessGate(store: StoreResult, req: AccessRequest): GateResult {
 
 interface GuardResult {
   blocked: boolean;
-  reason?: "contactRequired" | "ndaDocumentRequired" | "customExpiresAtRequired" | "customExpiresAtFuture";
+  reason?: "contactRequired" | "ndaDocumentRequired" | "customExpiresAtRequired" | "customExpiresAtFuture" | "customMaxViewsRequired" | "customMaxViewsInvalid";
 }
 
 function clientGuard(config: PermissionConfig): GuardResult {

@@ -58,6 +58,8 @@ async function initI18n() {
         documents: {
           share: {
             title: "Share document",
+            eyebrow: "Share link",
+            lead: "A private URL is copied as soon as you create it.",
             description: "Create a share link for “{{name}}” and copy it to the clipboard.",
             defaultsHint: "Uses the same defaults as Create link.",
             createAndCopy: "Create",
@@ -98,7 +100,11 @@ async function initI18n() {
               "10": "10",
               "50": "50",
               "100": "100",
+              custom: "Custom",
             },
+            customMaxViews: "Custom max views",
+            customMaxViewsRequired: "Enter a custom view limit",
+            customMaxViewsInvalid: "Max views must be a whole number from 1 to 1,000,000",
             contactRequired: "Please select a contact to send the verification code to.",
             ndaDocumentRequired: "Please select an NDA agreement document",
           },
@@ -173,7 +179,7 @@ describe("DocumentShareDialog", () => {
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 
-  it("expands an inline advanced settings card instead of navigating away", async () => {
+  it("shows advanced settings expanded by default instead of navigating away", async () => {
     const onOpenChange = vi.fn();
     const i18nInstance = await initI18n();
     render(
@@ -190,13 +196,15 @@ describe("DocumentShareDialog", () => {
       </I18nextProvider>,
     );
 
-    expect(screen.queryByTestId("document-share-advanced-card")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByTestId("document-share-advanced"));
-    expect(await screen.findByTestId("document-share-advanced-card")).toBeInTheDocument();
+    expect(screen.getByTestId("document-share-advanced-card")).toBeInTheDocument();
     expect(screen.getByText("Access control")).toBeInTheDocument();
     expect(screen.getByText("Content protection")).toBeInTheDocument();
+    expect(screen.getByText("Advanced settings")).toBeInTheDocument();
+    expect(screen.getByTestId("security-expiry-select")).toBeInTheDocument();
+    expect(screen.getByTestId("security-max-views-select")).toBeInTheDocument();
     expect(screen.getByTestId("security-switch-allowDownload")).toBeChecked();
     expect(screen.getByTestId("security-switch-watermarkEnabled")).toBeChecked();
+    expect(screen.queryByTestId("document-share-advanced")).not.toBeInTheDocument();
     expect(onOpenChange).not.toHaveBeenCalled();
     expect(createLinkMock).not.toHaveBeenCalled();
   });
@@ -217,7 +225,6 @@ describe("DocumentShareDialog", () => {
       </I18nextProvider>,
     );
 
-    fireEvent.click(screen.getByTestId("document-share-advanced"));
     fireEvent.click(screen.getByTestId("security-switch-allowDownload"));
     fireEvent.click(screen.getByTestId("document-share-create"));
 
@@ -248,7 +255,6 @@ describe("DocumentShareDialog", () => {
       </I18nextProvider>,
     );
 
-    fireEvent.click(screen.getByTestId("document-share-advanced"));
     fireEvent.click(screen.getByTestId("security-switch-requireEmailVerification"));
 
     expect(screen.getByTestId("document-share-contact-selector")).toBeInTheDocument();
@@ -286,7 +292,6 @@ describe("DocumentShareDialog", () => {
       </I18nextProvider>,
     );
 
-    fireEvent.click(screen.getByTestId("document-share-advanced"));
     fireEvent.click(screen.getByTestId("security-switch-ndaEnabled"));
 
     expect(screen.getByTestId("security-switch-requireEmailVerification")).toBeChecked();

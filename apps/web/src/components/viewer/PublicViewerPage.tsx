@@ -1003,6 +1003,7 @@ export function PublicViewerPage() {
       shouldDefaultVisitorWorkspaceOpen({
         dealRoomId: access.link.dealRoomId,
         showWorkspace,
+        documentCount: access.documents.length,
       })
     ) {
       setSidebarOpen(true);

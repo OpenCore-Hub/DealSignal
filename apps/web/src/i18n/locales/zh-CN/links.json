@@ -36,17 +36,12 @@
     "forDocument": "文档：{{title}}"
   },
   "actions": {
-    "viewLog": "查看日志",
+    "viewLog": "查看详情",
     "editLink": "编辑链接",
     "exportData": "导出访问数据",
     "exportSuccess": "已导出 {{count}} 条访问记录",
     "exportEmpty": "暂无访问记录可导出",
-    "exportError": "导出访问数据失败",
-    "allowDownload": "允许下载",
-    "disallowDownload": "禁止下载",
-    "downloadEnabledSuccess": "已允许访客下载文件",
-    "downloadDisabledSuccess": "已禁止访客下载",
-    "downloadToggleError": "更新下载权限失败"
+    "exportError": "导出访问数据失败"
   },
   "export": {
     "csv": {
@@ -162,8 +157,12 @@
       "unlimited": "无限制",
       "10": "10 次",
       "50": "50 次",
-      "100": "100 次"
+      "100": "100 次",
+      "custom": "自定义"
     },
+    "customMaxViews": "自定义访问次数",
+    "customMaxViewsRequired": "请输入自定义访问次数",
+    "customMaxViewsInvalid": "访问次数须为 1 到 1,000,000 的整数",
     "securityScore": "安全强度",
     "frictionScore": "接收方摩擦",
     "requireEmailDesc": "访问者需验证邮箱以确认身份",
@@ -223,7 +222,7 @@
     "nextStep": "下一步",
     "prevStep": "上一步",
     "cancel": "取消",
-    "saveChanges": "保存修改",
+    "saveChanges": "保存",
     "unsavedConfirmTitle": "放弃编辑？",
     "unsavedConfirmDesc": "当前配置将不会被保存，确定离开吗？",
     "editingLink": "编辑链接",
@@ -256,7 +255,7 @@
       "documentsSection": "链接包内容",
       "securitySection": "安全配置",
       "createButton": "创建链接包",
-      "saveButton": "保存修改",
+      "saveButton": "保存",
       "submitting": "保存中...",
       "successCreate": "链接包已创建！",
       "successUpdate": "链接已更新！收件人刷新页面即可看到最新内容。",

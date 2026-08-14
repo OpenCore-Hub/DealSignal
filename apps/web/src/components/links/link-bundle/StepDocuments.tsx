@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { clearPipelineDraft, useBundlePipeline } from "./BundlePipelineContext";
 import { BundleDocumentPicker } from "./BundleDocumentPicker";
 import { PipelineProgress } from "./PipelineProgress";
+import { PipelinePaper } from "./PipelinePaper";
 import { SHARE_CONTENT_DOCUMENT_CATEGORY } from "./pipelineUtils";
 import { api } from "@/lib/api";
 import type { Document } from "@/types";
@@ -92,25 +93,25 @@ export function StepDocuments() {
   }, [loadDocuments]);
 
   return (
-    <div className="space-y-8">
-      {/* Header */}
+    <div className="mx-auto w-full max-w-3xl space-y-6">
       <div className="flex justify-center">
         <PipelineProgress />
       </div>
 
-      {/* Document picker */}
-      <BundleDocumentPicker
-        allDocuments={state.documents}
-        loading={loading}
-        selectedDocuments={state.selectedDocuments}
-        selectedIds={new Set(state.selectedDocuments.map((d) => d.id))}
-        searchQuery={state.searchQuery}
-        onSearchChange={(query) => dispatch({ type: "SET_SEARCH_QUERY", query })}
-        onToggle={(doc) => dispatch({ type: "TOGGLE_DOCUMENT", document: doc })}
-        onRemove={(id) => dispatch({ type: "REMOVE_DOCUMENT", documentId: id })}
-        onMoveUp={(id) => dispatch({ type: "MOVE_DOCUMENT_UP", documentId: id })}
-        onMoveDown={(id) => dispatch({ type: "MOVE_DOCUMENT_DOWN", documentId: id })}
-      />
+      <PipelinePaper>
+        <BundleDocumentPicker
+          allDocuments={state.documents}
+          loading={loading}
+          selectedDocuments={state.selectedDocuments}
+          selectedIds={new Set(state.selectedDocuments.map((d) => d.id))}
+          searchQuery={state.searchQuery}
+          onSearchChange={(query) => dispatch({ type: "SET_SEARCH_QUERY", query })}
+          onToggle={(doc) => dispatch({ type: "TOGGLE_DOCUMENT", document: doc })}
+          onRemove={(id) => dispatch({ type: "REMOVE_DOCUMENT", documentId: id })}
+          onMoveUp={(id) => dispatch({ type: "MOVE_DOCUMENT_UP", documentId: id })}
+          onMoveDown={(id) => dispatch({ type: "MOVE_DOCUMENT_DOWN", documentId: id })}
+        />
+      </PipelinePaper>
     </div>
   );
 }

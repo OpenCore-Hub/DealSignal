@@ -39,6 +39,22 @@ export function buildEditModeDocumentLists(
 export const LINK_EXPIRY_PRESET_DAYS = [7, 15, 30] as const;
 export type LinkExpiryPresetDays = (typeof LINK_EXPIRY_PRESET_DAYS)[number];
 
+/** Preset max-views options shown in the Security step (plus Unlimited / Custom). */
+export const LINK_MAX_VIEWS_PRESETS = [10, 50, 100] as const;
+export type LinkMaxViewsPreset = (typeof LINK_MAX_VIEWS_PRESETS)[number];
+
+/** Inclusive upper bound for custom max views (fits int32 `max_access_count`). */
+export const LINK_CUSTOM_MAX_VIEWS_MAX = 1_000_000;
+
+/** Default value when switching Max views to Custom from Unlimited. */
+export const LINK_CUSTOM_MAX_VIEWS_DEFAULT = 25;
+
+export function isLinkMaxViewsPreset(
+  value: PermissionConfig["maxViews"] | number,
+): value is LinkMaxViewsPreset {
+  return (LINK_MAX_VIEWS_PRESETS as readonly number[]).includes(Number(value));
+}
+
 /**
  * Map a stored expiresAt onto the Security expiry select.
  * Presets snap within ±1 day (ceil + time-of-day); everything else is Custom
@@ -68,11 +84,49 @@ export function resolveExpiryDaysFromExpiresAt(
   return { expiryDays: "custom", _editExpiresAt: expiresAt };
 }
 
+/**
+ * Map a stored maxAccessCount onto the Security max-views select.
+ * 10 / 50 / 100 snap to presets; any other positive count is Custom.
+ */
+export function resolveMaxViewsFromAccessCount(
+  maxAccessCount: number | undefined | null,
+): { maxViews: number | "unlimited" | "custom"; _editMaxViews?: number } {
+  if (typeof maxAccessCount !== "number" || maxAccessCount <= 0) {
+    return { maxViews: "unlimited" };
+  }
+  if (isLinkMaxViewsPreset(maxAccessCount)) {
+    return { maxViews: maxAccessCount };
+  }
+  return { maxViews: "custom", _editMaxViews: maxAccessCount };
+}
+
 export type BundleSecurityGuardReason =
   | "contactRequired"
   | "ndaDocumentRequired"
   | "customExpiresAtRequired"
-  | "customExpiresAtFuture";
+  | "customExpiresAtFuture"
+  | "customMaxViewsRequired"
+  | "customMaxViewsInvalid";
+
+export function bundleSecurityGuardI18nKey(
+  reason: BundleSecurityGuardReason,
+): string {
+  switch (reason) {
+    case "ndaDocumentRequired":
+      return "creator.ndaDocumentRequired";
+    case "customExpiresAtRequired":
+      return "creator.customExpiresAtRequired";
+    case "customExpiresAtFuture":
+      return "creator.customExpiresAtFuture";
+    case "customMaxViewsRequired":
+      return "creator.customMaxViewsRequired";
+    case "customMaxViewsInvalid":
+      return "creator.customMaxViewsInvalid";
+    case "contactRequired":
+    default:
+      return "creator.contactRequired";
+  }
+}
 
 /** Client-side guards before create/update — mirrors StepReview checks. */
 export function validateBundleSecurityConfig(
@@ -93,6 +147,15 @@ export function validateBundleSecurityConfig(
     const ts = new Date(config._editExpiresAt).getTime();
     if (Number.isNaN(ts) || ts <= Date.now()) {
       return { ok: false, reason: "customExpiresAtFuture" };
+    }
+  }
+  if (config.maxViews === "custom") {
+    const n = config._editMaxViews;
+    if (typeof n !== "number" || !Number.isFinite(n)) {
+      return { ok: false, reason: "customMaxViewsRequired" };
+    }
+    if (!Number.isInteger(n) || n < 1 || n > LINK_CUSTOM_MAX_VIEWS_MAX) {
+      return { ok: false, reason: "customMaxViewsInvalid" };
     }
   }
   return { ok: true };

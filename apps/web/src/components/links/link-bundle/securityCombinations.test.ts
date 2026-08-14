@@ -24,7 +24,7 @@ import type { PermissionConfig, PermissionPreset } from "@/types";
 
 interface GuardResult {
   blocked: boolean;
-  reason?: "contactRequired" | "ndaDocumentRequired" | "customExpiresAtRequired" | "customExpiresAtFuture";
+  reason?: "contactRequired" | "ndaDocumentRequired" | "customExpiresAtRequired" | "customExpiresAtFuture" | "customMaxViewsRequired" | "customMaxViewsInvalid";
 }
 
 function clientGuard(config: PermissionConfig): GuardResult {

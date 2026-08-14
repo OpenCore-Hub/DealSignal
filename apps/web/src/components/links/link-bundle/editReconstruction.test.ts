@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { Link, PermissionConfig } from "@/types";
-import { resolveExpiryDaysFromExpiresAt } from "./pipelineUtils";
+import { resolveExpiryDaysFromExpiresAt, resolveMaxViewsFromAccessCount } from "./pipelineUtils";
 
 /**
  * Tests for the edit-mode security config reconstruction logic
@@ -15,13 +15,10 @@ function reconstructConfig(
   link: Link,
 ): Pick<PermissionConfig, "allowDownload" | "watermarkEnabled" | "expiryDays" | "maxViews"> & {
   _editExpiresAt?: string;
+  _editMaxViews?: number;
 } {
   const { expiryDays, _editExpiresAt } = resolveExpiryDaysFromExpiresAt(link.expiresAt);
-
-  const maxViews: number | "unlimited" =
-    typeof link.maxAccessCount === "number" && link.maxAccessCount > 0
-      ? link.maxAccessCount
-      : "unlimited";
+  const { maxViews, _editMaxViews } = resolveMaxViewsFromAccessCount(link.maxAccessCount);
 
   return {
     allowDownload: link.downloadEnabled ?? true,
@@ -29,6 +26,7 @@ function reconstructConfig(
     expiryDays,
     maxViews,
     _editExpiresAt: link.expiresAt ?? _editExpiresAt,
+    _editMaxViews,
   };
 }
 
@@ -121,9 +119,10 @@ describe("edit mode PermissionConfig reconstruction", () => {
     expect(config._editExpiresAt).toBe(iso);
   });
 
-  it("maps maxAccessCount to maxViews", () => {
-    const config = reconstructConfig({ ...baseLink, maxAccessCount: 50 });
-    expect(config.maxViews).toBe(50);
+  it("maps non-preset maxAccessCount to custom", () => {
+    const config = reconstructConfig({ ...baseLink, maxAccessCount: 25 });
+    expect(config.maxViews).toBe("custom");
+    expect(config._editMaxViews).toBe(25);
   });
 
   it("maps maxAccessCount=10 to maxViews", () => {

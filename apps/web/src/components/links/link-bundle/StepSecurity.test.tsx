@@ -48,6 +48,8 @@ async function setupI18n() {
           "creator.maxViewsOptions.10": "10",
           "creator.maxViewsOptions.50": "50",
           "creator.maxViewsOptions.100": "100",
+          "creator.maxViewsOptions.custom": "Custom",
+          "creator.customMaxViews": "Custom max views",
 
           "preset.public.label": "Public",
           "preset.public.description": "Public",

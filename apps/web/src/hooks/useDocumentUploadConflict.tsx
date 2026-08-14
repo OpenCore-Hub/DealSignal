@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ConfirmDialog } from "@/components/common/ConfirmDialog";
+import { DocumentExistsDialog } from "@/components/documents/DocumentExistsDialog";
 import { api } from "@/lib/api";
 import { ApiError } from "@/lib/apiClient";
 import type { Document } from "@/types";
@@ -125,19 +125,11 @@ export function useDocumentUploadConflict(opts?: {
   );
 
   const conflictDialog = (
-    <ConfirmDialog
+    <DocumentExistsDialog
       open={Boolean(prompt)}
-      title={t("upload.replaceTitle")}
-      description={t("upload.replaceDescription", {
-        name: prompt?.fileName ?? "",
-      })}
-      confirmLabel={t("upload.replaceConfirm")}
-      cancelLabel={t("upload.replaceCancel")}
-      // Sit above host dialogs (UploadDialog) and avoid X dismiss races.
-      contentClassName="sm:max-w-md z-[60]"
-      showCloseButton={false}
-      onConfirm={() => settle("replace")}
-      onCancel={() => settle("cancel")}
+      fileName={prompt?.fileName ?? ""}
+      onOverwrite={() => settle("replace")}
+      onDiscard={() => settle("cancel")}
     />
   );
 

@@ -56,6 +56,8 @@ async function setupI18n() {
           "creator.maxViewsOptions.10": "10",
           "creator.maxViewsOptions.50": "50",
           "creator.maxViewsOptions.100": "100",
+          "creator.maxViewsOptions.custom": "Custom",
+          "creator.customMaxViews": "Custom max views",
         },
         linkShare: {
           "accessRules.additionalProtections.requireNda": "Require NDA to view",
@@ -172,5 +174,16 @@ describe("BundleSecurityOptions switch interaction", () => {
     };
     await renderSecurityOptions(config, vi.fn());
     expect(screen.getByTestId("security-expiry-custom-datetime")).toBeInTheDocument();
+  });
+
+  it("shows custom number input when max views is custom", async () => {
+    const config = {
+      ...buildConfigFromPreset("customized"),
+      maxViews: "custom" as const,
+      _editMaxViews: 25,
+    };
+    await renderSecurityOptions(config, vi.fn());
+    expect(screen.getByTestId("security-max-views-custom-input")).toBeInTheDocument();
+    expect(screen.getByTestId("security-max-views-custom-input")).toHaveValue("25");
   });
 });

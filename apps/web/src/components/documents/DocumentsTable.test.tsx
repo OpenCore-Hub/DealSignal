@@ -134,6 +134,8 @@ const resources = {
       share: {
         cta: "Share",
         title: "Share document",
+        eyebrow: "Share link",
+        lead: "A private URL is copied as soon as you create it.",
         description: "Create a share link for “{{name}}”.",
         defaultsHint: "Uses create-link defaults.",
         createAndCopy: "Create",
