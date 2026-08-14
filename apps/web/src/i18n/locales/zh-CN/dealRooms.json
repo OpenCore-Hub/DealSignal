@@ -50,7 +50,11 @@
   },
   "card": {
     "viewDocuments": "查看文档",
-    "noViewsYet": "暂无浏览"
+    "noViewsYet": "暂无浏览",
+    "deleteTitle": "删除数据室",
+    "deleteDescription": "确定删除「{{name}}」？文档将退回文档库。该数据室的分享链接、知识库和分析将被删除，此操作无法撤销。",
+    "deleted": "数据室已删除",
+    "deleteFailed": "删除数据室失败"
   },
   "detail": {
     "back": "返回数据室",
@@ -504,6 +508,7 @@
     "description": "当前房间策略一览。可编辑控件将逐步完善。",
     "moreComing": "冻结房间、默认水印与保留策略即将上线。",
     "inviteMembers": "邀请成员",
+    "ndaSaved": "NDA 协议已保存",
     "enabled": "开启",
     "disabled": "关闭",
     "fields": {
@@ -763,16 +768,29 @@
     }
   },
   "new": {
-    "title": "新建数据室",
-    "subtitle": "选择场景模板，系统会自动生成文件夹结构与推荐文件清单。",
+    "title": "选择模板",
+    "breadcrumb": "数据室",
+    "subtitle": "数据室与文件夹将按所选模板创建。",
+    "scenario": "场景",
     "basicInfo": "基本信息",
     "name": "名称",
-    "namePlaceholder": "例如：创业融资数据室",
+    "nameRequired": "必填",
+    "namePlaceholder": "例如：创业融资",
+    "nameError": {
+      "empty": "请输入名称。",
+      "short": "至少 2 个字符。",
+      "long": "名称不超过 80 个字符。",
+      "format": "请包含文字或数字，且不要使用 < 或 >。"
+    },
     "description": "描述",
+    "descriptionOptional": "选填",
     "descriptionPlaceholder": "说明数据室用途与目标受众",
     "enableNda": "启用 NDA",
     "enableNdaDescription": "访问前要求签署保密协议",
-    "ndaPlanRequired": "NDA 需 Business 或更高方案",
+    "ndaFromTemplate": "成员进入前须签署。",
+    "ndaPlanRequired": "NDA 需 Business 或更高方案。",
+    "scenarioGroupNda": "须签 NDA",
+    "scenarioGroupOpen": "无须 NDA",
     "roomLimitReached": "已达到当前方案的数据室数量上限，请升级后再创建。",
     "folders": "文件夹结构",
     "recommendedFiles": "推荐文件",
@@ -783,6 +801,19 @@
     "created": "数据室已创建",
     "createFailed": "创建数据室失败",
     "folderCount": "{{count}} 个文件夹",
+    "customFolderMeta": "自行搭建",
+    "customFoldersHint": "暂无文件夹，创建后再自行添加。",
+    "foldersDialog": {
+      "title": "核对目录",
+      "subtitle": "{{name}} — 勾选要保留的目录，在列表里重命名，可新增目录或一级子目录。",
+      "add": "新增目录",
+      "addSubfolder": "新增子目录",
+      "addPlaceholder": "目录名称",
+      "rename": "重命名",
+      "select": "保留{{name}}",
+      "empty": "请先新增一个目录。",
+      "create": "创建"
+    },
     "previousTemplate": "上一个模板",
     "nextTemplate": "下一个模板"
   },
@@ -822,6 +853,10 @@
     "sales-dataroom": {
       "name": "销售数据室",
       "description": "用于企业销售的数据室，包含销售材料、提案与报价、合同协议、产品信息、客户参考和安全合规。"
+    },
+    "custom": {
+      "name": "完全自定义",
+      "description": "从空白开始，自行添加文件夹。"
     }
   },
   "folders": {
@@ -919,6 +954,12 @@
   "members": {
     "inviteTitle": "邀请成员",
     "inviteDescription": "邀请成员访问该数据室。",
+    "inviteDescriptionNda": "邀请成员访问该数据室。进入前须签署所选 NDA 协议。",
+    "ndaAgreement": "NDA 协议",
+    "ndaAgreementHint": "该数据室所有成员签署同一份协议。",
+    "ndaAgreementPlaceholder": "选择 NDA 协议",
+    "ndaAgreementRequired": "邀请成员前请先选择 NDA 协议",
+    "ndaAgreementEmpty": "还没有 NDA 协议，请先在协议库中添加。",
     "email": "邮箱",
     "emailPlaceholder": "investor@example.com",
     "role": "角色",

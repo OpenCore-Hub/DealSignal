@@ -1,57 +1,62 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { motion } from "motion/react";
-import {
-  Plus,
-  Check,
-  Folder,
-  FileText,
-  ShieldCheck,
-  GlobeHemisphereWest,
-  LockKey,
-  UsersThree,
-  CaretLeft,
-  CaretRight,
-} from "@phosphor-icons/react";
+import { Check } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
+import { CreateRoomFoldersDialog } from "@/components/deal-rooms/CreateRoomFoldersDialog";
+import { PipelinePaper } from "@/components/links/link-bundle/PipelinePaper";
 import { api } from "@/lib/api";
+import { ApiError } from "@/lib/apiClient";
 import { apiErrorMessage } from "@/lib/apiErrors";
 import { usageAtCap } from "@/lib/planQuota";
-import { BackButton } from "@/components/common/BackButton";
+import {
+  ensureDealRoomTemplates,
+  templateFolderCount,
+} from "@/lib/dealRoomTemplates";
+import { dealRoomSlugFromName, normalizeDealRoomName, validateDealRoomName } from "@/lib/dealRoomName";
 import { useReducedMotion } from "@/hooks/useReducedMotion";
 import { useAsyncData } from "@/hooks/useAsyncData";
+import { useUIStore } from "@/stores/uiStore";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
+import { cn } from "@/lib/utils";
 import type { DealRoomTemplate } from "@/types";
 
-const permissionIcons: Record<string, typeof GlobeHemisphereWest> = {
-  public: GlobeHemisphereWest,
-  standard: LockKey,
-  confidential: ShieldCheck,
-  collaborative: UsersThree,
-};
+function SectionLabel({ index, label }: { index: string; label: string }) {
+  return (
+    <h2 className="mb-3 flex items-center gap-2.5">
+      <span className="font-mono text-[10px] font-medium tracking-[0.16em] text-muted-foreground/65">
+        {index}
+      </span>
+      <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/75">
+        {label}
+      </span>
+    </h2>
+  );
+}
 
 export function NewDealRoomPage() {
   const { t } = useTranslation("dealRooms");
   const { t: tc } = useTranslation("common");
   const navigate = useNavigate();
   const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
+  const setBreadcrumbTail = useUIStore((state) => state.setBreadcrumbTail);
   const reducedMotion = useReducedMotion();
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [nda, setNda] = useState(true);
+  const [ndaOverride, setNdaOverride] = useState<boolean | null>(null);
   const [creating, setCreating] = useState(false);
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const [folderDialogOpen, setFolderDialogOpen] = useState(false);
+  const [nameTouched, setNameTouched] = useState(false);
 
   const {
-    data: templates,
+    data: catalog,
     loading,
     error,
     refetch,
@@ -59,6 +64,10 @@ export function NewDealRoomPage() {
     const res = await api.getDealRoomTemplates();
     return res.data;
   }, [tc]);
+  const templates = useMemo(
+    () => (catalog == null ? [] : ensureDealRoomTemplates(catalog)),
+    [catalog],
+  );
   const { data: billing } = useAsyncData(() => api.getBillingInfo().catch(() => null), []);
   const roomsAtCap = billing ? usageAtCap(billing.roomsUsed, billing.roomsLimit) : false;
   const ndaPlanBlocked = billing != null && billing.ndaEnabled === false;
@@ -70,76 +79,86 @@ export function NewDealRoomPage() {
         defaultValue: template.description,
       }),
     }),
-    [t]
+    [t],
   );
+
+  useEffect(() => {
+    setBreadcrumbTail({ label: t("new.breadcrumb") });
+    return () => setBreadcrumbTail(null);
+  }, [setBreadcrumbTail, t]);
 
   useEffect(() => {
     if (templates && templates.length > 0 && !selectedTemplateId) {
-      const first = templates[0];
-      const display = getTemplateDisplay(first);
-      setSelectedTemplateId(first.id);
-      setNda(ndaPlanBlocked ? false : first.ndaEnabled);
-      setName(display.name);
-      setDescription(display.description);
+      setSelectedTemplateId(templates[0].id);
     }
-  }, [templates, selectedTemplateId, getTemplateDisplay, ndaPlanBlocked]);
+  }, [templates, selectedTemplateId]);
 
-  useEffect(() => {
-    if (ndaPlanBlocked && nda) {
-      setNda(false);
-    }
-  }, [ndaPlanBlocked, nda]);
-
-  const selectTemplate = (template: DealRoomTemplate, fillFields = false) => {
-    const display = getTemplateDisplay(template);
+  const selectTemplate = (template: DealRoomTemplate) => {
     setSelectedTemplateId(template.id);
-    setNda(ndaPlanBlocked ? false : template.ndaEnabled);
-    if (fillFields || !name) setName(display.name);
-    if (fillFields || !description) setDescription(display.description);
-  };
-
-  const scroll = (direction: "left" | "right") => {
-    const container = scrollRef.current;
-    if (!container) return;
-    const cardWidth = 288;
-    const gap = 16;
-    const scrollAmount = direction === "left" ? -(cardWidth + gap) : cardWidth + gap;
-    container.scrollBy({ left: scrollAmount, behavior: "smooth" });
+    setNdaOverride(null);
   };
 
   const selectedTemplate = useMemo(
-    () => templates?.find((tpl) => tpl.id === selectedTemplateId),
-    [templates, selectedTemplateId]
+    () => templates.find((tpl) => tpl.id === selectedTemplateId),
+    [templates, selectedTemplateId],
   );
 
-  const slugify = (value: string) =>
-    value
-      .toLowerCase()
-      .trim()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "");
+  const ndaEnabled = ndaPlanBlocked
+    ? false
+    : (ndaOverride ?? Boolean(selectedTemplate?.ndaEnabled));
 
-  const handleCreate = async () => {
-    if (!selectedTemplate || !name) return;
+  const nameIssue = validateDealRoomName(name);
+  const nameValid = nameIssue === null;
+  const selectedDisplay = selectedTemplate ? getTemplateDisplay(selectedTemplate) : null;
+  const descriptionPlaceholder = selectedDisplay?.description || t("new.descriptionPlaceholder");
+
+  const openFolderDialog = () => {
+    if (!selectedTemplate || !nameValid) return;
     if (roomsAtCap) {
       toast.error(t("new.roomLimitReached"));
       return;
     }
-    const slug = slugify(name) || selectedTemplate.scenario;
-    if (!slug) {
-      toast.error(tc("error.saveFailed"));
+    setFolderDialogOpen(true);
+  };
+
+  const handleCreate = async (folders: { name: string; path: string; description?: string }[]) => {
+    if (!selectedTemplate || !nameValid) return;
+    if (roomsAtCap) {
+      toast.error(t("new.roomLimitReached"));
       return;
     }
+    const trimmedName = normalizeDealRoomName(name);
+    const baseSlug = dealRoomSlugFromName(trimmedName);
     setCreating(true);
     try {
-      const room = await api.createDealRoom({
-        name,
-        slug,
-        description,
+      const payload = {
+        name: trimmedName,
+        description: description.trim(),
         template: selectedTemplate.scenario,
-        ndaEnabled: ndaPlanBlocked ? false : nda,
-      });
+        ndaEnabled: ndaPlanBlocked ? false : ndaEnabled,
+        folders: folders.map((folder, index) => ({
+          name: folder.name,
+          path: folder.path,
+          ...(folder.description ? { description: folder.description } : {}),
+          sort_order: index,
+        })),
+      };
+      let room;
+      for (let attempt = 0; attempt < 8; attempt++) {
+        const slug = attempt === 0 ? baseSlug : `${baseSlug}-${attempt + 1}`;
+        try {
+          room = await api.createDealRoom({ ...payload, slug });
+          break;
+        } catch (error) {
+          const taken =
+            error instanceof ApiError &&
+            (error.code === "duplicate_slug" || error.code === "slug_conflict");
+          if (!taken || attempt === 7) throw error;
+        }
+      }
+      if (!room) throw new Error("create room failed");
       toast.success(t("new.created"));
+      setFolderDialogOpen(false);
       navigate(`/${workspaceSlug}/deal-rooms/${room.id}`);
     } catch (e) {
       toast.error(apiErrorMessage(e, { messageKey: "dealRooms:new.createFailed" }));
@@ -148,245 +167,215 @@ export function NewDealRoomPage() {
     }
   };
 
+  const fieldClass =
+    "h-10 border-border/60 bg-transparent shadow-none placeholder:text-[12px] placeholder:font-normal placeholder:text-foreground/28";
+
   return (
     <motion.div
       initial={reducedMotion ? false : { opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-      className="mx-auto max-w-5xl space-y-6"
+      className="flex w-full flex-col gap-5"
     >
-      <BackButton to={`/${workspaceSlug}/deal-rooms`} label={t("detail.back")} />
-
-      <div className="space-y-1">
-        <h1 className="text-h1">{t("new.title")}</h1>
-        <p className="text-body text-muted-foreground">
+      <header className="flex flex-col items-start">
+        <h1 className="text-[1.375rem] font-medium leading-none tracking-[-0.045em] text-foreground">
+          {t("new.title")}
+        </h1>
+        <p className="mt-3 max-w-[22rem] border-l border-foreground/12 pl-3 text-[12.5px] leading-[1.55] tracking-[-0.011em] text-muted-foreground">
           {t("new.subtitle")}
         </p>
-      </div>
+      </header>
 
       {error ? (
-        <div className="flex flex-col items-center justify-center gap-4 rounded-lg border border-border bg-card p-12 text-center">
+        <div className="flex flex-col items-center justify-center gap-4 rounded-2xl bg-muted/30 px-8 py-16 text-center ring-1 ring-foreground/[0.05]">
           <p className="text-body text-muted-foreground">{error}</p>
           <Button onClick={refetch}>{tc("retry")}</Button>
         </div>
-      ) : loading ? (
-        <div className="flex gap-4 overflow-x-auto pb-2">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <Skeleton key={i} className="h-40 w-72 shrink-0" />
-          ))}
-        </div>
       ) : (
-        <div className="relative">
-          <Button
-            type="button"
-            variant="outline"
-            size="icon"
-            className="absolute -left-14 top-1/2 z-10 -translate-y-1/2 rounded-full shadow-md"
-            onClick={() => scroll("left")}
-            aria-label={t("new.previousTemplate")}
-          >
-            <CaretLeft size={20} />
-          </Button>
-          <div
-            ref={scrollRef}
-            className="flex gap-4 overflow-x-auto pb-4 scroll-smooth"
-          >
-            {templates?.map((template) => {
-              const selected = selectedTemplateId === template.id;
-              const display = getTemplateDisplay(template);
-              return (
-                <Card
-                  key={template.id}
-                  role="button"
-                  tabIndex={0}
-                  className={`w-72 shrink-0 cursor-pointer transition-colors hover:bg-muted/50 hover:border-muted-foreground/20 ${
-                    selected ? "ring-2 ring-primary" : ""
-                  }`}
-                  onClick={() => selectTemplate(template, true)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      selectTemplate(template, true);
-                    }
-                  }}
-                >
-                  <CardContent>
-                    <div className="flex items-start justify-between">
-                      <p className="text-h3">{display.name}</p>
-                      {selected && (
-                        <div className="flex h-5 w-5 items-center justify-center rounded-full bg-primary text-primary-foreground">
-                          <Check size={12} weight="bold" />
-                        </div>
-                      )}
-                    </div>
-                    <p className="text-caption mt-2 text-muted-foreground line-clamp-3">
-                      {display.description}
-                    </p>
-                    <div className="mt-3 flex flex-wrap gap-1">
-                      <Badge variant="outline" className="text-caption">
-                        {t("new.folderCount", { count: template.folderStructure.length })}
-                      </Badge>
-                      {template.ndaEnabled && (
-                        <Badge variant="secondary" className="text-caption">
-                          NDA
-                        </Badge>
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
-              );
-            })}
-          </div>
-          <Button
-            type="button"
-            variant="outline"
-            size="icon"
-            className="absolute -right-14 top-1/2 z-10 -translate-y-1/2 rounded-full shadow-md"
-            onClick={() => scroll("right")}
-            aria-label={t("new.nextTemplate")}
-          >
-            <CaretRight size={20} />
-          </Button>
-        </div>
-      )}
+        <>
+        <PipelinePaper className="w-full">
+          <div className="flex flex-col lg:min-h-[calc(100dvh-14.5rem)]">
+            <div className="grid flex-1 lg:grid-cols-[minmax(0,1fr)_minmax(21rem,24.5rem)]">
+              <section className="flex min-h-0 flex-col px-5 py-6 sm:px-7 sm:py-7">
+                <SectionLabel index="01" label={t("new.scenario")} />
+                {loading ? (
+                  <div className="grid flex-1 grid-cols-1 gap-2 sm:grid-cols-2">
+                    {Array.from({ length: 4 }).map((_, i) => (
+                      <Skeleton key={i} className="h-full min-h-[4.25rem] w-full rounded-xl" />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="grid min-h-0 flex-1 grid-cols-1 gap-px overflow-hidden rounded-xl bg-foreground/[0.055] sm:grid-cols-2 sm:auto-rows-fr">
+                    {templates.map((template, index) => {
+                      const selected = selectedTemplateId === template.id;
+                      const display = getTemplateDisplay(template);
+                      return (
+                        <button
+                          key={template.id}
+                          type="button"
+                          aria-pressed={selected}
+                          onClick={() => selectTemplate(template)}
+                          className={cn(
+                            "flex h-full min-h-[4.25rem] items-start gap-3 px-4 py-3.5 text-left",
+                            "transition-colors duration-200 ease-[cubic-bezier(0.16,1,0.3,1)]",
+                            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
+                            selected
+                              ? "bg-foreground text-background"
+                              : "bg-background hover:bg-foreground/[0.03]",
+                          )}
+                        >
+                          <span
+                            className={cn(
+                              "mt-0.5 font-mono text-[10px] tracking-[0.14em]",
+                              selected ? "text-background/55" : "text-muted-foreground/55",
+                            )}
+                          >
+                            {String(index + 1).padStart(2, "0")}
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-[13px] font-medium tracking-[-0.02em]">
+                              {display.name}
+                            </span>
+                            <span
+                              className={cn(
+                                "mt-0.5 block text-[11px] tabular-nums",
+                                selected ? "text-background/65" : "text-muted-foreground/80",
+                              )}
+                            >
+                              {templateFolderCount(template) === 0
+                                ? t("new.customFolderMeta")
+                                : t("new.folderCount", {
+                                    count: templateFolderCount(template),
+                                  })}
+                            </span>
+                          </span>
+                          <span
+                            className={cn(
+                              "mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full",
+                              selected
+                                ? "bg-background text-foreground"
+                                : "ring-1 ring-foreground/15",
+                            )}
+                            aria-hidden
+                          >
+                            {selected ? <Check size={10} weight="bold" /> : null}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </section>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
-          <CardHeader>
-            <CardTitle className="text-h2">{t("new.basicInfo")}</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="room-name">{t("new.name")}</Label>
-              <Input
-                id="room-name"
-                placeholder={t("new.namePlaceholder")}
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-              />
+              <section className="flex flex-col border-t border-foreground/[0.055] px-5 py-6 sm:px-7 sm:py-7 lg:border-t-0 lg:border-l">
+                <SectionLabel index="02" label={t("new.basicInfo")} />
+                <div className="flex min-h-0 flex-1 flex-col gap-4">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="room-name" className="text-[12px] text-muted-foreground">
+                      {t("new.name")}
+                      <span className="ml-1 text-foreground/45">{t("new.nameRequired")}</span>
+                    </Label>
+                    <Input
+                      id="room-name"
+                      placeholder={t("new.namePlaceholder")}
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      onBlur={() => {
+                        const next = normalizeDealRoomName(name);
+                        if (next !== name) setName(next);
+                        setNameTouched(true);
+                      }}
+                      aria-invalid={nameTouched && !nameValid}
+                      aria-describedby={nameTouched && nameIssue ? "room-name-hint" : undefined}
+                      className={fieldClass}
+                    />
+                    {nameTouched && nameIssue ? (
+                      <p id="room-name-hint" className="text-[11.5px] leading-snug text-destructive">
+                        {t(`new.nameError.${nameIssue}`)}
+                      </p>
+                    ) : null}
+                  </div>
+                  <div className="flex min-h-0 flex-1 flex-col space-y-1.5">
+                    <Label htmlFor="room-description" className="text-[12px] text-muted-foreground">
+                      {t("new.description")}
+                      <span className="ml-1 text-foreground/45">{t("new.descriptionOptional")}</span>
+                    </Label>
+                    <Textarea
+                      id="room-description"
+                      placeholder={descriptionPlaceholder}
+                      value={description}
+                      onChange={(e) => setDescription(e.target.value)}
+                      rows={5}
+                      className="min-h-[7rem] flex-1 resize-none border-border/60 bg-transparent shadow-none placeholder:text-[12px] placeholder:font-normal placeholder:text-foreground/28 lg:min-h-[10rem]"
+                    />
+                  </div>
+                  <div className="flex items-center justify-between gap-6 pt-1">
+                    <div className="min-w-0">
+                      <p className="text-[13px] font-medium tracking-[-0.015em] text-foreground">
+                        {t("new.enableNda")}
+                      </p>
+                      <p className="mt-0.5 text-[12px] leading-snug text-muted-foreground">
+                        {ndaPlanBlocked
+                          ? t("new.ndaPlanRequired")
+                          : t("new.enableNdaDescription")}
+                      </p>
+                    </div>
+                    <Switch
+                      checked={ndaEnabled}
+                      disabled={ndaPlanBlocked}
+                      onCheckedChange={(checked) => {
+                        if (checked && ndaPlanBlocked) return;
+                        setNdaOverride(checked);
+                      }}
+                      aria-label={t("new.enableNda")}
+                    />
+                  </div>
+                  {roomsAtCap ? (
+                    <p className="text-xs text-muted-foreground" data-testid="new-room-limit-hint">
+                      {t("new.roomLimitReached")}
+                    </p>
+                  ) : null}
+                </div>
+              </section>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="room-description">{t("new.description")}</Label>
-              <Input
-                id="room-description"
-                placeholder={t("new.descriptionPlaceholder")}
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-              />
-            </div>
-            <div className="flex items-center justify-between rounded-md border border-border p-3">
-              <div>
-                <p className="text-sm font-medium">{t("new.enableNda")}</p>
-                <p className="text-caption text-muted-foreground">
-                  {ndaPlanBlocked ? t("new.ndaPlanRequired") : t("new.enableNdaDescription")}
-                </p>
-              </div>
-              <Switch
-                checked={nda}
-                disabled={ndaPlanBlocked}
-                onCheckedChange={(checked) => {
-                  if (ndaPlanBlocked && checked) return;
-                  setNda(checked);
-                }}
-                aria-label={t("new.enableNda")}
-              />
-            </div>
-            {roomsAtCap ? (
-              <p className="text-xs text-muted-foreground" data-testid="new-room-limit-hint">
-                {t("new.roomLimitReached")}
-              </p>
-            ) : null}
-            <div className="flex justify-end gap-2 pt-2">
-              <Button variant="outline" onClick={() => navigate(`/${workspaceSlug}/deal-rooms`)}>
+
+            <div className="flex items-center justify-center gap-8 border-t border-foreground/[0.06] bg-muted/45 px-5 py-3.5 sm:px-8">
+              <Button
+                variant="outline"
+                onClick={() => navigate(`/${workspaceSlug}/deal-rooms`)}
+                className="h-10 min-w-[6.5rem] rounded-lg bg-background px-4 text-[13px] font-medium tracking-tight"
+              >
                 {t("new.cancel")}
               </Button>
               <Button
-                className="gap-1.5"
-                disabled={!name || creating || roomsAtCap}
-                onClick={handleCreate}
+                disabled={!nameValid || creating || roomsAtCap}
+                onClick={openFolderDialog}
+                className={cn(
+                  "h-10 min-w-[8.5rem] rounded-lg px-5 text-[13px] font-medium tracking-tight",
+                  "shadow-[inset_0_1px_0_rgba(255,255,255,0.12)]",
+                )}
               >
-                <Plus size={16} weight="bold" />
                 {creating ? t("new.creating") : t("new.create")}
               </Button>
             </div>
-          </CardContent>
-        </Card>
-
-        <div className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-h2 flex items-center gap-2">
-                <Folder size={20} />
-                {t("new.folders")}
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {selectedTemplate ? (
-                <ul className="space-y-2">
-                  {selectedTemplate.folderStructure.map((folder, idx) => (
-                    <li key={idx} className="flex items-start gap-2 text-sm">
-                      <Folder size={16} className="mt-0.5 text-muted-foreground" />
-                      <div>
-                        <p className="font-medium">{folder.name}</p>
-                        {folder.description && (
-                          <p className="text-caption text-muted-foreground">{folder.description}</p>
-                        )}
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="text-sm text-muted-foreground">{t("detail.noTemplate")}</p>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-h2 flex items-center gap-2">
-                <FileText size={20} />
-                {t("new.recommendedFiles")}
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {selectedTemplate ? (
-                <ul className="space-y-2">
-                  {selectedTemplate.recommendedFiles.map((file, idx) => (
-                    <li key={idx} className="flex items-center gap-2 text-sm">
-                      <FileText size={16} className="text-muted-foreground" />
-                      {file}
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="text-sm text-muted-foreground">{t("detail.noTemplate")}</p>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-h2 flex items-center gap-2">
-                <ShieldCheck size={20} />
-                {t("new.defaultPermission")}
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {selectedTemplate ? (
-                <div className="flex items-center gap-2 text-sm">
-                  {(() => {
-                    const Icon = permissionIcons[selectedTemplate.defaultPermissionLevel];
-                    return <Icon size={18} className="text-muted-foreground" />;
-                  })()}
-                  {t(`permission.${selectedTemplate.defaultPermissionLevel}.label`)}
-                </div>
-              ) : (
-                <p className="text-sm text-muted-foreground">{t("detail.noTemplate")}</p>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+          </div>
+        </PipelinePaper>
+        <CreateRoomFoldersDialog
+          open={folderDialogOpen}
+          onOpenChange={setFolderDialogOpen}
+          templateName={
+            selectedTemplate
+              ? getTemplateDisplay(selectedTemplate).name
+              : ""
+          }
+          folders={selectedTemplate?.folderStructure ?? []}
+          creating={creating}
+          onConfirm={(folders) => {
+            void handleCreate(folders);
+          }}
+        />
+        </>
+      )}
     </motion.div>
   );
 }

@@ -281,16 +281,18 @@ test.describe("real backend P0 flow", () => {
     await authenticatePage(page);
 
     await page.goto(`/${seed.workspaceSlug}/deal-rooms/new`);
-    await expect(page.getByRole("heading", { name: "New Data Room" })).toBeVisible({ timeout: 30000 });
+    await expect(page.getByRole("heading", { name: "Choose a template" })).toBeVisible({ timeout: 30000 });
 
     // Templates should load.
     await expect(page.getByRole("button", { name: /Startup Fundraising/i }).first()).toBeVisible({ timeout: 30000 });
 
-    const roomName = `E2E Room ${Date.now()}`;
+    const roomName = `E2E-Room-${Date.now()}`;
     await page.getByLabel("Name").fill(roomName);
     await page.getByLabel("Description").fill("End-to-end test deal room");
 
     await page.getByRole("button", { name: "Create data room" }).click();
+    await expect(page.getByRole("dialog")).toBeVisible({ timeout: 10000 });
+    await page.getByTestId("confirm-create-room").click();
 
     // Should redirect to the new room detail.
     await expect(page).toHaveURL(new RegExp(`/${seed.workspaceSlug}/deal-rooms/`), { timeout: 30000 });

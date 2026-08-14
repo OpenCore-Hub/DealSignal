@@ -7,6 +7,7 @@ import i18n from "i18next";
 import { NewDealRoomPage } from "./new";
 import { toast } from "sonner";
 import { ApiError } from "@/lib/apiClient";
+import { useUIStore } from "@/stores/uiStore";
 import type { DealRoomTemplate, DealRoom } from "@/types";
 
 const { getDealRoomTemplatesMock, createDealRoomMock, getBillingInfoMock } = vi.hoisted(() => ({
@@ -76,16 +77,29 @@ const resources = {
     dealRooms: {
       detail: { back: "Back to data rooms", noTemplate: "No matching template structure." },
       new: {
-        title: "New Data Room",
-        subtitle: "Choose a scenario template",
+        title: "Choose a template",
+        breadcrumb: "Data Room",
+        subtitle: "The data room and its folders are created from your selection.",
+        scenario: "Scenario",
         basicInfo: "Basic info",
         name: "Name",
-        namePlaceholder: "e.g. Seed Round Due Diligence",
+        nameRequired: "Required",
+        namePlaceholder: "e.g. Acme Series A",
+        nameError: {
+          empty: "Enter a name.",
+          short: "Use at least 2 characters.",
+          long: "Keep the name under 80 characters.",
+          format: "Include letters or numbers, and do not use < or >.",
+        },
         description: "Description",
+        descriptionOptional: "Optional",
         descriptionPlaceholder: "Describe the purpose",
         enableNda: "Enable NDA",
         enableNdaDescription: "Require NDA signature before access",
-        ndaPlanRequired: "NDA requires Business or higher",
+        ndaFromTemplate: "Members sign before they enter.",
+        ndaPlanRequired: "NDA is on Business and above.",
+        scenarioGroupNda: "NDA",
+        scenarioGroupOpen: "No NDA",
         roomLimitReached: "You've reached the data room limit for your plan. Upgrade to create more.",
         folders: "Folder structure",
         recommendedFiles: "Recommended files",
@@ -97,12 +111,31 @@ const resources = {
         createFailed: "Failed to create data room",
         folderCount: "{{count}} folders",
         folderCount_one: "{{count}} folder",
+        customFolderMeta: "Build your own",
+        customFoldersHint: "No folders yet. Add them after you create the room.",
+        foldersDialog: {
+          title: "Review folders",
+          subtitle: "{{name}} — keep what you need, rename in the list, add a folder or one subfolder under it.",
+          add: "Add folder",
+          addSubfolder: "Add subfolder",
+          addPlaceholder: "Folder name",
+          rename: "Rename",
+          select: "Keep {{name}}",
+          empty: "Add a folder to continue.",
+          create: "Create",
+        },
       },
       permission: {
         public: { label: "Public Distribution" },
         standard: { label: "Standard Due Diligence" },
         confidential: { label: "Confidential Data Room" },
         collaborative: { label: "Collaborative Review" },
+      },
+      templates: {
+        custom: {
+          name: "Completely Custom",
+          description: "Start with an empty room and add your own folders.",
+        },
       },
     },
     common: {
@@ -151,11 +184,25 @@ async function renderPage() {
   return result;
 }
 
+const namePlaceholder = "e.g. Acme Series A";
+
+function fillRoomName(value = "Seed-Round") {
+  fireEvent.change(screen.getByLabelText(/name/i), { target: { value } });
+}
+
+async function confirmFolderDialog() {
+  await waitFor(() => {
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+  fireEvent.click(screen.getByTestId("confirm-create-room"));
+}
+
 describe("NewDealRoomPage", () => {
   beforeEach(() => {
     getDealRoomTemplatesMock.mockReset();
     createDealRoomMock.mockReset();
     getBillingInfoMock.mockReset();
+    useUIStore.getState().setBreadcrumbTail(null);
     vi.mocked(toast.success).mockClear();
     vi.mocked(toast.error).mockClear();
     getDealRoomTemplatesMock.mockResolvedValue({ data: mockTemplates });
@@ -199,34 +246,108 @@ describe("NewDealRoomPage", () => {
     expect(document.querySelectorAll("[data-slot=\"skeleton\"]").length).toBeGreaterThan(0);
   });
 
-  it("renders templates and pre-fills first template", async () => {
+  it("sets the workspace breadcrumb tail to Data Room", async () => {
     await renderPage();
 
-    await waitFor(() => {
-      expect(screen.getByText("Seed Round")).toBeInTheDocument();
-    });
-    expect(screen.getByDisplayValue("Seed Round")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("Early-stage due diligence room")).toBeInTheDocument();
+    expect(useUIStore.getState().breadcrumbTail).toEqual({ label: "Data Room" });
   });
 
-  it("switches template selection and updates form defaults", async () => {
+  it("omits the back link and returns to the list on cancel", async () => {
+    await renderPage();
+
+    expect(screen.queryByText("Back to data rooms")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
+    expect(screen.getByTestId("location")).toHaveTextContent("/acme/deal-rooms");
+  });
+
+  it("renders templates and uses the first template as placeholders", async () => {
     await renderPage();
 
     await waitFor(() => {
       expect(screen.getByText("Seed Round")).toBeInTheDocument();
     });
+    expect(screen.getByPlaceholderText(namePlaceholder)).toHaveValue("");
+    expect(screen.getByPlaceholderText("Early-stage due diligence room")).toHaveValue("");
+    expect(screen.getByRole("button", { name: /create data room/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /seed round/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /series a/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /completely custom/i })).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: /enable nda/i })).toHaveAttribute(
+      "aria-checked",
+      "false",
+    );
+  });
 
-    const nameInput = screen.getByPlaceholderText("e.g. Seed Round Due Diligence") as HTMLInputElement;
-    const descriptionInput = screen.getByPlaceholderText("Describe the purpose") as HTMLInputElement;
-    fireEvent.change(nameInput, { target: { value: "" } });
-    fireEvent.change(descriptionInput, { target: { value: "" } });
+  it("switches template placeholders without filling the form", async () => {
+    await renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("Seed Round")).toBeInTheDocument();
+    });
 
     fireEvent.click(screen.getByText("Series A"));
 
     await waitFor(() => {
-      expect(screen.getByDisplayValue("Series A")).toBeInTheDocument();
+      expect(screen.getByPlaceholderText("Growth-stage data room")).toHaveValue("");
     });
-    expect(screen.getByDisplayValue("Growth-stage data room")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(namePlaceholder)).toHaveValue("");
+    expect(screen.getByRole("button", { name: /create data room/i })).toBeDisabled();
+    expect(screen.getByRole("switch", { name: /enable nda/i })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+  });
+
+  it("enables create only after the name passes validation", async () => {
+    await renderPage();
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText(namePlaceholder)).toBeInTheDocument();
+    });
+    const nameInput = screen.getByLabelText(/name/i);
+    fireEvent.change(nameInput, { target: { value: "A < B" } });
+    fireEvent.blur(nameInput);
+    expect(
+      screen.getByText("Include letters or numbers, and do not use < or >."),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /create data room/i })).toBeDisabled();
+    fillRoomName("创业融资");
+    expect(screen.getByRole("button", { name: /create data room/i })).toBeEnabled();
+  });
+
+  it("uses an opaque slug for CJK-only names instead of the template scenario", async () => {
+    createDealRoomMock.mockResolvedValue(createdRoom);
+    await renderPage();
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText(namePlaceholder)).toBeInTheDocument();
+    });
+    fillRoomName("创业融资");
+    fireEvent.click(screen.getByRole("button", { name: /create data room/i }));
+    await confirmFolderDialog();
+    await waitFor(() => {
+      expect(createDealRoomMock).toHaveBeenCalled();
+    });
+    expect(createDealRoomMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "创业融资",
+        slug: expect.stringMatching(/^room-[0-9a-f]{10}$/),
+      }),
+    );
+  });
+
+  it("still shows completely custom when the API catalog omits it", async () => {
+    await renderPage();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /completely custom/i })).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByText("Completely Custom"));
+    expect(screen.getByRole("button", { name: /build your own/i })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByRole("switch", { name: /enable nda/i })).toHaveAttribute(
+      "aria-checked",
+      "false",
+    );
   });
 
   it("creates a deal room and navigates to detail", async () => {
@@ -234,19 +355,24 @@ describe("NewDealRoomPage", () => {
     await renderPage();
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /create data room/i })).toBeEnabled();
+      expect(screen.getByPlaceholderText(namePlaceholder)).toBeInTheDocument();
     });
+    fillRoomName("Seed-Round");
+    expect(screen.getByRole("button", { name: /create data room/i })).toBeEnabled();
 
     fireEvent.click(screen.getByRole("button", { name: /create data room/i }));
+    expect(createDealRoomMock).not.toHaveBeenCalled();
+    await confirmFolderDialog();
 
     await waitFor(() => {
       expect(createDealRoomMock).toHaveBeenCalledWith(
         expect.objectContaining({
-          name: "Seed Round",
+          name: "Seed-Round",
           slug: "seed-round",
-          description: "Early-stage due diligence room",
+          description: "",
           template: "startup-fundraising",
           ndaEnabled: false,
+          folders: [{ name: "Pitch", path: "/pitch", description: "Pitch materials", sort_order: 0 }],
         })
       );
     });
@@ -255,6 +381,71 @@ describe("NewDealRoomPage", () => {
     await waitFor(() => {
       expect(screen.getByTestId("location")).toHaveTextContent("/acme/deal-rooms/room-1");
     });
+  });
+
+  it("creates the room from the folders edited in the dialog", async () => {
+    createDealRoomMock.mockResolvedValue(createdRoom);
+    await renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText(namePlaceholder)).toBeInTheDocument();
+    });
+    fillRoomName("Seed-Round");
+    fireEvent.click(screen.getByRole("button", { name: /create data room/i }));
+    await waitFor(() => {
+      expect(screen.getByRole("dialog")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /^rename$/i }));
+    fireEvent.change(screen.getByLabelText("Folder name"), { target: { value: "Deck" } });
+    fireEvent.blur(screen.getByLabelText("Folder name"));
+    fireEvent.click(screen.getByRole("button", { name: /add subfolder/i }));
+    fireEvent.change(screen.getByLabelText("Folder name"), { target: { value: "Annex" } });
+    fireEvent.blur(screen.getByLabelText("Folder name"));
+
+    fireEvent.click(screen.getByTestId("confirm-create-room"));
+    await waitFor(() => {
+      expect(createDealRoomMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          folders: [
+            { name: "Deck", path: "/deck", sort_order: 0 },
+            { name: "Annex", path: "/deck/annex", sort_order: 1 },
+          ],
+        }),
+      );
+    });
+  });
+
+  it("retries with a suffixed slug when the URL is already taken", async () => {
+    createDealRoomMock
+      .mockRejectedValueOnce(
+        new ApiError({
+          status: 409,
+          code: "duplicate_slug",
+          message: "a data room with this URL already exists",
+          requestId: "req_slug",
+        }),
+      )
+      .mockResolvedValueOnce(createdRoom);
+    await renderPage();
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText(namePlaceholder)).toBeInTheDocument();
+    });
+    fillRoomName("Seed-Round");
+    fireEvent.click(screen.getByRole("button", { name: /create data room/i }));
+    await confirmFolderDialog();
+    await waitFor(() => {
+      expect(createDealRoomMock).toHaveBeenCalledTimes(2);
+    });
+    expect(createDealRoomMock).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ slug: "seed-round" }),
+    );
+    expect(createDealRoomMock).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ slug: "seed-round-2" }),
+    );
+    expect(toast.success).toHaveBeenCalledWith("Data room created");
   });
 
   it("disables create and shows hint when room quota is exhausted", async () => {
@@ -282,7 +473,34 @@ describe("NewDealRoomPage", () => {
     expect(screen.getByRole("button", { name: /create data room/i })).toBeDisabled();
   });
 
-  it("locks NDA off when the plan lacks NDA", async () => {
+  it("turns NDA on for a confidential scenario, without requiring a manual toggle", async () => {
+    createDealRoomMock.mockResolvedValue({ ...createdRoom, ndaEnabled: true });
+    await renderPage();
+    await waitFor(() => {
+      expect(screen.getByText("Series A")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByText("Series A"));
+    await waitFor(() => {
+      expect(screen.getByRole("switch", { name: /enable nda/i })).toHaveAttribute(
+        "aria-checked",
+        "true",
+      );
+    });
+    fillRoomName("Series-A-Room");
+    fireEvent.click(screen.getByRole("button", { name: /create data room/i }));
+    await confirmFolderDialog();
+    await waitFor(() => {
+      expect(createDealRoomMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          template: "series-a-plus",
+          ndaEnabled: true,
+        }),
+      );
+    });
+  });
+
+  it("forces NDA off when the plan lacks NDA, even for confidential scenarios", async () => {
+    createDealRoomMock.mockResolvedValue(createdRoom);
     getBillingInfoMock.mockResolvedValue({
       plan: "free",
       period: "monthly",
@@ -305,12 +523,22 @@ describe("NewDealRoomPage", () => {
       expect(screen.getByText("Series A")).toBeInTheDocument();
     });
     fireEvent.click(screen.getByText("Series A"));
-    const ndaSwitch = await screen.findByRole("switch", { name: /enable nda/i });
     await waitFor(() => {
-      expect(ndaSwitch).toBeDisabled();
-      expect(ndaSwitch).not.toBeChecked();
+      expect(screen.getByText(/nda is on business and above/i)).toBeInTheDocument();
     });
-    expect(screen.getByText(/nda requires business or higher/i)).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: /enable nda/i })).toBeDisabled();
+    expect(screen.getByRole("switch", { name: /enable nda/i })).toHaveAttribute(
+      "aria-checked",
+      "false",
+    );
+    fillRoomName("Series-A-Room");
+    fireEvent.click(screen.getByRole("button", { name: /create data room/i }));
+    await confirmFolderDialog();
+    await waitFor(() => {
+      expect(createDealRoomMock).toHaveBeenCalledWith(
+        expect.objectContaining({ ndaEnabled: false }),
+      );
+    });
   });
 
   it("surfaces plan_limit_rooms from the API via toast", async () => {
@@ -324,9 +552,11 @@ describe("NewDealRoomPage", () => {
     );
     await renderPage();
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /create data room/i })).toBeEnabled();
+      expect(screen.getByPlaceholderText(namePlaceholder)).toBeInTheDocument();
     });
+    fillRoomName("Seed-Round");
     fireEvent.click(screen.getByRole("button", { name: /create data room/i }));
+    await confirmFolderDialog();
     await waitFor(() => {
       expect(toast.error).toHaveBeenCalledWith(
         "You've reached the data room limit for your plan. Upgrade to create more.",

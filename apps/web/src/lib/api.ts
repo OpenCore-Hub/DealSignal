@@ -1548,6 +1548,8 @@ export const api = {
   },
   getDealRoomById: (id: string) =>
     request<DealRoom>(getWorkspaceSlug(), `/deal-rooms/${id}`),
+  deleteDealRoom: (id: string) =>
+    request<void>(getWorkspaceSlug(), `/deal-rooms/${id}`, { method: "DELETE" }),
   getDealRoomAnalytics: (roomId: string) =>
     request<DealRoomAnalytics>(getWorkspaceSlug(), `/deal-rooms/${roomId}/analytics`),
   getDealRoomKnowledge: (roomId: string) =>
@@ -1749,6 +1751,7 @@ export const api = {
     template?: string;
     ndaEnabled?: boolean;
     requiresApproval?: boolean;
+    folders?: { name: string; path?: string; description?: string; sort_order?: number }[];
   }) =>
     request<DealRoom>(getWorkspaceSlug(), "/deal-rooms", {
       method: "POST",
@@ -1814,6 +1817,14 @@ export const api = {
   inviteDealRoomMember: (roomId: string, payload: { email: string; role: DealRoomMember["role"] }) =>
     request<{ data: DealRoomMember }>(getWorkspaceSlug(), `/deal-rooms/${roomId}/members`, {
       method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  patchDealRoomNdaAgreement: (
+    roomId: string,
+    payload: { nda_template_id?: string; nda_document_id?: string },
+  ) =>
+    request<DealRoom>(getWorkspaceSlug(), `/deal-rooms/${roomId}/nda-agreement`, {
+      method: "PATCH",
       body: JSON.stringify(payload),
     }),
   removeDealRoomMember: (roomId: string, memberId: string) =>

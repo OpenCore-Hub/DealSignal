@@ -336,7 +336,7 @@ export interface PermissionFields {
   indexFileEnabled: boolean;
   screenshotProtectionEnabled?: boolean;
   expiryDays: number | "custom";
-  maxViews: number | "unlimited";
+  maxViews: number | "unlimited" | "custom";
 }
 
 export interface PermissionConfig extends PermissionFields {
@@ -348,6 +348,9 @@ export interface PermissionConfig extends PermissionFields {
    * round-trip drift from expiryDays → expiresAt → expiryDays conversion.
    * Cleared whenever expiryDays is changed by the user. */
   _editExpiresAt?: string;
+  /** Custom max-views count while the Security select is "custom".
+   * Cleared whenever maxViews is switched to a preset or unlimited. */
+  _editMaxViews?: number;
 }
 
 export interface Evidence {
@@ -573,6 +576,8 @@ export interface DealRoom {
   memberCount: number;
   pendingApprovals: number;
   ndaEnabled: boolean;
+  ndaTemplateId?: string;
+  ndaDocumentId?: string;
   requiresApproval?: boolean;
   isPublic?: boolean;
   createdAt: string;
@@ -1232,7 +1237,7 @@ export interface DealRoomTemplate {
   name: string;
   description: string;
   scenario: DealRoomTemplateScenario;
-  folderStructure: { name: string; description?: string }[];
+  folderStructure: { name: string; description?: string; path?: string }[];
   recommendedFiles: string[];
   defaultPermissionLevel: PermissionPreset;
   ndaEnabled: boolean;

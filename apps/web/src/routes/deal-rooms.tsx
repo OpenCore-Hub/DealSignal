@@ -1,18 +1,27 @@
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
-import { Plus, Lock, Folder, MagnifyingGlass } from "@phosphor-icons/react";
+import { Plus, Lock, Folder, MagnifyingGlass, DotsThree } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { PageHeader } from "@/components/common/PageHeader";
 import { EmptyState } from "@/components/common/EmptyState";
+import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import { api } from "@/lib/api";
+import { apiErrorMessage } from "@/lib/apiErrors";
 import { formatRelativeTime } from "@/lib/formatters";
 import { usageAtCap } from "@/lib/planQuota";
 import { useAsyncData } from "@/hooks/useAsyncData";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import type { DealRoom } from "@/types";
 import { useWorkspaceAccess } from "@/hooks/useWorkspaceAccess";
 
@@ -52,6 +61,8 @@ export function DealRoomsPage() {
   }, [accessLoading, canWrite]);
   const roomsAtCap = billing ? usageAtCap(billing.roomsUsed, billing.roomsLimit) : false;
   const canCreateRoom = canWrite && !roomsAtCap;
+  const [pendingDelete, setPendingDelete] = useState<DealRoom | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const rooms = data?.data;
   const pagination = data?.pagination;
@@ -79,6 +90,25 @@ export function DealRoomsPage() {
 
   const handleCardClick = (roomId: string) => {
     navigateToRoom(roomId);
+  };
+
+  const handleDeleteRoom = async () => {
+    if (!pendingDelete) return;
+    setDeleting(true);
+    try {
+      await api.deleteDealRoom(pendingDelete.id);
+      toast.success(t("card.deleted"));
+      setPendingDelete(null);
+      if ((rooms?.length ?? 0) <= 1 && page > 1) {
+        setPage((current) => Math.max(1, current - 1));
+      } else {
+        await refetch();
+      }
+    } catch (error) {
+      toast.error(apiErrorMessage(error, { fallback: "deleteFailed", messageKey: "dealRooms:card.deleteFailed" }));
+    } finally {
+      setDeleting(false);
+    }
   };
 
   const isActive = (room: DealRoom) => room.status === "active";
@@ -205,6 +235,44 @@ export function DealRoomsPage() {
                         {room.ndaEnabled && (
                           <Lock size={14} className="ml-1 text-muted-foreground" />
                         )}
+                        {room.isAdmin ? (
+                          <DropdownMenu>
+                            <DropdownMenuTrigger
+                              render={(props) => (
+                                <Button
+                                  type="button"
+                                  size="icon-sm"
+                                  variant="ghost"
+                                  className="-mr-1.5 h-8 w-8"
+                                  aria-label={tc("moreActions")}
+                                  data-testid={`deal-room-menu-${room.id}`}
+                                  {...props}
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    props.onClick?.(event);
+                                  }}
+                                  onPointerDown={(event) => {
+                                    event.stopPropagation();
+                                    props.onPointerDown?.(event);
+                                  }}
+                                >
+                                  <DotsThree size={18} />
+                                </Button>
+                              )}
+                            />
+                            <DropdownMenuContent
+                              align="end"
+                              onClick={(event) => event.stopPropagation()}
+                            >
+                              <DropdownMenuItem
+                                variant="destructive"
+                                onClick={() => setPendingDelete(room)}
+                              >
+                                {tc("delete")}
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        ) : null}
                       </div>
                     </div>
                     {(room.tags?.length ?? 0) > 0 && (
@@ -291,6 +359,21 @@ export function DealRoomsPage() {
           )}
         </div>
       </>)}
+      <ConfirmDialog
+        open={pendingDelete != null}
+        title={t("card.deleteTitle")}
+        description={t("card.deleteDescription", { name: pendingDelete?.name ?? "" })}
+        confirmLabel={tc("delete")}
+        cancelLabel={tc("cancel")}
+        destructive
+        loading={deleting}
+        onConfirm={() => {
+          void handleDeleteRoom();
+        }}
+        onCancel={() => {
+          if (!deleting) setPendingDelete(null);
+        }}
+      />
     </div>
   );
 }

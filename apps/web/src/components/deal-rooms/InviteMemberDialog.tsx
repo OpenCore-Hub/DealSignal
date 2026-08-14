@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { apiErrorMessage } from "@/lib/apiErrors";
 import { Envelope, Minus, Plus, UserPlus } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
@@ -25,16 +25,30 @@ import { api } from "@/lib/api";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import type { DealRoomMemberRole } from "@/types";
+import {
+  RoomNdaAgreementPicker,
+  type RoomNdaSelection,
+} from "@/components/deal-rooms/RoomNdaAgreementPicker";
 
 interface InviteMemberDialogProps {
   roomId: string;
+  ndaEnabled?: boolean;
+  ndaTemplateId?: string;
+  ndaDocumentId?: string;
   onInvited: () => void;
   children?: React.ReactNode;
 }
 
 const isValidEmail = (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 
-export function InviteMemberDialog({ roomId, onInvited, children }: InviteMemberDialogProps) {
+export function InviteMemberDialog({
+  roomId,
+  ndaEnabled: ndaEnabledProp,
+  ndaTemplateId: ndaTemplateIdProp,
+  ndaDocumentId: ndaDocumentIdProp,
+  onInvited,
+  children,
+}: InviteMemberDialogProps) {
   const { t } = useTranslation("dealRooms");
   const { t: tc } = useTranslation("common");
   const [open, setOpen] = useState(false);
@@ -43,7 +57,33 @@ export function InviteMemberDialog({ roomId, onInvited, children }: InviteMember
   const [submitting, setSubmitting] = useState(false);
   const [showErrors, setShowErrors] = useState(false);
   const [touched, setTouched] = useState<Set<number>>(new Set());
+  const [ndaEnabled, setNdaEnabled] = useState(Boolean(ndaEnabledProp));
+  const [ndaSelection, setNdaSelection] = useState<RoomNdaSelection>({
+    ndaTemplateId: ndaTemplateIdProp ?? "",
+    ndaDocumentId: ndaDocumentIdProp ?? "",
+  });
   const listRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setNdaEnabled(Boolean(ndaEnabledProp));
+    setNdaSelection({
+      ndaTemplateId: ndaTemplateIdProp ?? "",
+      ndaDocumentId: ndaDocumentIdProp ?? "",
+    });
+    let cancelled = false;
+    void api.getDealRoomById(roomId).then((room) => {
+      if (cancelled) return;
+      setNdaEnabled(Boolean(room.ndaEnabled));
+      setNdaSelection({
+        ndaTemplateId: room.ndaTemplateId ?? "",
+        ndaDocumentId: room.ndaDocumentId ?? "",
+      });
+    }).catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [open, roomId, ndaEnabledProp, ndaTemplateIdProp, ndaDocumentIdProp]);
 
   const handleEmailChange = (index: number, value: string) => {
     const next = [...emails];
@@ -71,7 +111,6 @@ export function InviteMemberDialog({ roomId, onInvited, children }: InviteMember
     if (e.key === "Enter") {
       e.preventDefault();
       addEmailField(index);
-      // Focus the newly added input on the next render.
       setTimeout(() => {
         const inputs = listRef.current?.querySelectorAll("input[type='email']");
         const nextInput = inputs?.[index + 1] as HTMLInputElement | undefined;
@@ -79,6 +118,8 @@ export function InviteMemberDialog({ roomId, onInvited, children }: InviteMember
       }, 0);
     }
   };
+
+  const ndaMissing = ndaEnabled && !ndaSelection.ndaTemplateId && !ndaSelection.ndaDocumentId;
 
   const handleInvite = async () => {
     const trimmedEmails = emails.map((e) => e.trim()).filter(Boolean);
@@ -91,8 +132,21 @@ export function InviteMemberDialog({ roomId, onInvited, children }: InviteMember
       return;
     }
 
+    if (ndaMissing) {
+      setShowErrors(true);
+      toast.error(t("members.ndaAgreementRequired"));
+      return;
+    }
+
     setSubmitting(true);
     try {
+      if (ndaEnabled && (ndaSelection.ndaTemplateId || ndaSelection.ndaDocumentId)) {
+        await api.patchDealRoomNdaAgreement(roomId, {
+          nda_template_id: ndaSelection.ndaTemplateId || undefined,
+          nda_document_id: ndaSelection.ndaDocumentId || undefined,
+        });
+      }
+
       const results = await Promise.allSettled(
         trimmedEmails.map((email) => api.inviteDealRoomMember(roomId, { email, role }))
       );
@@ -136,13 +190,15 @@ export function InviteMemberDialog({ roomId, onInvited, children }: InviteMember
           {t("detail.invite")}
         </Button>
       )} />
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <UserPlus size={20} />
             {t("members.inviteTitle")}
           </DialogTitle>
-          <DialogDescription>{t("members.inviteDescription")}</DialogDescription>
+          <DialogDescription>
+            {ndaEnabled ? t("members.inviteDescriptionNda") : t("members.inviteDescription")}
+          </DialogDescription>
         </DialogHeader>
         <div className="space-y-4 py-2">
           <div className="space-y-2">
@@ -243,12 +299,24 @@ export function InviteMemberDialog({ roomId, onInvited, children }: InviteMember
               </SelectContent>
             </Select>
           </div>
+          {ndaEnabled ? (
+            <RoomNdaAgreementPicker
+              value={ndaSelection}
+              onChange={setNdaSelection}
+              disabled={submitting}
+              showError={showErrors}
+            />
+          ) : null}
         </div>
         <DialogFooter>
           <Button type="button" variant="outline" onClick={() => setOpen(false)}>
             {tc("cancel")}
           </Button>
-          <Button type="button" onClick={handleInvite} disabled={!hasValidEmail || submitting}>
+          <Button
+            type="button"
+            onClick={handleInvite}
+            disabled={!hasValidEmail || submitting || ndaMissing}
+          >
             {submitting ? t("members.inviting") : t("detail.invite")}
           </Button>
         </DialogFooter>

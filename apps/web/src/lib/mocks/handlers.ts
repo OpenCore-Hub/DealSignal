@@ -740,6 +740,24 @@ type MockKnowledgeArchive = {
 };
 const mockKnowledgeArchivesByRoom = new Map<string, MockKnowledgeArchive[]>();
 
+function purgeMockKnowledgeForRoom(roomId: string) {
+  const sessions = mockKnowledgeSessionsByRoom.get(roomId) ?? [];
+  for (const session of sessions) {
+    mockKnowledgeTurnsBySession.delete(session.id);
+  }
+  mockKnowledgeSessionsByRoom.delete(roomId);
+  mockKnowledgeCorpusOverrideByRoom.delete(roomId);
+  mockKnowledgeMissionByRoom.delete(roomId);
+  mockKnowledgeEvalCandidatesByRoom.delete(roomId);
+  mockKnowledgeArchivesByRoom.delete(roomId);
+  for (const key of [...mockKnowledgeTurnByClientRequest.keys()]) {
+    if (key.startsWith(`${roomId}\0`)) {
+      mockKnowledgeTurnByClientRequest.delete(key);
+    }
+  }
+  void persistKnowledgeQAState();
+}
+
 function seedDefaultKnowledgeArchives() {
   // room_1 demo tombstone for corpus landing / Phase U e2e.
   mockKnowledgeArchivesByRoom.set("room_1", [
@@ -1545,6 +1563,55 @@ function getRoomFolders(room: DealRoom): DealRoomFolder[] {
     return [{ path: "/general", name: "General", sort_order: 0 }];
   }
   return folders.filter((f) => f.path !== "/");
+}
+
+function slugPathFromName(name: string): string {
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "folder";
+  return `/${slug}`;
+}
+
+/** Prefer the create-dialog payload; template folders are only a preset when `folders` is omitted. */
+function foldersForCreatedRoom(body: {
+  template_type?: string;
+  folders?: { name?: string; path?: string; description?: string }[];
+}): DealRoomFolder[] {
+  if (Array.isArray(body.folders)) {
+    const used = new Set<string>();
+    const out: DealRoomFolder[] = [];
+    for (const folder of body.folders) {
+      const name = String(folder.name ?? "").trim();
+      if (!name) continue;
+      let path = String(folder.path ?? "").trim();
+      if (!path || path === "/") path = slugPathFromName(name);
+      if (!path.startsWith("/")) path = `/${path}`;
+      let candidate = path;
+      let n = 2;
+      while (used.has(candidate)) {
+        candidate = `${path}-${n}`;
+        n += 1;
+      }
+      used.add(candidate);
+      out.push({
+        path: candidate,
+        name,
+        description: folder.description,
+        sort_order: out.length,
+      });
+      if (out.length >= 40) break;
+    }
+    return out.length > 0 ? out : [{ path: "/general", name: "General", sort_order: 0 }];
+  }
+  const scenario = body.template_type?.replace(/_/g, "-") ?? "custom";
+  const template = mockDealRoomTemplates.find((t) => t.scenario === scenario);
+  if (!template || template.folderStructure.length === 0) {
+    return [{ path: "/general", name: "General", sort_order: 0 }];
+  }
+  return template.folderStructure.map((folder, index) => ({
+    path: slugPathFromName(folder.name),
+    name: folder.name,
+    description: folder.description,
+    sort_order: index,
+  }));
 }
 
 function getRoomFolderDocs(room: DealRoom): DealRoomFolderDocs[] {
@@ -2662,6 +2729,37 @@ export const handlers = [
     const room = findRoom(params.id as string);
     if (!room) return new HttpResponse(null, { status: 404 });
     return HttpResponse.json(room);
+  }),
+
+  http.delete("*/api/workspaces/:workspaceSlug/deal-rooms/:id", ({ params }) => {
+    const roomId = params.id as string;
+    const index = mockDealRooms.findIndex((room) => room.id === roomId);
+    if (index < 0) return new HttpResponse(null, { status: 404 });
+    const room = mockDealRooms[index]!;
+    const docIds = new Set<string>();
+    for (const fd of getRoomFolderDocs(room)) {
+      for (const d of fd.documents) {
+        if (d.document_id) docIds.add(d.document_id);
+      }
+    }
+    mockDealRooms.splice(index, 1);
+    for (const docId of docIds) {
+      const stillInAnyRoom = mockDealRooms.some((r) =>
+        (r.documents ?? []).some((fd) => fd.documents.some((d) => d.document_id === docId)),
+      );
+      if (!stillInAnyRoom) {
+        const libDoc = mockDocuments.find((d) => d.id === docId);
+        if (libDoc?.category === "deal_room") libDoc.category = "general";
+      }
+    }
+    for (const link of mockLinks) {
+      if (link.dealRoomId === roomId && link.status !== "deleted") {
+        link.status = "deleted";
+        link.isActive = false;
+      }
+    }
+    purgeMockKnowledgeForRoom(roomId);
+    return new HttpResponse(null, { status: 204 });
   }),
 
   http.get("*/api/workspaces/:workspaceSlug/deal-rooms/:id/analytics", ({ params }) => {
@@ -3886,6 +3984,7 @@ export const handlers = [
       template_type?: string;
       requires_nda?: boolean;
       requires_approval?: boolean;
+      folders?: { name?: string; path?: string; description?: string }[];
     };
     if (mockDealRooms.some((r) => r.slug === body.slug)) {
       return HttpResponse.json(
@@ -3895,14 +3994,7 @@ export const handlers = [
     }
     const scenario = body.template_type?.replace(/_/g, "-") ?? "custom";
     const template = mockDealRoomTemplates.find((t) => t.scenario === scenario);
-    const folders: DealRoomFolder[] = template
-      ? template.folderStructure.map((f, i) => ({
-          path: `/${f.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
-          name: f.name,
-          description: f.description,
-          sort_order: i,
-        }))
-      : [{ path: "/general", name: "General", sort_order: 0 }];
+    const folders = foldersForCreatedRoom(body);
     const newRoom: DealRoom = {
       id: generateId("dr"),
       name: body.name,
@@ -4288,6 +4380,21 @@ export const handlers = [
     room.members = members;
     updateRoomDerivedFields(room);
     return HttpResponse.json({ data: newMember }, { status: 201 });
+  }),
+
+  http.patch("*/api/workspaces/:workspaceSlug/deal-rooms/:id/nda-agreement", async ({ request, params }) => {
+    const room = findRoom(params.id as string);
+    if (!room) return new HttpResponse(null, { status: 404 });
+    const body = (await request.json()) as { nda_template_id?: string; nda_document_id?: string };
+    if (room.ndaEnabled && !body.nda_template_id && !body.nda_document_id) {
+      return HttpResponse.json(
+        { code: "nda_agreement_required", message: "nda agreement is required" },
+        { status: 400 },
+      );
+    }
+    room.ndaTemplateId = body.nda_template_id || undefined;
+    room.ndaDocumentId = body.nda_document_id || undefined;
+    return HttpResponse.json(room);
   }),
 
   http.delete("*/api/workspaces/:workspaceSlug/deal-rooms/:id/members/:memberId", ({ params }) => {

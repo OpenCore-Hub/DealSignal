@@ -170,6 +170,16 @@ describe("toCreateLinkPayload", () => {
     expect(payload.max_access_count).toBe(50);
   });
 
+  it("sets max_access_count from custom max views", () => {
+    const config: PermissionConfig = {
+      ...buildConfigFromPreset("public"),
+      maxViews: "custom",
+      _editMaxViews: 25,
+    };
+    const payload = toCreateLinkPayload(["doc-1"], config);
+    expect(payload.max_access_count).toBe(25);
+  });
+
   it("does not set max_access_count for unlimited views", () => {
     const config = buildConfigFromPreset("public");
     const payload = toCreateLinkPayload(["doc-1"], config);

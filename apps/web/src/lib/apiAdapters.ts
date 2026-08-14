@@ -152,11 +152,22 @@ export function toCreateLinkPayload(
     payload.expires_at = expiresAt.toISOString();
   }
 
-  if (typeof config.maxViews === "number") {
+  if (config.maxViews === "custom") {
+    if (typeof config._editMaxViews === "number" && config._editMaxViews > 0) {
+      payload.max_access_count = config._editMaxViews;
+    }
+  } else if (typeof config.maxViews === "number") {
     payload.max_access_count = config.maxViews;
   }
 
   return payload;
+}
+
+export interface CreateDealRoomFolderPayload {
+  name: string;
+  path?: string;
+  description?: string;
+  sort_order?: number;
 }
 
 export interface CreateDealRoomPayload {
@@ -166,6 +177,7 @@ export interface CreateDealRoomPayload {
   template_type?: string;
   requires_nda?: boolean;
   requires_approval?: boolean;
+  folders?: CreateDealRoomFolderPayload[];
 }
 
 export function toCreateDealRoomPayload(
@@ -176,6 +188,7 @@ export function toCreateDealRoomPayload(
     template?: string;
     ndaEnabled?: boolean;
     requiresApproval?: boolean;
+    folders?: CreateDealRoomFolderPayload[];
   },
 ): CreateDealRoomPayload {
   return {
@@ -185,6 +198,7 @@ export function toCreateDealRoomPayload(
     template_type: input.template,
     requires_nda: input.ndaEnabled,
     requires_approval: input.requiresApproval,
+    folders: input.folders,
   };
 }
 

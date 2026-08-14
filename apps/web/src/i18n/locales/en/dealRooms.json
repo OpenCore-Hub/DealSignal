@@ -53,7 +53,11 @@
   },
   "card": {
     "viewDocuments": "View Documents",
-    "noViewsYet": "No views yet"
+    "noViewsYet": "No views yet",
+    "deleteTitle": "Delete data room",
+    "deleteDescription": "Delete “{{name}}”? Documents return to the library. Share links, knowledge, and analytics for this room will be removed. This cannot be undone.",
+    "deleted": "Data room deleted",
+    "deleteFailed": "Failed to delete data room"
   },
   "detail": {
     "back": "Back to data rooms",
@@ -507,6 +511,7 @@
     "description": "Current room policy at a glance. Editable controls will expand here.",
     "moreComing": "Freeze, default watermark, and retention controls are coming soon.",
     "inviteMembers": "Invite members",
+    "ndaSaved": "NDA agreement saved",
     "enabled": "On",
     "disabled": "Off",
     "fields": {
@@ -766,16 +771,29 @@
     }
   },
   "new": {
-    "title": "New Data Room",
-    "subtitle": "Choose a scenario template and the system will generate folder structure and a recommended file list.",
+    "title": "Choose a template",
+    "breadcrumb": "Data Room",
+    "subtitle": "The data room and its folders are created from your selection.",
+    "scenario": "Scenario",
     "basicInfo": "Basic info",
     "name": "Name",
-    "namePlaceholder": "e.g. Startup Fundraising",
+    "nameRequired": "Required",
+    "namePlaceholder": "e.g. Acme Series A",
+    "nameError": {
+      "empty": "Enter a name.",
+      "short": "Use at least 2 characters.",
+      "long": "Keep the name under 80 characters.",
+      "format": "Include letters or numbers, and do not use < or >."
+    },
     "description": "Description",
+    "descriptionOptional": "Optional",
     "descriptionPlaceholder": "Describe the purpose and target audience",
     "enableNda": "Enable NDA",
     "enableNdaDescription": "Require NDA signature before access",
-    "ndaPlanRequired": "NDA requires Business or higher",
+    "ndaFromTemplate": "Members sign before they enter.",
+    "ndaPlanRequired": "NDA is on Business and above.",
+    "scenarioGroupNda": "NDA",
+    "scenarioGroupOpen": "No NDA",
     "roomLimitReached": "You've reached the data room limit for your plan. Upgrade to create more.",
     "folders": "Folder structure",
     "recommendedFiles": "Recommended files",
@@ -787,6 +805,19 @@
     "createFailed": "Failed to create data room",
     "folderCount_one": "{{count}} folder",
     "folderCount_other": "{{count}} folders",
+    "customFolderMeta": "Build your own",
+    "customFoldersHint": "No folders yet. Add them after you create the room.",
+    "foldersDialog": {
+      "title": "Review folders",
+      "subtitle": "{{name}} — keep what you need, rename in the list, add a folder or one subfolder under it.",
+      "add": "Add folder",
+      "addSubfolder": "Add subfolder",
+      "addPlaceholder": "Folder name",
+      "rename": "Rename",
+      "select": "Keep {{name}}",
+      "empty": "Add a folder to continue.",
+      "create": "Create"
+    },
     "previousTemplate": "Previous template",
     "nextTemplate": "Next template"
   },
@@ -826,6 +857,10 @@
     "sales-dataroom": {
       "name": "Sales Data Room",
       "description": "Data room for enterprise sales, covering sales materials, proposals, contracts, product info, customer references and security compliance."
+    },
+    "custom": {
+      "name": "Completely Custom",
+      "description": "Start with an empty room and add your own folders."
     }
   },
   "folders": {
@@ -925,6 +960,12 @@
   "members": {
     "inviteTitle": "Invite members",
     "inviteDescription": "Invite people to access this data room.",
+    "inviteDescriptionNda": "Invite people to this data room. They must sign the selected NDA before they can enter.",
+    "ndaAgreement": "NDA agreement",
+    "ndaAgreementHint": "Every member of this room signs the same agreement.",
+    "ndaAgreementPlaceholder": "Select an NDA agreement",
+    "ndaAgreementRequired": "Select an NDA agreement before inviting members",
+    "ndaAgreementEmpty": "No NDA agreements yet. Add one in Agreements.",
     "email": "Email",
     "emailPlaceholder": "investor@example.com",
     "role": "Role",

@@ -42,6 +42,7 @@ async function withI18n(ui: React.ReactElement) {
             description: "Policy",
             moreComing: "More coming",
             inviteMembers: "Invite members",
+            ndaSaved: "NDA agreement saved",
             enabled: "On",
             disabled: "Off",
             fields: {
@@ -55,12 +56,50 @@ async function withI18n(ui: React.ReactElement) {
             stageHint: "Derived",
             status: { active: "Active", archived: "Archived", pending: "Pending" },
           },
+          members: {
+            ndaAgreement: "NDA agreement",
+            ndaAgreementHint: "Every member of this room signs the same agreement.",
+            ndaAgreementPlaceholder: "Select an NDA agreement",
+            ndaAgreementRequired: "Select an NDA agreement before inviting members",
+            ndaAgreementEmpty: "No NDA agreements yet.",
+            inviteTitle: "Invite members",
+            inviteDescription: "Invite people",
+            inviteDescriptionNda: "They must sign the NDA.",
+          },
+          detail: { invite: "Invite" },
         },
       },
     },
   });
   return render(<I18nextProvider i18n={instance}>{ui}</I18nextProvider>);
 }
+
+vi.mock("@/hooks/useWorkspaceAccess", () => ({
+  useWorkspaceAccess: () => ({
+    role: "owner",
+    loading: false,
+    canRead: true,
+    canWrite: true,
+    canManage: true,
+    isGuest: false,
+  }),
+}));
+
+vi.mock("@/lib/api", () => ({
+  api: {
+    getWorkspaces: vi.fn().mockResolvedValue({ data: [] }),
+    listNDATemplates: vi.fn().mockResolvedValue({ data: [] }),
+    getDocuments: vi.fn().mockResolvedValue({ data: [] }),
+    getDealRoomById: vi.fn().mockResolvedValue({
+      id: "room-1",
+      ndaEnabled: true,
+      ndaTemplateId: "",
+      ndaDocumentId: "",
+    }),
+    patchDealRoomNdaAgreement: vi.fn(),
+    inviteDealRoomMember: vi.fn(),
+  },
+}));
 
 describe("deal room nav B′ pieces", () => {
   it("deriveRoomStage uses active links", () => {
