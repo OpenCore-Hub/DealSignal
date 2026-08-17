@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router";
-import { Combobox } from "@base-ui/react/combobox";
-import { CaretDown, Check, FileText } from "@phosphor-icons/react";
+import { FileText } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { DocumentAnalytics } from "@/components/documents/DocumentAnalytics";
 import { DocumentVisitorsCard } from "@/components/documents/DocumentVisitorsCard";
+import { InsightsDocumentPicker } from "@/components/insights/InsightsDocumentPicker";
 import {
   InsightsRangeControls,
   useInsightsRange,
@@ -16,28 +16,20 @@ import { EmptyState } from "@/components/common/EmptyState";
 import { useAsyncData } from "@/hooks/useAsyncData";
 import { api } from "@/lib/api";
 import { documentDetailPath } from "@/lib/documentDetailNav";
-import { cn } from "@/lib/utils";
+import { mergeInsightDocuments } from "@/lib/insightsDocumentPicker";
 import { useTranslation } from "react-i18next";
-import type { Document } from "@/types";
 
-export function mergeInsightDocuments(general: Document[], dealRoom: Document[]): Document[] {
-  const byId = new Map<string, Document>();
-  for (const d of [...general, ...dealRoom]) {
-    byId.set(d.id, d);
-  }
-  return Array.from(byId.values()).sort((a, b) =>
-    a.title.localeCompare(b.title, undefined, { sensitivity: "base" }),
-  );
-}
-
-function documentLabel(
-  doc: Document,
-  untitled: string,
-  dealRoomSuffix: string,
-): string {
-  const title = doc.title.trim() || untitled;
-  return doc.category === "deal_room" ? `${title} · ${dealRoomSuffix}` : title;
-}
+export {
+  activeInsightRooms,
+  collectDealRoomDocumentIds,
+  documentTitle,
+  filterInsightDocuments,
+  filterInsightRooms,
+  insightDocScope,
+  insightRoomPickerMode,
+  mergeInsightDocuments,
+} from "@/lib/insightsDocumentPicker";
+export type { InsightDocScope, InsightRoomPickerMode } from "@/lib/insightsDocumentPicker";
 
 export function InsightsPagesPage() {
   const { t } = useTranslation("insights");
@@ -45,7 +37,6 @@ export function InsightsPagesPage() {
   const navigate = useNavigate();
   const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
   const [selectedDocId, setSelectedDocId] = useState("");
-  const [docQuery, setDocQuery] = useState("");
   const rangeCtl = useInsightsRange(30);
   const {
     data: documents,
@@ -129,19 +120,6 @@ export function InsightsPagesPage() {
           )
       : undefined;
 
-  const untitled = t("pages.untitledDocument");
-  const dealRoomSuffix = t("pages.categoryDealRoom");
-
-  const filteredDocuments = useMemo(() => {
-    if (!documents) return [];
-    const q = docQuery.trim().toLowerCase();
-    if (!q) return documents;
-    return documents.filter((doc) => {
-      const label = documentLabel(doc, untitled, dealRoomSuffix).toLowerCase();
-      return label.includes(q) || doc.title.toLowerCase().includes(q);
-    });
-  }, [documents, docQuery, untitled, dealRoomSuffix]);
-
   if (error) {
     return (
       <div className="flex flex-col items-center justify-center gap-4 rounded-lg border border-border bg-card p-12 text-center">
@@ -165,11 +143,6 @@ export function InsightsPagesPage() {
     );
   }
 
-  const selectedDoc = documents.find((d) => d.id === selectedDocId);
-  const selectedDocLabel = selectedDoc
-    ? documentLabel(selectedDoc, untitled, dealRoomSuffix)
-    : t("pages.selectPlaceholder");
-
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -188,90 +161,13 @@ export function InsightsPagesPage() {
           onApplyCustom={rangeCtl.applyCustom}
         />
 
-        <Combobox.Root
-          value={selectedDocId || null}
-          onValueChange={(next) => {
-            if (next) setSelectedDocId(next);
-          }}
-          onInputValueChange={setDocQuery}
-          onOpenChange={(open) => {
-            if (!open) setDocQuery("");
-          }}
-        >
-          <Combobox.Trigger
-            data-testid="insights-document-picker"
-            className={cn(
-              "flex h-9 w-full items-center justify-between gap-2 rounded-lg border border-input bg-transparent px-3 py-2 text-sm outline-none transition-colors",
-              "focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50",
-              "sm:w-80 sm:max-w-[22rem] sm:self-end",
-            )}
-          >
-            <span className="min-w-0 flex-1 truncate text-left">
-              {selectedDocLabel}
-            </span>
-            <Combobox.Icon
-              render={<CaretDown size={16} className="shrink-0 text-muted-foreground" />}
-            />
-          </Combobox.Trigger>
-
-          <Combobox.Portal>
-            <Combobox.Positioner
-              className="isolate z-50"
-              align="end"
-              side="bottom"
-              sideOffset={4}
-            >
-              <Combobox.Popup
-                className={cn(
-                  "z-50 w-[min(22rem,var(--available-width))] min-w-[var(--anchor-width)] origin-[var(--transform-origin)] overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-md outline-none",
-                  "data-[side=bottom]:slide-in-from-top-2 data-[side=top]:slide-in-from-bottom-2",
-                  "data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95",
-                  "data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
-                )}
-              >
-                <div className="border-b border-border px-2 py-1.5">
-                  <Combobox.Input
-                    placeholder={t("pages.searchPlaceholder")}
-                    className={cn(
-                      "flex h-8 w-full bg-transparent px-1.5 text-sm outline-none",
-                      "placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-0",
-                    )}
-                  />
-                </div>
-                <Combobox.List className="max-h-64 overflow-auto p-1">
-                  {filteredDocuments.map((doc) => {
-                    const label = documentLabel(doc, untitled, dealRoomSuffix);
-                    return (
-                      <Combobox.Item
-                        key={doc.id}
-                        value={doc.id}
-                        className={cn(
-                          "group relative flex w-full cursor-default items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm outline-none select-none",
-                          "hover:bg-accent hover:text-accent-foreground data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground",
-                        )}
-                      >
-                        <FileText
-                          size={16}
-                          className="shrink-0 text-muted-foreground group-hover:text-accent-foreground group-data-[highlighted]:text-accent-foreground"
-                        />
-                        <span className="min-w-0 flex-1 truncate">{label}</span>
-                        <Combobox.ItemIndicator className="ml-auto text-foreground">
-                          <Check size={16} weight="bold" />
-                        </Combobox.ItemIndicator>
-                      </Combobox.Item>
-                    );
-                  })}
-                  {filteredDocuments.length === 0 ? (
-                    <Combobox.Empty className="px-2 py-4 text-center text-sm text-muted-foreground">
-                      {t("pages.noSearchResults")}
-                    </Combobox.Empty>
-                  ) : null}
-                </Combobox.List>
-              </Combobox.Popup>
-            </Combobox.Positioner>
-          </Combobox.Portal>
-        </Combobox.Root>
+        <InsightsDocumentPicker
+          documents={documents}
+          selectedDocId={selectedDocId}
+          onSelectedDocIdChange={setSelectedDocId}
+        />
       </div>
+      <p className="text-caption text-muted-foreground">{t("pages.actorHint")}</p>
 
       <ReadingFunnelCard
         funnel={funnel}
