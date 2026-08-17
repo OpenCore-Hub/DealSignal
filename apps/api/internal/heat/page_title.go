@@ -1,4 +1,4 @@
-package analytics
+package heat
 
 import (
 	"regexp"
@@ -12,7 +12,8 @@ var (
 	truncatedJSONKey = regexp.MustCompile(`^\w{1,40}":`)
 )
 
-func displayablePageTitle(title string) string {
+// DisplayablePageTitle hides PDF text dumps that were stored as page titles.
+func DisplayablePageTitle(title string) string {
 	t := strings.TrimSpace(title)
 	if t == "" || looksLikeStructuredPageDump(t) {
 		return ""

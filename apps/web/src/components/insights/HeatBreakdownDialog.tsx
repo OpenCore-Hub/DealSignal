@@ -11,6 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { HeatBadge } from "@/components/common/HeatBadge";
 import { useAsyncData } from "@/hooks/useAsyncData";
 import { api, type DocumentHeatScore, type LinkHeatScore } from "@/lib/api";
+import { displayablePageTitle } from "@/lib/insights/pageTitleDisplay";
 import { shareKindFromLink } from "@/lib/shareKind";
 
 const FACTOR_ORDER = [
@@ -80,6 +81,17 @@ function resolveTarget(props: HeatBreakdownDialogProps): {
 
 function isDocumentScore(data: HeatScorePayload): data is DocumentHeatScore {
   return "documentId" in data && "contributingLinks" in data;
+}
+
+function keyPageEvidenceLabel(
+  t: (key: string, opts?: Record<string, unknown>) => string,
+  pageNumber: number,
+  rawTitle: string,
+): string {
+  const title = displayablePageTitle(rawTitle);
+  return title
+    ? t("heatBreakdown.keyPageRow", { page: pageNumber, title })
+    : t("heatBreakdown.keyPageRowPageOnly", { page: pageNumber });
 }
 
 function heatCircleLabel(
@@ -262,16 +274,19 @@ export function HeatBreakdownDialog({
                 </p>
                 {data.keyPages && data.keyPages.pages.length > 0 ? (
                   <ul className="space-y-1">
-                    {data.keyPages.pages.map((page) => (
+                    {data.keyPages.pages.map((page) => {
+                      const label = keyPageEvidenceLabel(
+                        t,
+                        page.pageNumber,
+                        page.title,
+                      );
+                      return (
                       <li
-                        key={`${page.pageNumber}-${page.title}`}
+                        key={`${page.pageNumber}-${label}`}
                         className="flex items-center justify-between gap-2 text-caption"
                       >
-                        <span className="min-w-0 truncate">
-                          {t("heatBreakdown.keyPageRow", {
-                            page: page.pageNumber,
-                            title: page.title,
-                          })}
+                        <span className="min-w-0 truncate" title={label}>
+                          {label}
                         </span>
                         <span className="shrink-0 tabular-nums text-muted-foreground">
                           {t("heatBreakdown.keyPageRowViews", {
@@ -280,7 +295,8 @@ export function HeatBreakdownDialog({
                           })}
                         </span>
                       </li>
-                    ))}
+                      );
+                    })}
                   </ul>
                 ) : null}
               </div>

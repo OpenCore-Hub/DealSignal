@@ -1,5 +1,5 @@
 /**
- * Keep in lockstep with apps/api/internal/analytics/page_title.go.
+ * Keep in lockstep with apps/api/internal/heat/page_title.go.
  * Display-only: heat matching still uses the stored page title.
  */
 const TRUNCATED_JSON_KEY = /^\w{1,40}":/;
@@ -10,6 +10,17 @@ export function displayablePageTitle(title: string | undefined | null): string {
     return "";
   }
   return t;
+}
+
+export function displayablePageTitles(
+  titles: Array<string | undefined | null> | undefined | null,
+): string[] {
+  const out: string[] = [];
+  for (const title of titles ?? []) {
+    const label = displayablePageTitle(title);
+    if (label) out.push(label);
+  }
+  return out;
 }
 
 function looksLikeStructuredPageDump(title: string): boolean {

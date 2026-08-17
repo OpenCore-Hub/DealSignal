@@ -5825,6 +5825,9 @@ LIMIT sqlc.arg(page_limit) OFFSET sqlc.arg(page_offset);
 
 -- Insights access-audit: permission / gate failures across the workspace.
 -- Folder grain: document placement path, else link target_folder_path (deal-room shares).
+-- Hold KPIs exclude empty-form gate prompts (email_required, email_code_required,
+-- nda_required). ListWorkspaceAccessAuditEvents still returns those rows for the
+-- gray historical label.
 -- name: CountWorkspaceAccessAuditByType :many
 SELECT se.event_type, COUNT(*)::bigint AS count
 FROM security_events se
@@ -5852,6 +5855,11 @@ WHERE se.workspace_id = sqlc.arg(workspace_id)
     'invite_token_revoked',
     'rate_limit_exceeded'
   ]::text[])
+  AND COALESCE(se.reason, '') NOT IN (
+    'email_required',
+    'email_code_required',
+    'nda_required'
+  )
   AND (sqlc.narg(event_type)::text IS NULL OR se.event_type = sqlc.narg(event_type))
   AND (sqlc.narg(deal_room_id)::uuid IS NULL OR l.deal_room_id = sqlc.narg(deal_room_id))
   AND (sqlc.narg(member_id)::uuid IS NULL OR l.created_by = sqlc.narg(member_id))
@@ -5893,6 +5901,11 @@ WHERE se.workspace_id = sqlc.arg(workspace_id)
     'invite_token_revoked',
     'rate_limit_exceeded'
   ]::text[])
+  AND COALESCE(se.reason, '') NOT IN (
+    'email_required',
+    'email_code_required',
+    'nda_required'
+  )
   AND (sqlc.narg(event_type)::text IS NULL OR se.event_type = sqlc.narg(event_type))
   AND (sqlc.narg(member_id)::uuid IS NULL OR l.created_by = sqlc.narg(member_id))
   AND (
@@ -5934,6 +5947,11 @@ WHERE se.workspace_id = sqlc.arg(workspace_id)
     'invite_token_revoked',
     'rate_limit_exceeded'
   ]::text[])
+  AND COALESCE(se.reason, '') NOT IN (
+    'email_required',
+    'email_code_required',
+    'nda_required'
+  )
   AND (sqlc.narg(event_type)::text IS NULL OR se.event_type = sqlc.narg(event_type))
   AND (sqlc.narg(deal_room_id)::uuid IS NULL OR l.deal_room_id = sqlc.narg(deal_room_id))
   AND (
@@ -5976,6 +5994,11 @@ WHERE se.workspace_id = sqlc.arg(workspace_id)
     'invite_token_revoked',
     'rate_limit_exceeded'
   ]::text[])
+  AND COALESCE(se.reason, '') NOT IN (
+    'email_required',
+    'email_code_required',
+    'nda_required'
+  )
   AND (sqlc.narg(event_type)::text IS NULL OR se.event_type = sqlc.narg(event_type))
   AND (sqlc.narg(deal_room_id)::uuid IS NULL OR l.deal_room_id = sqlc.narg(deal_room_id))
   AND (sqlc.narg(member_id)::uuid IS NULL OR l.created_by = sqlc.narg(member_id))

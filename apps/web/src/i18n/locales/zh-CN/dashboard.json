@@ -34,6 +34,18 @@
       "review": "核对",
       "open": "打开"
     },
+    "ctaByProduct": {
+      "diligence_gate": {
+        "review": "去看这次拦截"
+      },
+      "leak_watch": {
+        "review": "查看分发"
+      },
+      "buying_window": {
+        "email": "给 {{contact}} 写邮件",
+        "confirmRecipient": "先确认该发给谁"
+      }
+    },
     "evidence": "证据",
     "snooze": "延后",
     "snoozeHours": {
@@ -58,7 +70,7 @@
       "buying_window": "现在正热。趁还在看的时候跟进。",
       "diligence_gate": "有人还进不去。先决定要不要让他进来。",
       "commitment_ask": "有提问等你今天回复。",
-      "leak_watch": "有转发、下载或未授权进入的迹象。先核对再跟进。",
+      "leak_watch": "有转发、下载或截屏迹象。先核对再跟进。",
       "access_decay": "这条分享快到期了。续上，或确认可以关掉。",
       "abuse_guard": "提问或打开次数明显高于平时。先看配额。"
     },
@@ -69,7 +81,7 @@
           "buying_window": "投资人现在正热。趁还在看的时候跟进。",
           "diligence_gate": "投资人还在门外。先决定要不要放。",
           "commitment_ask": "有尽调提问等你今天回复。",
-          "leak_watch": "有转发、下载或未授权进入的迹象。先核对再跟进。",
+          "leak_watch": "有转发、下载或截屏迹象。先核对再跟进。",
           "access_decay": "投资人访问快到期了。续上，或确认可以收口。",
           "abuse_guard": "这一轮提问或打开次数明显高于平时。先看配额。"
         },
@@ -88,7 +100,7 @@
           "buying_window": "后期轮次兴趣升温。趁还在看的时候推进投委会下一步。",
           "diligence_gate": "后期评审者还进不去。先决定要不要放。",
           "commitment_ask": "有条款或尽调提问等你今天回复。",
-          "leak_watch": "有转发、下载或未授权进入的迹象。先核对流向。",
+          "leak_watch": "有转发、下载或截屏迹象。先核对流向。",
           "access_decay": "联合投资人访问快到期了。给还在看的人续期。",
           "abuse_guard": "提问或打开次数明显高于平时。先看策略。"
         },
@@ -107,7 +119,7 @@
           "buying_window": "买方互动正热。趁还在看的时候推进流程。",
           "diligence_gate": "买方还进不去。先决定要不要放。",
           "commitment_ask": "有并购尽调提问等你今天回复。",
-          "leak_watch": "有转发、下载或未授权进入的迹象。先核对再跟进买方。",
+          "leak_watch": "有转发、下载或截屏迹象。先核对再跟进买方。",
           "access_decay": "买方访问快到期了。续上，或确认已经暂停。",
           "abuse_guard": "这一单提问或打开次数明显高于平时。先看配额。"
         },
@@ -126,7 +138,7 @@
           "buying_window": "买方评估窗口已开。趁还在看的时候跟进。",
           "diligence_gate": "潜客还进不去。先决定要不要放。",
           "commitment_ask": "有商务或安全提问等你今天回复。",
-          "leak_watch": "有转发、下载或未授权进入的迹象。下次通话前先核对。",
+          "leak_watch": "有转发、下载或截屏迹象。下次通话前先核对。",
           "access_decay": "潜客访问快到期了。续上，或确认已经掉单。",
           "abuse_guard": "潜客提问或打开次数明显高于平时。先看配额。"
         },
@@ -145,7 +157,7 @@
           "buying_window": "LP 现在正热。趁还在看的时候跟进。",
           "diligence_gate": "LP 还进不去。先决定要不要放。",
           "commitment_ask": "有 LP 尽调提问等你今天回复。",
-          "leak_watch": "有转发、下载或未授权进入的迹象。先核对再跟进 LP。",
+          "leak_watch": "有转发、下载或截屏迹象。先核对再跟进 LP。",
           "access_decay": "LP 访问快到期了。给还在看的人续期。",
           "abuse_guard": "LP 提问或打开次数明显高于平时。先看配额。"
         },
@@ -164,7 +176,7 @@
           "buying_window": "干系人互动正热。趁还在看的时候跟进。",
           "diligence_gate": "干系人还进不去。先决定要不要放。",
           "commitment_ask": "有汇报或合规提问等你今天回复。",
-          "leak_watch": "有转发、下载或未授权进入的迹象。先核对流向。",
+          "leak_watch": "有转发、下载或截屏迹象。先核对流向。",
           "access_decay": "汇报访问快到期了。续上，或确认可以关掉。",
           "abuse_guard": "提问或打开次数明显高于平时。先看配额。"
         },
@@ -183,7 +195,7 @@
           "buying_window": "组合互动正热。趁还在看的时候跟进。",
           "diligence_gate": "投后干系人还进不去。先决定要不要放。",
           "commitment_ask": "有投后提问等你今天回复。",
-          "leak_watch": "有转发、下载或未授权进入的迹象。更新前先核对。",
+          "leak_watch": "有转发、下载或截屏迹象。更新前先核对。",
           "access_decay": "投后访问快到期了。给还在看的人续期。",
           "abuse_guard": "提问或打开次数明显高于平时。先看配额。"
         },
@@ -204,7 +216,7 @@
           "buying_window": "对手方现在正热。趁尽调窗口推进。",
           "diligence_gate": "对手方还进不去。先决定要不要放。",
           "commitment_ask": "有交易提问等你今天回复。",
-          "leak_watch": "有转发、下载或未授权进入的迹象。先核对流向。",
+          "leak_watch": "有转发、下载或截屏迹象。先核对流向。",
           "access_decay": "对手方访问快到期了。续上，或确认已经暂停。",
           "abuse_guard": "提问或打开次数明显高于平时。先看配额。"
         },
@@ -225,7 +237,7 @@
           "buying_window": "干系人注意力在高位。趁还在看的时候跟进。",
           "diligence_gate": "协作者还进不去。先决定要不要放。",
           "commitment_ask": "有项目提问等你今天回复。",
-          "leak_watch": "有转发、下载或未授权进入的迹象。先核对流向。",
+          "leak_watch": "有转发、下载或截屏迹象。先核对流向。",
           "access_decay": "协作者访问快到期了。续上，或确认可以关掉。",
           "abuse_guard": "提问或打开次数明显高于平时。先看配额。"
         },
@@ -244,7 +256,7 @@
           "buying_window": "互动正热。趁还在看的时候跟进。",
           "diligence_gate": "有人还进不去。先决定要不要让他进来。",
           "commitment_ask": "有提问等你今天回复。",
-          "leak_watch": "有转发、下载或未授权进入的迹象。先核对再继续。",
+          "leak_watch": "有转发、下载或截屏迹象。先核对再继续。",
           "access_decay": "访问快到期了。续上，或确认可以关掉。",
           "abuse_guard": "提问或打开次数明显高于平时。先看配额。"
         }
@@ -289,17 +301,21 @@
       },
       "gateEvents": "门禁记录",
       "gateTimeline": {
-        "beforeAndAfter": "申请前碰到门禁 {{before}} 次，申请后还有 {{after}} 次。名单仍然有效，所以还会被拦。",
+        "beforeAndAfter": "申请前碰到门禁 {{before}} 次，申请后还有 {{after}} 次。",
+        "beforeAndAfterPending": "申请前碰到门禁 {{before}} 次，申请后还有 {{after}} 次。申请还在等审批，所以还会被拦。",
         "beforeOnly": "申请前碰到门禁 {{before}} 次。",
-        "afterOnly": "提出申请后还有 {{after}} 次门禁拦住。若仍在等审批，这是预期的。",
-        "eventsOnly": "碰到门禁 {{total}} 次。若名单未改，这是预期的。"
+        "beforeOnlyPending": "申请前碰到门禁 {{before}} 次。申请还在等审批。",
+        "afterOnly": "提出申请后还有 {{after}} 次门禁拦住。",
+        "afterOnlyPending": "提出申请后还有 {{after}} 次门禁拦住。申请还在等审批，所以还会被拦。",
+        "eventsOnly": "碰到门禁 {{total}} 次。名单仍在生效。",
+        "eventsOnlyPending": "碰到门禁 {{total}} 次。申请还在等审批。"
       },
       "coalesced": {
         "count": "{{count}}×"
       },
       "gateNoSuccessfulOpens": "还没有成功打开——访客仍在门外。",
       "emptyPrimary": {
-        "leak_watch": "近 24 小时没有转发或下载。先看门禁记录，不要当成外传已发生。",
+        "leak_watch": "近 24 小时没有转发或下载。不要当成外传已发生。",
         "abuse_guard": "这条分享近 24 小时还没有截屏或限流记录。",
         "access_decay": "这条分享近 24 小时还没有过期或撤销记录。",
         "buying_window": "这条分享近 24 小时还没有打开或关键页记录。",
@@ -343,9 +359,13 @@
         "email_required": "待完成：填写邮箱",
         "invalid_email_code": "未通过：验证码不正确",
         "nda_required": "待完成：签署 NDA",
-        "password": "密码门禁未过",
+        "password": "密码不正确",
         "delivery_email_mismatch": "填写邮箱与验证邮箱不一致",
         "unknown": "原因未知"
+      },
+      "gatePromptBadge": "门禁提示 · 不是拦住",
+      "shareActivity": {
+        "summary": "分享近况（整条链接，不是这次拦住）"
       },
       "metrics": {
         "opens24h": "24h 打开",
@@ -382,6 +402,18 @@
       "approved": "已审批",
       "replied": "已回复",
       "other": "其他"
+    },
+    "outcomeByProduct": {
+      "diligence_gate": {
+        "review": {
+          "acted": "已看过这次拦截",
+          "false_positive": "拦住有效，无需处理"
+        }
+      },
+      "leak_watch": {
+        "acted": "已查看分发",
+        "false_positive": "不是外传迹象"
+      }
     },
     "inboxZero": {
       "title": "今天没有要处理的了",

@@ -6,6 +6,7 @@ import type {
   HeatScoreWeights,
   PageAnalytics,
 } from "@/types";
+import { displayablePageTitle } from "@/lib/insights/pageTitleDisplay";
 
 const CIRCLE_CONFIGS: Record<Circle, HeatScoreConfig> = {
   founder: {
@@ -198,7 +199,7 @@ export function computeHeatScore(
           }, 0);
           return { page: p, relevance };
         })
-        .filter(({ relevance }) => relevance > 0)
+        .filter(({ page, relevance }) => relevance > 0 && displayablePageTitle(page.title))
         .sort((a, b) => {
           // Rank by relevance weighted by view count so popular key pages surface first.
           const scoreA = a.relevance * (a.page.viewCount || 1);
@@ -206,11 +207,7 @@ export function computeHeatScore(
           return scoreB - scoreA;
         })
         .slice(0, 3)
-        // Language-neutral machine label — UI must localize via i18n if shown.
-        .map(({ page }) => {
-          const title = page.title?.trim();
-          return title || `Page ${page.pageNumber}`;
-        })
+        .map(({ page }) => displayablePageTitle(page.title))
     : [];
 
   return { score, level, trend, breakdown, topKeyPages };

@@ -25,6 +25,7 @@
     "keyPagesEngaged": "{{total}} 次标题命中中，{{engaged}} 次停留 ≥{{seconds}} 秒",
     "keyPagesSkim": "标题命中但停留不足 {{seconds}} 秒，不计分",
     "keyPageRow": "第 {{page}} 页 · {{title}}",
+    "keyPageRowPageOnly": "第 {{page}} 页",
     "keyPageRowViews": "{{engaged}}/{{total}}",
     "tabs": {
       "overview": "概览",

@@ -28,6 +28,7 @@ import {
   parsePageFromMetadata,
 } from "@/lib/documentDetailNav";
 import { formatDuration } from "@/lib/formatters";
+import { displayablePageTitles } from "@/lib/insights/pageTitleDisplay";
 
 const typeConfig = {
   hot_signal: { icon: Fire, dot: "bg-hot-500", subtle: "bg-hot-500/8", bar: "bg-hot-500" },
@@ -228,7 +229,7 @@ function renderSignalSummary(
   }
 
   if (subtype === "key_page") {
-    const titles = (ctx.keyPageTitles ?? []).slice(0, 3).join(", ");
+    const titles = displayablePageTitles(ctx.keyPageTitles).slice(0, 3).join(", ");
     return t("signal.summary.key_page", {
       contact,
       keyPages: titles || String(ctx.keyPageCount ?? "—"),
@@ -240,7 +241,7 @@ function renderSignalSummary(
     contact,
     opens: ctx.opens,
     duration: formatDuration(ctx.durationSeconds),
-    keyPages: ctx.keyPageTitles.slice(0, 3).join(", "),
+    keyPages: displayablePageTitles(ctx.keyPageTitles).slice(0, 3).join(", "),
     keyPageCount: ctx.keyPageCount,
   });
 }

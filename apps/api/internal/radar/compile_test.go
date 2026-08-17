@@ -365,6 +365,196 @@ func TestCompileSalesLensPrefersBuyingWindow(t *testing.T) {
 	}
 }
 
+func TestCompileBlockedAttemptIsDiligenceGateNotLeakWatch(t *testing.T) {
+	now := time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC)
+	sigID := uuid.New()
+	feed := Compile(CompileInput{
+		WorkspaceSlug: "acme",
+		Now:           now,
+		Signals: []db.Signal{{
+			ID:        mustUUID(sigID),
+			Type:      "risk_alert",
+			Subtype:   pgText(suggestions.SubtypeBlockedAttempt),
+			Title:     "Blocked",
+			Priority:  "medium",
+			CreatedAt: pgTime(now.Add(-10 * time.Minute)),
+		}},
+		Actions: []db.ActionItem{{
+			ID:         mustUUID(uuid.New()),
+			SignalID:   mustUUID(sigID),
+			Title:      "Review block",
+			Impact:     "medium",
+			Status:     "pending",
+			ActionType: "review",
+			CreatedAt:  pgTime(now.Add(-10 * time.Minute)),
+			DueAt:      pgTime(now.Add(time.Hour)),
+			UpdatedAt:  pgTime(now),
+		}},
+	})
+	if len(feed.Items) != 1 {
+		t.Fatalf("items=%d", len(feed.Items))
+	}
+	got := feed.Items[0]
+	if got.Product != ProductDiligenceGate {
+		t.Fatalf("product=%s want diligence_gate", got.Product)
+	}
+	if got.Verb != VerbReview {
+		t.Fatalf("verb=%s want review", got.Verb)
+	}
+	if got.Confidence != "" {
+		t.Fatalf("gate hold must not carry leak_watch confidence, got %s", got.Confidence)
+	}
+	hasGate := false
+	for _, c := range got.Evidence {
+		if c.Kind == "gate" {
+			hasGate = true
+		}
+		if c.Kind == "forward" || c.Kind == "download" {
+			t.Fatalf("unexpected sharing chip %+v", c)
+		}
+	}
+	if !hasGate {
+		t.Fatal("expected gate chip")
+	}
+}
+
+func TestCompileBlockedAttemptKeepsReviewVerbInFundraisingPack(t *testing.T) {
+	now := time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC)
+	roomID := uuid.New().String()
+	sigID := uuid.New()
+	linkID := uuid.New()
+	feed := Compile(CompileInput{
+		WorkspaceSlug: "acme",
+		Now:           now,
+		Rooms:         map[string]RoomMeta{roomID: {Name: "Series A", Scenario: ScenarioStartupFundraising}},
+		Links: map[string]LinkMeta{
+			linkID.String(): {ID: linkID.String(), Name: "Deck", DealRoomID: roomID},
+		},
+		Signals: []db.Signal{{
+			ID:        mustUUID(sigID),
+			Type:      "risk_alert",
+			Subtype:   pgText(suggestions.SubtypeBlockedAttempt),
+			Title:     "Blocked",
+			Priority:  "medium",
+			LinkID:    mustUUID(linkID),
+			CreatedAt: pgTime(now.Add(-10 * time.Minute)),
+		}},
+		Actions: []db.ActionItem{{
+			ID:         mustUUID(uuid.New()),
+			SignalID:   mustUUID(sigID),
+			Title:      "Review block",
+			Impact:     "medium",
+			Status:     "pending",
+			ActionType: "review",
+			CreatedAt:  pgTime(now.Add(-10 * time.Minute)),
+			DueAt:      pgTime(now.Add(time.Hour)),
+			UpdatedAt:  pgTime(now),
+		}},
+	})
+	if len(feed.Items) != 1 {
+		t.Fatalf("items=%d", len(feed.Items))
+	}
+	got := feed.Items[0]
+	if got.Product != ProductDiligenceGate {
+		t.Fatalf("product=%s want diligence_gate", got.Product)
+	}
+	if got.Verb != VerbReview {
+		t.Fatalf("fundraising pack must not turn a hold into approve, verb=%s", got.Verb)
+	}
+	if got.HeadlineCode != "unlock_investor_gate" {
+		t.Fatalf("headlineCode=%s want unlock_investor_gate", got.HeadlineCode)
+	}
+}
+
+func TestCompileGateHoldActorPrefersVisitorEmailOverShareContact(t *testing.T) {
+	now := time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC)
+	sigID := uuid.New()
+	ctx, err := jsonContext(map[string]any{
+		"contactName":  "张姐",
+		"contactEmail": "zhang@share.example",
+		"visitorEmail": "yqx-401@126.com",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	feed := Compile(CompileInput{
+		WorkspaceSlug: "acme",
+		Now:           now,
+		Signals: []db.Signal{{
+			ID:        mustUUID(sigID),
+			Type:      "risk_alert",
+			Subtype:   pgText(suggestions.SubtypeBlockedAttempt),
+			Title:     "Blocked",
+			Priority:  "medium",
+			Context:   ctx,
+			CreatedAt: pgTime(now.Add(-10 * time.Minute)),
+		}},
+		Actions: []db.ActionItem{{
+			ID:         mustUUID(uuid.New()),
+			SignalID:   mustUUID(sigID),
+			Title:      "Review block",
+			Impact:     "medium",
+			Status:     "pending",
+			ActionType: "review",
+			CreatedAt:  pgTime(now.Add(-10 * time.Minute)),
+			DueAt:      pgTime(now.Add(time.Hour)),
+			UpdatedAt:  pgTime(now),
+		}},
+	})
+	if len(feed.Items) != 1 {
+		t.Fatalf("items=%d", len(feed.Items))
+	}
+	got := feed.Items[0]
+	if got.Actor != "yqx-401@126.com" {
+		t.Fatalf("actor=%q want gated visitor email", got.Actor)
+	}
+	if got.ContactEmail != "zhang@share.example" {
+		t.Fatalf("contactEmail=%q want share-contact email", got.ContactEmail)
+	}
+}
+
+func TestCompileGateHoldActorKeepsShareContactWhenVisitorEmailMissing(t *testing.T) {
+	now := time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC)
+	sigID := uuid.New()
+	ctx, err := jsonContext(map[string]any{
+		"contactName": "张姐",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	feed := Compile(CompileInput{
+		WorkspaceSlug: "acme",
+		Now:           now,
+		Signals: []db.Signal{{
+			ID:        mustUUID(sigID),
+			Type:      "risk_alert",
+			Subtype:   pgText(suggestions.SubtypeBlockedAttempt),
+			Title:     "Blocked",
+			Priority:  "medium",
+			Context:   ctx,
+			CreatedAt: pgTime(now.Add(-10 * time.Minute)),
+		}},
+		Actions: []db.ActionItem{{
+			ID:         mustUUID(uuid.New()),
+			SignalID:   mustUUID(sigID),
+			Title:      "Review block",
+			Impact:     "medium",
+			Status:     "pending",
+			ActionType: "review",
+			CreatedAt:  pgTime(now.Add(-10 * time.Minute)),
+			DueAt:      pgTime(now.Add(time.Hour)),
+			UpdatedAt:  pgTime(now),
+		}},
+	})
+	if len(feed.Items) != 1 {
+		t.Fatalf("items=%d", len(feed.Items))
+	}
+	got := feed.Items[0]
+	if got.Actor != "张姐" {
+		t.Fatalf("actor=%q want share contact when visitorEmail is absent", got.Actor)
+	}
+}
+
 func TestCompileOutcomeDemoteAndMicroRank(t *testing.T) {
 	now := time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC)
 	sigKey := uuid.New()

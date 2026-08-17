@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   coalesceSecurityEvents,
   evidenceEmptyPrimaryKey,
+  gateTimelineI18nKey,
   gateTimelineSummary,
   isRadarGateHoldItem,
   radarRowIdentities,
@@ -21,37 +22,51 @@ describe("radarRowIdentities", () => {
   it("does not treat a contact name as the person held at the gate", () => {
     expect(
       radarRowIdentities({
-        product: "leak_watch",
-        confidence: "low",
+        product: "diligence_gate",
         actor: "张姐",
       }),
     ).toEqual({ primary: null, shareContact: "张姐" });
   });
 
-  it("keeps an email-shaped actor on a gate-hold leak card", () => {
+  it("keeps an email-shaped actor on a waiting-to-enter card", () => {
     expect(
       radarRowIdentities({
-        product: "leak_watch",
-        confidence: "low",
+        product: "diligence_gate",
         actor: "yqx-401@126.com",
       }),
     ).toEqual({ primary: "yqx-401@126.com", shareContact: null });
   });
+
+  it("names a distinct share-contact email beside the person held", () => {
+    expect(
+      radarRowIdentities({
+        product: "diligence_gate",
+        actor: "yqx-401@126.com",
+        contactEmail: "zhang@share.example",
+      }),
+    ).toEqual({
+      primary: "yqx-401@126.com",
+      shareContact: "zhang@share.example",
+    });
+  });
 });
 
 describe("isRadarGateHoldItem", () => {
-  it("is true for waiting-to-enter and low-confidence leak_watch", () => {
-    expect(isRadarGateHoldItem({ product: "diligence_gate" })).toBe(true);
-    expect(isRadarGateHoldItem({ product: "leak_watch", confidence: "low" })).toBe(
-      true,
-    );
+  it("is true only for a waiting-to-enter hold", () => {
     expect(
-      isRadarGateHoldItem({ product: "leak_watch", confidence: "medium" }),
+      isRadarGateHoldItem({ product: "diligence_gate", verb: "review" }),
+    ).toBe(true);
+    expect(
+      isRadarGateHoldItem({ product: "diligence_gate", verb: "approve" }),
+    ).toBe(false);
+    expect(isRadarGateHoldItem({ product: "diligence_gate" })).toBe(false);
+    expect(
+      isRadarGateHoldItem({ product: "leak_watch", verb: "review" }),
     ).toBe(false);
   });
 });
 
-const events = [
+const promptEvents = [
   {
     eventType: "security_gate_failed",
     reason: "email_code_required",
@@ -74,9 +89,15 @@ const events = [
   },
 ];
 
+const holdEvents = promptEvents.map((e) => ({
+  ...e,
+  eventType: "not_in_allow_list",
+  reason: undefined,
+}));
+
 describe("coalesceSecurityEvents", () => {
   it("merges identical gate failures and keeps newest lastAt", () => {
-    const groups = coalesceSecurityEvents(events);
+    const groups = coalesceSecurityEvents(promptEvents);
     expect(groups).toHaveLength(1);
     expect(groups[0]?.count).toBe(4);
     expect(groups[0]?.lastAt).toBe("2026-08-11T10:23:33Z");
@@ -85,7 +106,7 @@ describe("coalesceSecurityEvents", () => {
 
   it("keeps distinct reasons separate", () => {
     const groups = coalesceSecurityEvents([
-      ...events.slice(0, 1),
+      ...promptEvents.slice(0, 1),
       {
         eventType: "security_gate_failed",
         reason: "nda_required",
@@ -126,8 +147,8 @@ describe("evidenceEmptyPrimaryKey", () => {
 });
 
 describe("gateTimelineSummary", () => {
-  it("splits hits before and after the access request", () => {
-    const summary = gateTimelineSummary(events, "2026-08-11T10:15:22Z");
+  it("splits holds before and after the access request", () => {
+    const summary = gateTimelineSummary(holdEvents, "2026-08-11T10:15:22Z");
     expect(summary).toEqual({
       kind: "before_and_after",
       before: 1,
@@ -137,8 +158,62 @@ describe("gateTimelineSummary", () => {
   });
 
   it("handles request-only-after pattern", () => {
-    const summary = gateTimelineSummary(events.slice(0, 3), "2026-08-11T10:15:22Z");
+    const summary = gateTimelineSummary(holdEvents.slice(0, 3), "2026-08-11T10:15:22Z");
     expect(summary).toEqual({ kind: "after_only", after: 3, total: 3 });
+  });
+
+  it("ignores empty-form prompts when counting holds", () => {
+    expect(gateTimelineSummary(promptEvents, "2026-08-11T10:15:22Z")).toBeNull();
+    const mixed = [
+      ...promptEvents,
+      {
+        eventType: "not_in_allow_list",
+        createdAt: "2026-08-11T10:23:40Z",
+      },
+    ];
+    expect(gateTimelineSummary(mixed, "2026-08-11T10:15:22Z")).toEqual({
+      kind: "after_only",
+      after: 1,
+      total: 1,
+    });
+  });
+});
+
+describe("gateTimelineI18nKey", () => {
+  it("uses pending copy when the request is still waiting", () => {
+    expect(
+      gateTimelineI18nKey({ kind: "after_only", after: 1, total: 1 }, "pending"),
+    ).toBe("radar.evidenceRail.gateTimeline.afterOnlyPending");
+    expect(
+      gateTimelineI18nKey(
+        { kind: "before_and_after", before: 1, after: 2, total: 3 },
+        "pending",
+      ),
+    ).toBe("radar.evidenceRail.gateTimeline.beforeAndAfterPending");
+    expect(
+      gateTimelineI18nKey({ kind: "events_only", total: 2 }, "pending"),
+    ).toBe("radar.evidenceRail.gateTimeline.eventsOnlyPending");
+    expect(
+      gateTimelineI18nKey({ kind: "before_only", before: 2, total: 2 }, "pending"),
+    ).toBe("radar.evidenceRail.gateTimeline.beforeOnlyPending");
+  });
+
+  it("does not claim pending or a fault when status is unknown", () => {
+    expect(
+      gateTimelineI18nKey({ kind: "after_only", after: 1, total: 1 }, "approved"),
+    ).toBe("radar.evidenceRail.gateTimeline.afterOnly");
+    expect(gateTimelineI18nKey({ kind: "events_only", total: 2 })).toBe(
+      "radar.evidenceRail.gateTimeline.eventsOnly",
+    );
+    expect(
+      gateTimelineI18nKey(
+        { kind: "before_and_after", before: 1, after: 2, total: 3 },
+        "approved",
+      ),
+    ).toBe("radar.evidenceRail.gateTimeline.beforeAndAfter");
+    expect(
+      gateTimelineI18nKey({ kind: "before_only", before: 2, total: 2 }),
+    ).toBe("radar.evidenceRail.gateTimeline.beforeOnly");
   });
 });
 

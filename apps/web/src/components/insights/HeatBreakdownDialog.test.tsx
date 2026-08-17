@@ -142,6 +142,61 @@ describe("HeatBreakdownDialog", () => {
     expect(screen.queryByText("File extras")).not.toBeInTheDocument();
   });
 
+  it("hides JSON dumps used as key-page titles", async () => {
+    getLinkHeatScoreMock.mockResolvedValue({
+      linkId: "link-1",
+      score: 30,
+      level: "cold",
+      trend: "falling",
+      circle: "founder",
+      breakdown: {
+        opens: 3,
+        revisits: 0,
+        avgDurationMinutes: 0.7,
+        keyPageViews: 25,
+        forwardSignals: 0,
+        downloads: 0,
+        bouncePenalty: 0,
+      },
+      keyPages: {
+        engaged: 1,
+        total: 1,
+        minSeconds: 3,
+        pages: [
+          {
+            pageNumber: 27,
+            title: '{"parameters": {"window": 5, "volume_window": 20}, "m...',
+            engagedViews: 1,
+            totalViews: 1,
+          },
+        ],
+      },
+      updatedAt: "2026-06-20T00:00:00Z",
+    });
+
+    const i18nInstance = await initI18n();
+    await act(async () => {
+      render(
+        <I18nextProvider i18n={i18nInstance}>
+          <HeatBreakdownDialog
+            open
+            onOpenChange={() => {}}
+            linkId="link-1"
+            linkLabel="Q3 Pitch"
+          />
+        </I18nextProvider>,
+      );
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Key-page evidence")).toBeInTheDocument();
+    });
+    expect(screen.getByText("Page 27")).toBeInTheDocument();
+    expect(screen.queryByText(/parameters/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/volume_window/)).not.toBeInTheDocument();
+  });
+
   it("loads document-native heat and contributing shares", async () => {
     getDocumentHeatScoreMock.mockResolvedValue({
       documentId: "doc-1",

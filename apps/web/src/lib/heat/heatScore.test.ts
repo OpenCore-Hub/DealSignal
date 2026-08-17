@@ -85,6 +85,27 @@ describe("computeHeatScore", () => {
     expect(result.topKeyPages).toContain("Financial projections");
     expect(result.topKeyPages.join(" ")).not.toMatch(/第\s*\d+\s*页/);
   });
+
+  it("omits JSON dumps from topKeyPages", () => {
+    const pages: PageAnalytics[] = [
+      {
+        pageNumber: 27,
+        title: '{"financials": {"window": 5, "volume_window": 20}}',
+        viewCount: 9,
+        avgDurationSeconds: 0,
+        exitRate: 0,
+      },
+      {
+        pageNumber: 3,
+        title: "Financial projections",
+        viewCount: 1,
+        avgDurationSeconds: 0,
+        exitRate: 0,
+      },
+    ];
+    const result = computeHeatScore("founder", baseInput, pages);
+    expect(result.topKeyPages).toEqual(["Financial projections"]);
+  });
 });
 
 describe("keyword language filter", () => {

@@ -21,6 +21,7 @@ import { SkeletonDetail } from "@/components/common/SkeletonLayout";
 import { EmptyState } from "@/components/common/EmptyState";
 import { api } from "@/lib/api";
 import { formatDuration, formatRelativeTime } from "@/lib/formatters";
+import { displayablePageTitle } from "@/lib/insights/pageTitleDisplay";
 import { useTranslation } from "react-i18next";
 import { useAsyncData } from "@/hooks/useAsyncData";
 import type { Activity, Contact } from "@/types";
@@ -216,16 +217,23 @@ function ContactDetailPageInner({
                     </p>
                     {contact.keyPages && contact.keyPages.pages.length > 0 ? (
                       <ul className="space-y-1">
-                        {contact.keyPages.pages.map((page) => (
+                        {contact.keyPages.pages.map((page) => {
+                          const title = displayablePageTitle(page.title);
+                          const label = title
+                            ? t("detail.keyPageRow", {
+                                page: page.pageNumber,
+                                title,
+                              })
+                            : t("detail.keyPageRowPageOnly", {
+                                page: page.pageNumber,
+                              });
+                          return (
                           <li
-                            key={`${page.pageNumber}-${page.title}`}
+                            key={`${page.pageNumber}-${label}`}
                             className="flex items-center justify-between gap-2 text-caption"
                           >
-                            <span className="min-w-0 truncate">
-                              {t("detail.keyPageRow", {
-                                page: page.pageNumber,
-                                title: page.title,
-                              })}
+                            <span className="min-w-0 truncate" title={label}>
+                              {label}
                             </span>
                             <span className="shrink-0 tabular-nums text-muted-foreground">
                               {t("detail.keyPageRowViews", {
@@ -234,7 +242,8 @@ function ContactDetailPageInner({
                               })}
                             </span>
                           </li>
-                        ))}
+                          );
+                        })}
                       </ul>
                     ) : null}
                   </div>

@@ -220,6 +220,7 @@ func (s *Service) AccessAudit(ctx context.Context, workspaceID string, q AccessA
 	}
 	for _, r := range typeRows {
 		out.ByType = append(out.ByType, AccessAuditTypeCount{EventType: r.EventType, Count: r.Count})
+		// Hold KPI: COUNT SQL excludes empty-form prompts; the event list still includes them.
 		out.TotalEvents += r.Count
 	}
 

@@ -134,6 +134,32 @@ describe("ContactDetailPage", () => {
     expect(screen.getByText(/p1 · Financials/i)).toBeInTheDocument();
   });
 
+  it("hides JSON dumps used as key-page titles", async () => {
+    getContactByIdMock.mockResolvedValue({
+      ...mockContact,
+      keyPages: {
+        engaged: 1,
+        total: 1,
+        minSeconds: 3,
+        pages: [
+          {
+            pageNumber: 27,
+            title: '{"parameters": {"window": 5, "volume_window": 20}, "m...',
+            engagedViews: 1,
+            totalViews: 1,
+          },
+        ],
+      },
+    });
+    await renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("Key-page evidence")).toBeInTheDocument();
+    });
+    expect(screen.getByText("p27")).toBeInTheDocument();
+    expect(screen.queryByText(/parameters/)).not.toBeInTheDocument();
+  });
+
   it("switches to timeline tab and shows activities", async () => {
     await renderPage();
 

@@ -9,6 +9,7 @@ import (
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/action"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/heat"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/signal"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -300,14 +301,16 @@ func includeLinkSecurityEvents(product Product) bool {
 }
 
 // diligenceApplicantEmail resolves the external applicant attributed on the
-// radar card. Prefer structured contactEmail/actor; fall back to the action
-// title ("… from <email> for|on …") used by sync/compile internal-actor filter.
+// radar card. Prefer an email-shaped Actor (the person held at the gate);
+// ContactEmail is the share-contact and must not steal applicant lookup.
+// Fall back to the action title ("… from <email> for|on …") used by
+// sync/compile internal-actor filter.
 func diligenceApplicantEmail(item WorkItem) string {
-	if email := strings.TrimSpace(item.ContactEmail); email != "" {
-		return email
-	}
 	if actor := strings.TrimSpace(item.Actor); strings.Count(actor, "@") == 1 {
 		return actor
+	}
+	if email := strings.TrimSpace(item.ContactEmail); email != "" {
+		return email
 	}
 	return emailFromActionTitle(item.Headline)
 }
@@ -416,8 +419,12 @@ func contextKeyPageTitles(raw []byte) []string {
 	}
 	out := make([]string, 0, len(rawTitles))
 	for _, v := range rawTitles {
-		if s, ok := v.(string); ok && s != "" {
-			out = append(out, s)
+		s, ok := v.(string)
+		if !ok {
+			continue
+		}
+		if label := heat.DisplayablePageTitle(s); label != "" {
+			out = append(out, label)
 		}
 	}
 	return out

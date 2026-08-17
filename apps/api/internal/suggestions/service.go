@@ -362,6 +362,10 @@ func (s *Service) evaluateRules(link db.Link, result heat.Result, m suggestionMe
 
 	candidates := make([]candidate, 0, len(matches))
 	for _, match := range matches {
+		ctx := ctxSnapshot
+		if email := visitorEmailFromGateHold(match.Subtype, events); email != "" {
+			ctx.VisitorEmail = email
+		}
 		candidates = append(candidates, candidate{
 			RuleID:   match.ID,
 			Type:     match.Type,
@@ -369,7 +373,7 @@ func (s *Service) evaluateRules(link db.Link, result heat.Result, m suggestionMe
 			Reason:   match.Reason,
 			Action:   match.Action,
 			Metadata: match.Metadata,
-			Context:  ctxSnapshot,
+			Context:  ctx,
 		})
 	}
 	return candidates, bucketSkipped, shadowMatched, nil
@@ -995,7 +999,7 @@ func keyPageDisplayTitles(pages []db.GetLinkKeyPageViewDetailsRow) []string {
 	spanMultiple := len(ids) > 1
 	out := make([]string, 0, len(pages))
 	for _, page := range pages {
-		title := strings.TrimSpace(page.Title)
+		title := heat.DisplayablePageTitle(page.Title)
 		if title == "" {
 			continue
 		}

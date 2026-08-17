@@ -16,6 +16,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/ledongthuc/pdf"
+
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/heat"
 )
 
 // PageInfo holds extracted data for a single PDF page.
@@ -77,12 +79,16 @@ func truncateUTF8Bytes(s string, maxBytes int) string {
 	return s[:maxBytes]
 }
 
-// truncatePageTitle extracts the first non-empty text block and truncates it for
-// use as a page title. Fallback returns an empty string if no text is found.
+// truncatePageTitle extracts the first human-readable text block and truncates
+// it for use as a page title. JSON/code dumps are skipped so they are not shown
+// as headings. Fallback returns an empty string if no usable text is found.
 func truncatePageTitle(blocks []TextBlock) string {
 	for _, b := range blocks {
 		if t := strings.TrimSpace(sanitizeUTF8Text(b.Text)); t != "" {
 			t = strings.Join(strings.Fields(t), " ")
+			if heat.DisplayablePageTitle(t) == "" {
+				continue
+			}
 			return truncateUTF8Bytes(t, maxPageTitleLen)
 		}
 	}

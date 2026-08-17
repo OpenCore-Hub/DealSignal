@@ -395,8 +395,11 @@ func classify(a db.ActionItem, sig *db.Signal) (Product, Verb, bool) {
 			case suggestions.SubtypeBounce:
 				return "", "", false
 			case suggestions.SubtypeForward, suggestions.SubtypeDownload,
-				suggestions.SubtypeBlockedAttempt, suggestions.SubtypeCaptureAttempt:
+				suggestions.SubtypeCaptureAttempt:
 				return ProductLeakWatch, VerbReview, true
+			case suggestions.SubtypeBlockedAttempt:
+				// Same six products: a hold at the gate is waiting-to-enter, not sharing.
+				return ProductDiligenceGate, VerbReview, true
 			case suggestions.SubtypeExpired, suggestions.SubtypeAccessExhausted, suggestions.SubtypeAccessRevoked:
 				return ProductAccessDecay, VerbReview, true
 			case suggestions.SubtypeAnomaly:
@@ -632,7 +635,10 @@ func buildItem(in CompileInput, a db.ActionItem, sig *db.Signal, product Product
 
 	pack := PackFor(scenario)
 	if v, ok := pack.VerbByProduct[product]; ok {
-		verb = v
+		// A hold at the gate is review, not approve — there is no request to approve.
+		if product != ProductDiligenceGate || verb != VerbReview {
+			verb = v
+		}
 	}
 
 	dealKey := "workspace"
@@ -655,6 +661,13 @@ func buildItem(in CompileInput, a db.ActionItem, sig *db.Signal, product Product
 	if verb == VerbEmail && email == "" {
 		verb = VerbOpen
 	}
+	if product == ProductDiligenceGate && verb == VerbReview && sig != nil {
+		if v := visitorEmailFromContext(sig.Context); v != "" {
+			// Occupies Actor only. ContactEmail stays the share-contact so the
+			// row can name both the person held and who the link was sent to.
+			actor = v
+		}
+	}
 	headlineCode := ""
 	if code, ok := pack.HeadlineCodeByProduct[product]; ok {
 		headlineCode = code
@@ -674,8 +687,6 @@ func buildItem(in CompileInput, a db.ActionItem, sig *db.Signal, product Product
 		case suggestions.SubtypeForward, suggestions.SubtypeDownload,
 			suggestions.SubtypeCaptureAttempt:
 			conf = ConfidenceMedium
-		case suggestions.SubtypeBlockedAttempt:
-			conf = ConfidenceLow
 		default:
 			conf = ConfidenceLow
 		}
@@ -993,6 +1004,14 @@ func contextActor(raw []byte) (actor, email, docTitle string) {
 	email = firstNonEmpty(asString(ctx["contactEmail"]), asString(ctx["visitorEmail"]))
 	docTitle = asString(ctx["documentTitle"])
 	return actor, email, docTitle
+}
+
+func visitorEmailFromContext(raw []byte) string {
+	ctx, ok := unmarshalMap(raw)
+	if !ok {
+		return ""
+	}
+	return asString(ctx["visitorEmail"])
 }
 
 func metadataPage(raw []byte) string {

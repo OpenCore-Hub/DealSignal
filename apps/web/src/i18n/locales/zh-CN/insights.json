@@ -4,7 +4,7 @@
     "pages": "页面分析",
     "access": "访问审计",
     "keyPages": "关键页",
-    "suggestions": "跟进建议"
+    "suggestions": "去交易雷达"
   },
   "page": {
     "title": "洞察",
@@ -158,7 +158,7 @@
   "access": {
     "title": "访问审计",
     "description": "权限与门禁失败汇总——可按类型、数据室、链接所有者、文件夹切片。",
-    "scopeHint": "本页只审计权限与门禁拦住。待审批的访问申请在「分享」中处理，不计入上方的门禁拦住。",
+    "scopeHint": "本页只审计权限与门禁拦住。待审批的访问申请在「分享」中处理，不计入上方的门禁拦住。灰标的门禁提示也不计入。",
     "kpiTotal": "门禁拦住",
     "kpiTotalHint": "仅门禁失败 · 近 {{days}} 天（UTC）",
     "byTypeTitle": "按事件类型",
@@ -213,10 +213,11 @@
       "email_required": "待完成：填写邮箱",
       "invalid_email_code": "未通过：验证码不正确",
       "nda_required": "待完成：签署 NDA",
-      "password": "密码门禁未过",
+      "password": "密码不正确",
       "delivery_email_mismatch": "填写邮箱与验证邮箱不一致",
       "archived": "链接已归档"
-    }
+    },
+    "gatePromptBadge": "门禁提示 · 不是拦住"
   },
   "keyPages": {
     "title": "关键页",
@@ -347,6 +348,7 @@
     "keyPagesEngaged": "{{total}} 次标题命中中，{{engaged}} 次停留 ≥{{seconds}} 秒",
     "keyPagesSkim": "标题命中但停留不足 {{seconds}} 秒，不计分",
     "keyPageRow": "第 {{page}} 页 · {{title}}",
+    "keyPageRowPageOnly": "第 {{page}} 页",
     "keyPageRowViews": "{{engaged}}/{{total}}",
     "factors": {
       "opens": "打开次数",

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { displayablePageTitle } from "./pageTitleDisplay";
+import { displayablePageTitle, displayablePageTitles } from "./pageTitleDisplay";
 
 describe("displayablePageTitle", () => {
   it("keeps deck headings", () => {
@@ -19,11 +19,26 @@ describe("displayablePageTitle", () => {
       displayablePageTitle('"parameters": {"window": 5, "volume_window": 20}, "r...'),
     ).toBe("");
     expect(displayablePageTitle('{"window": 5}')).toBe("");
+    expect(
+      displayablePageTitle(
+        '{"parameters": {"window": 5, "volume_window": 20}, "m...',
+      ),
+    ).toBe("");
   });
 
   it("hides empty titles", () => {
     expect(displayablePageTitle("")).toBe("");
     expect(displayablePageTitle("   ")).toBe("");
     expect(displayablePageTitle(undefined)).toBe("");
+  });
+
+  it("drops JSON dumps from a title list", () => {
+    expect(
+      displayablePageTitles([
+        "Financials",
+        '{"parameters": {"window": 5, "volume_window": 20}, "m...',
+        "  Team  ",
+      ]),
+    ).toEqual(["Financials", "Team"]);
   });
 });

@@ -204,10 +204,13 @@ export function isEditableKeyboardTarget(target: EventTarget | null): boolean {
 }
 
 /** Default completion outcome when the user marks done without choosing. */
-export function defaultOutcomeForProduct(product: RadarProduct): RadarOutcome {
+export function defaultOutcomeForProduct(
+  product: RadarProduct,
+  verb?: RadarVerb,
+): RadarOutcome {
   switch (product) {
     case "diligence_gate":
-      return "approved";
+      return verb === "review" ? "acted" : "approved";
     case "commitment_ask":
       return "replied";
     case "access_decay":
@@ -218,12 +221,16 @@ export function defaultOutcomeForProduct(product: RadarProduct): RadarOutcome {
 }
 
 /** Outcomes offered in the complete menu for a product. */
-export function outcomesForProduct(product: RadarProduct): RadarOutcome[] {
+export function outcomesForProduct(
+  product: RadarProduct,
+  verb?: RadarVerb,
+): RadarOutcome[] {
   switch (product) {
     case "leak_watch":
     case "abuse_guard":
       return ["acted", "false_positive"];
     case "diligence_gate":
+      if (verb === "review") return ["acted", "false_positive"];
       return ["approved", "false_positive"];
     case "commitment_ask":
       return ["replied", "acted"];
@@ -232,6 +239,53 @@ export function outcomesForProduct(product: RadarProduct): RadarOutcome[] {
     default:
       return ["acted"];
   }
+}
+
+/** Primary CTA i18n key. Review means different work per product. */
+export function radarCtaKey(product: RadarProduct, verb: RadarVerb): string {
+  if (verb === "review" && (product === "diligence_gate" || product === "leak_watch")) {
+    return `radar.ctaByProduct.${product}.review`;
+  }
+  if (verb === "email" && product === "buying_window") {
+    return "radar.ctaByProduct.buying_window.email";
+  }
+  if (verb === "open" && product === "buying_window") {
+    return "radar.ctaByProduct.buying_window.confirmRecipient";
+  }
+  return `radar.cta.${verb}`;
+}
+
+/** Named recipient for warm-card email CTA. Missing/invalid email → no Email button. */
+export function radarEmailContactLabel(item: {
+  actor?: string;
+  contactEmail?: string;
+}): string | null {
+  const email = item.contactEmail?.trim() ?? "";
+  if (!email.includes("@") || /\s/.test(email)) return null;
+  const actor = item.actor?.trim() ?? "";
+  return actor || email;
+}
+
+/** Complete-menu i18n key. Stored outcome enums stay product-agnostic. */
+export function radarOutcomeKey(
+  product: RadarProduct,
+  outcome: RadarOutcome,
+  verb?: RadarVerb,
+): string {
+  if (
+    product === "diligence_gate" &&
+    verb === "review" &&
+    (outcome === "acted" || outcome === "false_positive")
+  ) {
+    return `radar.outcomeByProduct.diligence_gate.review.${outcome}`;
+  }
+  if (
+    product === "leak_watch" &&
+    (outcome === "acted" || outcome === "false_positive")
+  ) {
+    return `radar.outcomeByProduct.leak_watch.${outcome}`;
+  }
+  return `radar.outcome.${outcome}`;
 }
 
 export const RADAR_FILTERS: RadarFilter[] = [

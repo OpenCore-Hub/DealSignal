@@ -5,6 +5,7 @@ import {
   accessEventReasonLabel,
   accessEventSecondaryLabel,
   accessEventTypeLabel,
+  isAccessGatePromptReason,
 } from "./accessEventLabels";
 
 const en: Record<string, string> = {
@@ -13,6 +14,8 @@ const en: Record<string, string> = {
   "access.eventTypes.not_in_allow_list": "Not on allow list",
   "access.reasons.email_code_required": "Email verification required",
   "access.reasons.nda_required": "NDA required",
+  "access.reasons.password": "Wrong password",
+  "access.gatePromptBadge": "Gate prompt · not a hold",
 };
 
 const t = (key: string) => en[key] ?? key;
@@ -23,6 +26,15 @@ describe("accessEventLabels", () => {
       "Email verification required",
     );
     expect(accessEventSecondaryLabel(t, "security_gate_failed", "email_code_required")).toBe(
+      "Gate prompt · not a hold",
+    );
+  });
+
+  it("does not treat wrong password or invalid code as a prompt", () => {
+    expect(isAccessGatePromptReason("password")).toBe(false);
+    expect(isAccessGatePromptReason("invalid_email_code")).toBe(false);
+    expect(isAccessGatePromptReason("email_code_required")).toBe(true);
+    expect(accessEventSecondaryLabel(t, "security_gate_failed", "password")).toBe(
       "Security gate failed",
     );
   });

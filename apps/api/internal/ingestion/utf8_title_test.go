@@ -50,3 +50,18 @@ func TestTruncatePageTitle_ByteSliceLegacyWouldBreak(t *testing.T) {
 		t.Fatal("title still ends with orphan UTF-8 lead byte 0xe2")
 	}
 }
+
+func TestTruncatePageTitle_SkipsJSONDumpForNextHeading(t *testing.T) {
+	title := truncatePageTitle([]TextBlock{
+		{Text: `{"parameters": {"window": 5, "volume_window": 20}}`},
+		{Text: "  回测参数  "},
+	})
+	if title != "回测参数" {
+		t.Fatalf("got %q want 回测参数", title)
+	}
+	if got := truncatePageTitle([]TextBlock{
+		{Text: `"parameters": {"window": 5}`},
+	}); got != "" {
+		t.Fatalf("json-only page should have empty title, got %q", got)
+	}
+}

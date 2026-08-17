@@ -195,11 +195,11 @@ func productFromOutcomeKind(kind string) Product {
 	case "abnormal_access_pattern":
 		return ProductLeakWatch
 	case suggestions.SubtypeForward, suggestions.SubtypeDownload,
-		suggestions.SubtypeBlockedAttempt, suggestions.SubtypeCaptureAttempt,
+		suggestions.SubtypeCaptureAttempt,
 		// Legacy anomaly rows without metadata.eventType still learn as Leak Watch.
 		suggestions.SubtypeAnomaly, "review":
 		return ProductLeakWatch
-	case "approve", "sign", "verify":
+	case suggestions.SubtypeBlockedAttempt, "approve", "sign", "verify":
 		return ProductDiligenceGate
 	case suggestions.SubtypeQuestion, suggestions.SubtypeFormalAsk, "answer":
 		return ProductCommitmentAsk

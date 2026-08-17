@@ -93,6 +93,7 @@ async function renderPage(waitForLoad = true, entry = "/acme/dashboard") {
       "radar.cta.approve": "Approve",
       "radar.cta.reply": "Reply",
       "radar.cta.email": "Email",
+      "radar.ctaByProduct.buying_window.email": "Email {{contact}}",
       "radar.cta.renew": "Renew",
       "radar.cta.review": "Review",
       "radar.cta.open": "Open",
@@ -390,7 +391,7 @@ describe("DashboardPage inbox", () => {
     );
   });
 
-  it("hides Email primary CTA for Hot intent and never opens mailto", async () => {
+  it("names the Hot intent email CTA after the contact and never opens mailto", async () => {
     const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
     const item = makeItem({
       id: "act-hot",
@@ -409,18 +410,14 @@ describe("DashboardPage inbox", () => {
     await renderPage();
     const nextUp = await screen.findByTestId("radar-next-up");
 
-    expect(
-      within(nextUp).queryByRole("button", { name: /^Email$/i }),
-    ).not.toBeInTheDocument();
-    expect(
-      within(nextUp).getByRole("button", { name: /Evidence/i }),
-    ).toBeInTheDocument();
-
-    // Row body selects only — no navigate / mailto.
-    fireEvent.click(within(nextUp).getByText("Follow up with buyer"));
-    expect(mockFns.navigate).not.toHaveBeenCalled();
+    fireEvent.click(
+      within(nextUp).getByRole("button", { name: /^Email buyer@acme.test$/i }),
+    );
+    expect(mockFns.navigate).toHaveBeenCalledWith(
+      "/acme/links/l1",
+      expect.objectContaining({ state: expect.any(Object) }),
+    );
     expect(openSpy).not.toHaveBeenCalled();
-    expect(nextUp.querySelector('[data-radar-selected="true"]')).toBeTruthy();
 
     openSpy.mockRestore();
   });

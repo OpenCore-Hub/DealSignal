@@ -1878,6 +1878,11 @@ WHERE se.workspace_id = $1
     'invite_token_revoked',
     'rate_limit_exceeded'
   ]::text[])
+  AND COALESCE(se.reason, '') NOT IN (
+    'email_required',
+    'email_code_required',
+    'nda_required'
+  )
   AND ($4::text IS NULL OR se.event_type = $4)
   AND ($5::uuid IS NULL OR l.created_by = $5)
   AND (
@@ -1963,6 +1968,11 @@ WHERE se.workspace_id = $1
     'invite_token_revoked',
     'rate_limit_exceeded'
   ]::text[])
+  AND COALESCE(se.reason, '') NOT IN (
+    'email_required',
+    'email_code_required',
+    'nda_required'
+  )
   AND ($4::text IS NULL OR se.event_type = $4)
   AND ($5::uuid IS NULL OR l.deal_room_id = $5)
   AND ($6::uuid IS NULL OR l.created_by = $6)
@@ -2053,6 +2063,11 @@ WHERE se.workspace_id = $1
     'invite_token_revoked',
     'rate_limit_exceeded'
   ]::text[])
+  AND COALESCE(se.reason, '') NOT IN (
+    'email_required',
+    'email_code_required',
+    'nda_required'
+  )
   AND ($4::text IS NULL OR se.event_type = $4)
   AND ($5::uuid IS NULL OR l.deal_room_id = $5)
   AND (
@@ -2133,6 +2148,11 @@ WHERE se.workspace_id = $1
     'invite_token_revoked',
     'rate_limit_exceeded'
   ]::text[])
+  AND COALESCE(se.reason, '') NOT IN (
+    'email_required',
+    'email_code_required',
+    'nda_required'
+  )
   AND ($4::text IS NULL OR se.event_type = $4)
   AND ($5::uuid IS NULL OR l.deal_room_id = $5)
   AND ($6::uuid IS NULL OR l.created_by = $6)
@@ -2161,6 +2181,9 @@ type CountWorkspaceAccessAuditByTypeRow struct {
 
 // Insights access-audit: permission / gate failures across the workspace.
 // Folder grain: document placement path, else link target_folder_path (deal-room shares).
+// Hold KPIs exclude empty-form gate prompts (email_required, email_code_required,
+// nda_required). ListWorkspaceAccessAuditEvents still returns those rows for the
+// gray historical label.
 func (q *Queries) CountWorkspaceAccessAuditByType(ctx context.Context, arg CountWorkspaceAccessAuditByTypeParams) ([]CountWorkspaceAccessAuditByTypeRow, error) {
 	rows, err := q.db.Query(ctx, countWorkspaceAccessAuditByType,
 		arg.WorkspaceID,

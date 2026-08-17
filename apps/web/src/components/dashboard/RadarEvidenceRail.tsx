@@ -5,9 +5,11 @@ import { ArrowRight, SpinnerGap } from "@phosphor-icons/react";
 import { useAsyncData } from "@/hooks/useAsyncData";
 import { api } from "@/lib/api";
 import { documentDetailPath } from "@/lib/documentDetailNav";
+import { displayablePageTitles } from "@/lib/insights/pageTitleDisplay";
 import {
   coalesceSecurityEvents,
   evidenceEmptyPrimaryKey,
+  gateTimelineI18nKey,
   gateTimelineSummary,
   isRadarGateHoldItem,
   topPagesSpanMultipleDocuments,
@@ -20,6 +22,7 @@ import {
   type RadarWorkItem,
 } from "@/lib/radarQueue";
 import { cn } from "@/lib/utils";
+import { isAccessGatePromptReason } from "@/lib/accessEventLabels";
 
 /** Shared tile for Evidence list rows (parity with metric tiles across all 6 products). */
 const EMBEDDED_ITEM =
@@ -59,6 +62,7 @@ export function RadarEvidenceRail({
   }
 
   const isDiligenceGate = item.product === "diligence_gate";
+  const foldShareActivity = isRadarGateHoldItem(item);
   const accessRequest = data?.accessRequest;
   const metricsActive = evidenceMetricsHaveActivity(data?.metrics);
   const coalescedEvents = coalesceSecurityEvents(data?.securityEvents);
@@ -74,6 +78,7 @@ export function RadarEvidenceRail({
   // Selected radar row already shows deal / headline / actor / why-now — Evidence leads with facets only.
   const cardActor = item.actor?.trim().toLowerCase() ?? "";
   const labelTopPagesWithDocument = topPagesSpanMultipleDocuments(data?.topPages ?? []);
+  const keyPageTitles = displayablePageTitles(data?.keyPageTitles);
 
   return (
     <section
@@ -155,7 +160,7 @@ export function RadarEvidenceRail({
               className="text-sm text-muted-foreground"
               data-testid="radar-evidence-gate-timeline"
             >
-              {formatGateTimeline(t, timeline)}
+              {formatGateTimeline(t, timeline, accessRequest?.status)}
             </p>
           ) : null}
 
@@ -176,6 +181,8 @@ export function RadarEvidenceRail({
                     countLabel={t("radar.evidenceRail.coalesced.count", {
                       count: group.count,
                     })}
+                    prompt={isAccessGatePromptReason(group.reason)}
+                    promptLabel={t("radar.evidenceRail.gatePromptBadge")}
                     hideEmail={
                       Boolean(cardActor) &&
                       group.email?.trim().toLowerCase() === cardActor
@@ -186,42 +193,12 @@ export function RadarEvidenceRail({
             </Block>
           ) : null}
 
-          {data.metrics && metricsActive ? (
-            <div data-testid="radar-evidence-metrics">
-              {isRadarGateHoldItem(item) ? (
-                <p
-                  className="mb-2 text-caption text-muted-foreground"
-                  data-testid="radar-evidence-metrics-link-level"
-                >
-                  {t("radar.evidenceRail.metrics.linkLevel")}
-                </p>
-              ) : null}
-            <dl className="grid grid-cols-2 gap-2">
-              <Metric
-                label={t("radar.evidenceRail.metrics.opens24h")}
-                value={data.metrics.opens24h}
-              />
-              <Metric
-                label={t("radar.evidenceRail.metrics.visitors24h")}
-                value={data.metrics.uniqueVisitors24h}
-              />
-              <Metric
-                label={t("radar.evidenceRail.metrics.forwards24h")}
-                value={data.metrics.forwardSignals24h}
-              />
-              <Metric
-                label={t("radar.evidenceRail.metrics.downloads24h")}
-                value={data.metrics.downloads24h}
-              />
-              {(data.metrics.captureAttempts24h ?? 0) > 0 ? (
-                <Metric
-                  label={t("radar.evidenceRail.metrics.captures24h")}
-                  value={data.metrics.captureAttempts24h ?? 0}
-                />
-              ) : null}
-            </dl>
-            </div>
-          ) : null}
+          <ShareActivitySection
+            fold={foldShareActivity}
+            metrics={data.metrics}
+            visitors={data.recentVisitors}
+            t={t}
+          />
 
           {/* Product-primary empty copy — never lead with four zero tiles. */}
           {emptyPrimaryKey ? (
@@ -237,10 +214,10 @@ export function RadarEvidenceRail({
             </p>
           ) : null}
 
-          {data.keyPageTitles && data.keyPageTitles.length > 0 ? (
+          {keyPageTitles.length > 0 ? (
             <Block title={t("radar.evidenceRail.keyPages")}>
               <ul className="space-y-1.5" data-testid="radar-evidence-key-pages">
-                {data.keyPageTitles.map((title) => (
+                {keyPageTitles.map((title) => (
                   <li key={title} className={cn(EMBEDDED_ITEM, "text-foreground")}>
                     {title}
                   </li>
@@ -291,30 +268,8 @@ export function RadarEvidenceRail({
             </Block>
           ) : null}
 
-          {data.recentVisitors && data.recentVisitors.length > 0 ? (
-            <Block title={t("radar.evidenceRail.recentVisitors")}>
-              <ul
-                className="space-y-1.5"
-                data-testid="radar-evidence-recent-visitors"
-              >
-                {data.recentVisitors.map((v) => (
-                  <li
-                    key={v.visitorId}
-                    className={cn(
-                      EMBEDDED_ITEM,
-                      "flex flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5",
-                    )}
-                  >
-                    <span className="font-medium">
-                      {v.email || t("radar.evidenceRail.anonymousVisitor")}
-                    </span>
-                    <span className="text-caption text-muted-foreground">
-                      {t("radar.evidenceRail.views", { count: v.totalViews })}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </Block>
+          {!foldShareActivity && data.recentVisitors && data.recentVisitors.length > 0 ? (
+            <RecentVisitorsBlock visitors={data.recentVisitors} t={t} />
           ) : null}
 
           {(data.insightsPath || data.evidencePath || data.navigatePath) && (
@@ -340,6 +295,125 @@ export function RadarEvidenceRail({
   );
 }
 
+type EvidenceTranslate = (key: string, opts?: Record<string, unknown>) => string;
+
+function ShareActivitySection({
+  fold,
+  metrics,
+  visitors,
+  t,
+}: {
+  fold: boolean;
+  metrics?: RadarEvidencePack["metrics"];
+  visitors?: RadarEvidencePack["recentVisitors"];
+  t: EvidenceTranslate;
+}) {
+  const showMetrics = Boolean(metrics && evidenceMetricsHaveActivity(metrics));
+  const showVisitors = Boolean(visitors?.length);
+  if (!showMetrics && !(fold && showVisitors)) return null;
+
+  const body = (
+    <>
+      {showMetrics && metrics ? (
+        <div data-testid="radar-evidence-metrics">
+          {fold ? (
+            <p
+              className="mb-2 text-caption text-muted-foreground"
+              data-testid="radar-evidence-metrics-link-level"
+            >
+              {t("radar.evidenceRail.metrics.linkLevel")}
+            </p>
+          ) : null}
+          <EvidenceMetricsGrid metrics={metrics} t={t} />
+        </div>
+      ) : null}
+      {fold && showVisitors ? (
+        <RecentVisitorsBlock visitors={visitors ?? []} t={t} />
+      ) : null}
+    </>
+  );
+
+  if (!fold) return body;
+
+  return (
+    <details data-testid="radar-evidence-share-activity">
+      <summary
+        className="cursor-pointer text-caption font-medium text-muted-foreground"
+        data-testid="radar-evidence-share-activity-summary"
+      >
+        {t("radar.evidenceRail.shareActivity.summary")}
+      </summary>
+      <div className="mt-2 space-y-3">{body}</div>
+    </details>
+  );
+}
+
+function EvidenceMetricsGrid({
+  metrics,
+  t,
+}: {
+  metrics: NonNullable<RadarEvidencePack["metrics"]>;
+  t: EvidenceTranslate;
+}) {
+  return (
+    <dl className="grid grid-cols-2 gap-2">
+      <Metric
+        label={t("radar.evidenceRail.metrics.opens24h")}
+        value={metrics.opens24h}
+      />
+      <Metric
+        label={t("radar.evidenceRail.metrics.visitors24h")}
+        value={metrics.uniqueVisitors24h}
+      />
+      <Metric
+        label={t("radar.evidenceRail.metrics.forwards24h")}
+        value={metrics.forwardSignals24h}
+      />
+      <Metric
+        label={t("radar.evidenceRail.metrics.downloads24h")}
+        value={metrics.downloads24h}
+      />
+      {(metrics.captureAttempts24h ?? 0) > 0 ? (
+        <Metric
+          label={t("radar.evidenceRail.metrics.captures24h")}
+          value={metrics.captureAttempts24h ?? 0}
+        />
+      ) : null}
+    </dl>
+  );
+}
+
+function RecentVisitorsBlock({
+  visitors,
+  t,
+}: {
+  visitors: NonNullable<RadarEvidencePack["recentVisitors"]>;
+  t: EvidenceTranslate;
+}) {
+  return (
+    <Block title={t("radar.evidenceRail.recentVisitors")}>
+      <ul className="space-y-1.5" data-testid="radar-evidence-recent-visitors">
+        {visitors.map((v) => (
+          <li
+            key={v.visitorId}
+            className={cn(
+              EMBEDDED_ITEM,
+              "flex flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5",
+            )}
+          >
+            <span className="font-medium">
+              {v.email || t("radar.evidenceRail.anonymousVisitor")}
+            </span>
+            <span className="text-caption text-muted-foreground">
+              {t("radar.evidenceRail.views", { count: v.totalViews })}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </Block>
+  );
+}
+
 function eventLabel(
   t: (key: string, opts?: Record<string, unknown>) => string,
   group: CoalescedSecurityEvent,
@@ -359,23 +433,25 @@ function eventLabel(
 function formatGateTimeline(
   t: (key: string, opts?: Record<string, unknown>) => string,
   summary: GateTimelineSummary,
+  requestStatus?: string | null,
 ): string {
+  const key = gateTimelineI18nKey(summary, requestStatus);
   switch (summary.kind) {
     case "before_and_after":
-      return t("radar.evidenceRail.gateTimeline.beforeAndAfter", {
+      return t(key, {
         before: summary.before,
         after: summary.after,
       });
     case "before_only":
-      return t("radar.evidenceRail.gateTimeline.beforeOnly", {
+      return t(key, {
         before: summary.before,
       });
     case "after_only":
-      return t("radar.evidenceRail.gateTimeline.afterOnly", {
+      return t(key, {
         after: summary.after,
       });
     case "events_only":
-      return t("radar.evidenceRail.gateTimeline.eventsOnly", {
+      return t(key, {
         total: summary.total,
       });
   }
@@ -386,16 +462,22 @@ function CoalescedGateRow({
   label,
   countLabel,
   hideEmail,
+  prompt,
+  promptLabel,
 }: {
   group: CoalescedSecurityEvent;
   label: string;
   countLabel: string;
   hideEmail?: boolean;
+  prompt?: boolean;
+  promptLabel?: string;
 }) {
   return (
-    <li className={EMBEDDED_ITEM}>
+    <li className={EMBEDDED_ITEM} data-gate-prompt={prompt ? "true" : undefined}>
       <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
-        <span className="font-medium">{label}</span>
+        <span className={prompt ? "font-medium text-muted-foreground" : "font-medium"}>
+          {label}
+        </span>
         {group.count > 1 ? (
           <span className="text-caption text-muted-foreground">· {countLabel}</span>
         ) : null}
@@ -403,6 +485,9 @@ function CoalescedGateRow({
           <span className="text-caption text-muted-foreground">· {group.email}</span>
         ) : null}
       </div>
+      {prompt && promptLabel ? (
+        <p className="text-caption mt-0.5 text-muted-foreground">{promptLabel}</p>
+      ) : null}
     </li>
   );
 }

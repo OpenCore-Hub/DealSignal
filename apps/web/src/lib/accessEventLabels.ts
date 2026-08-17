@@ -1,5 +1,20 @@
 type Translate = (key: string, opts?: Record<string, unknown>) => string;
 
+/**
+ * Empty-form gate prompts stored before write-path stopped auditing them.
+ * Wrong password / invalid code are real failures and must not match.
+ */
+export function isAccessGatePromptReason(reason?: string | null): boolean {
+  switch (reason?.trim()) {
+    case "email_required":
+    case "email_code_required":
+    case "nda_required":
+      return true;
+    default:
+      return false;
+  }
+}
+
 /** Coarse security_events.event_type label (category). */
 export function accessEventTypeLabel(t: Translate, eventType: string): string {
   const key = `access.eventTypes.${eventType}`;
@@ -46,6 +61,11 @@ export function accessEventSecondaryLabel(
 ): string | null {
   const reasonLabel = accessEventReasonLabel(t, reason);
   if (eventType === "security_gate_failed" && reasonLabel) {
+    if (isAccessGatePromptReason(reason)) {
+      const key = "access.gatePromptBadge";
+      const labeled = t(key);
+      return labeled === key ? reasonLabel : labeled;
+    }
     return accessEventTypeLabel(t, eventType);
   }
   return null;

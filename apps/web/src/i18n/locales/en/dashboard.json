@@ -34,6 +34,18 @@
       "review": "Check",
       "open": "Open"
     },
+    "ctaByProduct": {
+      "diligence_gate": {
+        "review": "See this hold"
+      },
+      "leak_watch": {
+        "review": "Review sharing"
+      },
+      "buying_window": {
+        "email": "Email {{contact}}",
+        "confirmRecipient": "Confirm who to email"
+      }
+    },
     "evidence": "Evidence",
     "snooze": "Snooze",
     "snoozeHours": {
@@ -58,7 +70,7 @@
       "buying_window": "Interest is warm. Follow up while they are still looking.",
       "diligence_gate": "Someone still cannot get in. Decide whether to let them in.",
       "commitment_ask": "A question is waiting for a reply today.",
-      "leak_watch": "Forward, download, or blocked-access signals — check before the next outreach.",
+      "leak_watch": "Forward, download, or screenshot signals — check before the next outreach.",
       "access_decay": "This share is about to expire. Renew it, or confirm it can close.",
       "abuse_guard": "Asks or opens are well above the usual. Check quotas first."
     },
@@ -69,7 +81,7 @@
           "buying_window": "Investor interest is warm. Follow up while they are still looking.",
           "diligence_gate": "An investor still cannot get in. Decide whether to let them in.",
           "commitment_ask": "A diligence question is waiting for a reply today.",
-          "leak_watch": "Forward, download, or blocked-access signals — check before the next outreach.",
+          "leak_watch": "Forward, download, or screenshot signals — check before the next outreach.",
           "access_decay": "Investor access is about to expire. Renew it, or close the process.",
           "abuse_guard": "Asks or opens on this raise are well above the usual. Check quotas first."
         },
@@ -88,7 +100,7 @@
           "buying_window": "Later-stage interest is peaking. Push the next investment-committee step while they are still looking.",
           "diligence_gate": "A later-stage reviewer still cannot get in. Decide whether to let them in.",
           "commitment_ask": "A term or diligence question is waiting for a reply today.",
-          "leak_watch": "Forward, download, or blocked-access signals — check distribution first.",
+          "leak_watch": "Forward, download, or screenshot signals — check distribution first.",
           "access_decay": "Co-investor access is about to expire. Renew the people still looking.",
           "abuse_guard": "Asks or opens are well above the usual. Tighten policy if needed."
         },
@@ -107,7 +119,7 @@
           "buying_window": "Buyer engagement is warm. Advance the process while they are still looking.",
           "diligence_gate": "A buyer still cannot get in. Decide whether to let them in.",
           "commitment_ask": "An M&A diligence question is waiting for a reply today.",
-          "leak_watch": "Forward, download, or blocked-access signals — check before the next buyer touch.",
+          "leak_watch": "Forward, download, or screenshot signals — check before the next buyer touch.",
           "access_decay": "Buyer access is about to expire. Renew it, or confirm the process is paused.",
           "abuse_guard": "Asks or opens on this deal are well above the usual. Check quotas first."
         },
@@ -126,7 +138,7 @@
           "buying_window": "The buyer evaluation window is open. Follow up while they are still looking.",
           "diligence_gate": "A prospect still cannot get in. Decide whether to let them in.",
           "commitment_ask": "A commercial or security question is waiting for a reply today.",
-          "leak_watch": "Forward, download, or blocked-access signals — check before the next call.",
+          "leak_watch": "Forward, download, or screenshot signals — check before the next call.",
           "access_decay": "Prospect access is about to expire. Renew it, or confirm they dropped.",
           "abuse_guard": "Prospect asks or opens are well above the usual. Check quotas first."
         },
@@ -145,7 +157,7 @@
           "buying_window": "LP interest is warm. Follow up while they are still looking.",
           "diligence_gate": "An LP still cannot get in. Decide whether to let them in.",
           "commitment_ask": "An LP diligence question is waiting for a reply today.",
-          "leak_watch": "Forward, download, or blocked-access signals — check before the next LP touch.",
+          "leak_watch": "Forward, download, or screenshot signals — check before the next LP touch.",
           "access_decay": "LP access is about to expire. Renew the people still looking.",
           "abuse_guard": "LP asks or opens are well above the usual. Check quotas first."
         },
@@ -164,7 +176,7 @@
           "buying_window": "Stakeholder engagement is warm. Follow up while they are still looking.",
           "diligence_gate": "A stakeholder still cannot get in. Decide whether to let them in.",
           "commitment_ask": "A reporting or compliance question is waiting for a reply today.",
-          "leak_watch": "Forward, download, or blocked-access signals — check distribution first.",
+          "leak_watch": "Forward, download, or screenshot signals — check distribution first.",
           "access_decay": "Reporting access is about to expire. Renew it, or confirm it can close.",
           "abuse_guard": "Asks or opens are well above the usual. Check quotas first."
         },
@@ -183,7 +195,7 @@
           "buying_window": "Portfolio engagement is warm. Follow up while they are still looking.",
           "diligence_gate": "A portfolio stakeholder still cannot get in. Decide whether to let them in.",
           "commitment_ask": "A portfolio question is waiting for a reply today.",
-          "leak_watch": "Forward, download, or blocked-access signals — check before the next update.",
+          "leak_watch": "Forward, download, or screenshot signals — check before the next update.",
           "access_decay": "Portfolio access is about to expire. Renew the people still looking.",
           "abuse_guard": "Asks or opens are well above the usual. Check quotas first."
         },
@@ -204,7 +216,7 @@
           "buying_window": "Counterparty interest is warm. Advance while they are still looking.",
           "diligence_gate": "A counterparty still cannot get in. Decide whether to let them in.",
           "commitment_ask": "A transaction question is waiting for a reply today.",
-          "leak_watch": "Forward, download, or blocked-access signals — check distribution first.",
+          "leak_watch": "Forward, download, or screenshot signals — check distribution first.",
           "access_decay": "Counterparty access is about to expire. Renew it, or confirm pause.",
           "abuse_guard": "Asks or opens are well above the usual. Check quotas first."
         },
@@ -225,7 +237,7 @@
           "buying_window": "Stakeholder attention is high. Follow up while they are still looking.",
           "diligence_gate": "A collaborator still cannot get in. Decide whether to let them in.",
           "commitment_ask": "A project question is waiting for a reply today.",
-          "leak_watch": "Forward, download, or blocked-access signals — check sharing first.",
+          "leak_watch": "Forward, download, or screenshot signals — check sharing first.",
           "access_decay": "Collaborator access is about to expire. Renew it, or confirm it can close.",
           "abuse_guard": "Asks or opens are well above the usual. Check quotas first."
         },
@@ -244,7 +256,7 @@
           "buying_window": "Engagement is warm. Follow up while they are still looking.",
           "diligence_gate": "Someone still cannot get in. Decide whether to let them in.",
           "commitment_ask": "A question is waiting for a reply today.",
-          "leak_watch": "Forward, download, or blocked-access signals — check before continuing.",
+          "leak_watch": "Forward, download, or screenshot signals — check before continuing.",
           "access_decay": "Access is about to expire. Renew it, or confirm it can close.",
           "abuse_guard": "Asks or opens are well above the usual. Check quotas first."
         }
@@ -289,17 +301,21 @@
       },
       "gateEvents": "Gate records",
       "gateTimeline": {
-        "beforeAndAfter": "Hit the gate {{before}}× before requesting, then {{after}}× after. The allowlist is still in effect, so more holds are expected.",
+        "beforeAndAfter": "Hit the gate {{before}}× before requesting, then {{after}}× after.",
+        "beforeAndAfterPending": "Hit the gate {{before}}× before requesting, then {{after}}× after. The request is still waiting for approval, so more holds are expected.",
         "beforeOnly": "Hit the gate {{before}}× before requesting access.",
-        "afterOnly": "Requested access, then hit the gate {{after}}×. If approval is still pending, that is expected.",
-        "eventsOnly": "Hit the gate {{total}}×. If the list is unchanged, that is expected."
+        "beforeOnlyPending": "Hit the gate {{before}}× before requesting access. The request is still waiting for approval.",
+        "afterOnly": "Requested access, then hit the gate {{after}}×.",
+        "afterOnlyPending": "Requested access, then hit the gate {{after}}×. The request is still waiting for approval, so more holds are expected.",
+        "eventsOnly": "Hit the gate {{total}}×. The allowlist is still in effect.",
+        "eventsOnlyPending": "Hit the gate {{total}}×. The request is still waiting for approval."
       },
       "coalesced": {
         "count": "{{count}}×"
       },
       "gateNoSuccessfulOpens": "No successful opens yet — the visitor is still outside.",
       "emptyPrimary": {
-        "leak_watch": "No forwards or downloads in the last 24h. Check the gate record — this is not confirmed sharing.",
+        "leak_watch": "No forwards or downloads in the last 24h. This is not confirmed sharing.",
         "abuse_guard": "No capture or rate-limit events in the last 24h on this share yet.",
         "access_decay": "No expired or revoked events in the last 24h on this share yet.",
         "buying_window": "No opens or key-page records in the last 24h on this share yet.",
@@ -343,9 +359,13 @@
         "email_required": "Pending: enter email",
         "invalid_email_code": "Failed: invalid verification code",
         "nda_required": "Pending: sign NDA",
-        "password": "Password gate not passed",
+        "password": "Wrong password",
         "delivery_email_mismatch": "Entered email does not match verified email",
         "unknown": "Reason unavailable"
+      },
+      "gatePromptBadge": "Gate prompt · not a hold",
+      "shareActivity": {
+        "summary": "Share activity (this link, not the person held)"
       },
       "metrics": {
         "opens24h": "Opens (24h)",
@@ -382,6 +402,18 @@
       "approved": "Approved",
       "replied": "Replied",
       "other": "Other"
+    },
+    "outcomeByProduct": {
+      "diligence_gate": {
+        "review": {
+          "acted": "Reviewed this hold",
+          "false_positive": "Hold stands — no action"
+        }
+      },
+      "leak_watch": {
+        "acted": "Reviewed sharing",
+        "false_positive": "Not a sharing signal"
+      }
     },
     "inboxZero": {
       "title": "Nothing to handle today",

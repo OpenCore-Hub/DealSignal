@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/heat"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/plan"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -150,10 +151,17 @@ func notificationSubject(ev Event) string {
 	}
 }
 
+func displayableNotificationPageTitle(meta map[string]string) string {
+	if meta == nil {
+		return ""
+	}
+	return heat.DisplayablePageTitle(strings.TrimSpace(meta["page_title"]))
+}
+
 // formatKeyPageSubject keeps solo subjects unchanged. Bundle secondary
 // views (document_title set) append the file name so inbox rows do not collide.
 func formatKeyPageSubject(base string, meta map[string]string) string {
-	title := strings.TrimSpace(meta["page_title"])
+	title := displayableNotificationPageTitle(meta)
 	doc := strings.TrimSpace(meta["document_title"])
 	switch {
 	case title != "" && doc != "":
@@ -261,7 +269,11 @@ func formatMergeMetadataLines(metadata map[string]string) []string {
 	used := make(map[string]struct{}, len(mergeMetadataOrder))
 	var lines []string
 	for _, item := range mergeMetadataOrder {
+		used[item.key] = struct{}{}
 		v := strings.TrimSpace(metadata[item.key])
+		if item.key == "page_title" {
+			v = heat.DisplayablePageTitle(v)
+		}
 		if v == "" {
 			continue
 		}
@@ -269,7 +281,6 @@ func formatMergeMetadataLines(metadata map[string]string) []string {
 			v += "s"
 		}
 		lines = append(lines, item.label+": "+v)
-		used[item.key] = struct{}{}
 	}
 	var other []string
 	for k, v := range metadata {
@@ -313,7 +324,7 @@ func formatKeyPageBody(ev Event) string {
 		label = "Sensitive page revisited"
 	}
 	b := label + "\n"
-	if title := ev.Metadata["page_title"]; title != "" {
+	if title := displayableNotificationPageTitle(ev.Metadata); title != "" {
 		b += fmt.Sprintf("Page: %s\n", title)
 	}
 	if doc := ev.Metadata["document_title"]; doc != "" {

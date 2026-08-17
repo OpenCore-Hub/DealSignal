@@ -125,3 +125,33 @@ func TestMergeNotificationBodySkipsMachineKeys(t *testing.T) {
 		t.Fatalf("machine-only metadata must not append a section, got %q", got)
 	}
 }
+
+func TestFormatKeyPageBodyHidesJSONPageTitle(t *testing.T) {
+	body := formatEventBody(Event{
+		EventType: "key_page",
+		LinkID:    "link-1",
+		Metadata: map[string]string{
+			"page_title":  `{"parameters": {"window": 5, "volume_window": 20}}`,
+			"page_number": "27",
+		},
+	})
+	if strings.Contains(body, "parameters") || strings.Contains(body, "volume_window") {
+		t.Fatalf("json dump leaked into body:\n%s", body)
+	}
+	if !strings.Contains(body, "Page #: 27") {
+		t.Fatalf("page number must remain:\n%s", body)
+	}
+}
+
+func TestMergeNotificationBodyHidesJSONPageTitle(t *testing.T) {
+	got := mergeNotificationBody("Sensitive page viewed", map[string]string{
+		"page_title":  `{"parameters": {"window": 5}}`,
+		"page_number": "27",
+	})
+	if strings.Contains(got, "parameters") {
+		t.Fatalf("json dump leaked into merge:\n%s", got)
+	}
+	if !strings.Contains(got, "Page #: 27") {
+		t.Fatalf("page number must remain:\n%s", got)
+	}
+}

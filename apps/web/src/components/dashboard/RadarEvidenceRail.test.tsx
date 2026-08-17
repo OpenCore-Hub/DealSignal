@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { I18nextProvider } from "react-i18next";
 import { MemoryRouter } from "react-router";
 import { RadarEvidenceRail } from "./RadarEvidenceRail";
@@ -53,6 +53,8 @@ async function renderRail(item: RadarWorkItem | null) {
       "radar.evidenceRail.metrics.downloads24h": "Downloads (24h)",
       "radar.evidenceRail.metrics.linkLevel":
         "These counts are for this share over the last 24 hours, not the person held at the gate.",
+      "radar.evidenceRail.shareActivity.summary":
+        "Share activity (this link, not the person held)",
       "radar.evidenceRail.recentVisitors": "Recent visitors",
       "radar.evidenceRail.keyPages": "Key pages",
       "radar.evidenceRail.topPages": "Top pages",
@@ -60,6 +62,7 @@ async function renderRail(item: RadarWorkItem | null) {
       "radar.evidenceRail.pageOnDocument": "{{title}} · p.{{page}}",
       "radar.evidenceRail.securityEvents": "Security events",
       "radar.evidenceRail.eventTypes.forward_signal": "Forward signal",
+      "radar.evidenceRail.eventTypes.not_in_allow_list": "Not on allow list",
       "radar.evidenceRail.reasons.abnormal_access": "Abnormal access",
       "radar.evidenceRail.views_one": "{{count}} view",
       "radar.evidenceRail.views_other": "{{count}} views",
@@ -67,13 +70,21 @@ async function renderRail(item: RadarWorkItem | null) {
       "radar.evidenceRail.openShareInbox": "Review in Share",
       "radar.evidenceRail.gateEvents": "Gate events",
       "radar.evidenceRail.gateTimeline.beforeAndAfter":
-        "Hit the gate {{before}}× before requesting, then {{after}}× after — still blocked.",
+        "Hit the gate {{before}}× before requesting, then {{after}}× after.",
+      "radar.evidenceRail.gateTimeline.beforeAndAfterPending":
+        "Hit the gate {{before}}× before requesting, then {{after}}× after. The request is still waiting for approval, so more holds are expected.",
       "radar.evidenceRail.gateTimeline.beforeOnly":
         "Hit the gate {{before}}× before requesting access.",
+      "radar.evidenceRail.gateTimeline.beforeOnlyPending":
+        "Hit the gate {{before}}× before requesting access. The request is still waiting for approval.",
       "radar.evidenceRail.gateTimeline.afterOnly":
-        "Requested access, then hit the gate {{after}}× — still blocked.",
+        "Requested access, then hit the gate {{after}}×.",
+      "radar.evidenceRail.gateTimeline.afterOnlyPending":
+        "Requested access, then hit the gate {{after}}×. The request is still waiting for approval, so more holds are expected.",
       "radar.evidenceRail.gateTimeline.eventsOnly":
-        "Hit the gate {{total}}× — still blocked.",
+        "Hit the gate {{total}}×. The allowlist is still in effect.",
+      "radar.evidenceRail.gateTimeline.eventsOnlyPending":
+        "Hit the gate {{total}}×. The request is still waiting for approval.",
       "radar.evidenceRail.coalesced.count": "{{count}}×",
       "radar.evidenceRail.gateNoSuccessfulOpens":
         "No successful opens yet — the visitor is still at the gate.",
@@ -85,6 +96,7 @@ async function renderRail(item: RadarWorkItem | null) {
       "radar.evidenceRail.accessRequest.surfaces.document_link": "Document share link",
       "radar.evidenceRail.accessRequest.noReason": "No reason provided",
       "radar.evidenceRail.reasons.email_code_required": "Email verification required",
+      "radar.evidenceRail.gatePromptBadge": "Gate prompt · not a hold",
       "radar.evidenceRail.eventTypes.security_gate_failed": "Security gate failed",
       "radar.whyNow.leak_watch": "Leak risk in the last {{hours}}h",
       "radar.whyNow.fallback.leak_watch": "Review soon",
@@ -148,6 +160,7 @@ describe("RadarEvidenceRail", () => {
     expect(screen.getByText("9")).toBeInTheDocument();
     expect(screen.getByText("3")).toBeInTheDocument();
     expect(screen.queryByTestId("radar-evidence-metrics-link-level")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("radar-evidence-share-activity")).not.toBeInTheDocument();
     expect(screen.getByTestId("radar-evidence-open")).toHaveAttribute(
       "href",
       "/acme/links/link-1",
@@ -240,11 +253,11 @@ describe("RadarEvidenceRail", () => {
     expect(screen.queryByTestId("radar-evidence-applicant")).not.toBeInTheDocument();
     expect(screen.getByText("Need the deck for IC")).toBeInTheDocument();
     expect(screen.queryByTestId("radar-evidence-why-now")).not.toBeInTheDocument();
-    expect(screen.getByTestId("radar-evidence-gate-timeline")).toHaveTextContent(
-      "Hit the gate 1× before requesting, then 3× after — still blocked.",
-    );
+    expect(screen.queryByTestId("radar-evidence-gate-timeline")).not.toBeInTheDocument();
     const events = screen.getByTestId("radar-evidence-security-events");
     expect(events).toHaveTextContent("Email verification required");
+    expect(events).toHaveTextContent("Gate prompt · not a hold");
+    expect(events.querySelector("[data-gate-prompt='true']")).toBeTruthy();
     expect(events).toHaveTextContent("4×");
     expect(events).not.toHaveTextContent("Show times");
     expect(events).not.toHaveTextContent("last ");
@@ -262,6 +275,104 @@ describe("RadarEvidenceRail", () => {
       "/acme/documents?tab=shared&linkId=link-1",
     );
     expect(screen.getByTestId("radar-evidence-open")).toHaveTextContent("Review in Share");
+  });
+
+  it("states pending approval on a real hold after the request", async () => {
+    mockFns.getRadarEvidence.mockResolvedValue({
+      itemId: "act-gate-hold-1",
+      product: "diligence_gate",
+      headline: "An investor is still waiting to enter",
+      whyNowCode: "diligence_gate",
+      accessRequest: {
+        email: "lp@vc.com",
+        reason: "Need the deck for IC",
+        status: "pending",
+        requestedAt: "2026-08-11T10:15:00Z",
+        surface: "document_link",
+      },
+      metrics: {
+        opens24h: 0,
+        uniqueVisitors24h: 0,
+        forwardSignals24h: 0,
+        downloads24h: 0,
+      },
+      securityEvents: [
+        {
+          eventType: "not_in_allow_list",
+          email: "lp@vc.com",
+          createdAt: "2026-08-11T10:23:33Z",
+        },
+        {
+          eventType: "security_gate_failed",
+          reason: "email_code_required",
+          createdAt: "2026-08-11T10:14:46Z",
+        },
+      ],
+    } satisfies RadarEvidencePack);
+
+    await renderRail(
+      makeItem({
+        id: "act-gate-hold-1",
+        product: "diligence_gate",
+        headline: "An investor is still waiting to enter",
+        headlineCode: "radar.headline.diligence_gate",
+        whyNowCode: "diligence_gate",
+        verb: "review",
+      }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("radar-evidence-gate-timeline")).toHaveTextContent(
+        "Requested access, then hit the gate 1×. The request is still waiting for approval, so more holds are expected.",
+      );
+    });
+    expect(screen.getByTestId("radar-evidence-gate-timeline")).not.toHaveTextContent(
+      "still blocked",
+    );
+  });
+
+  it("states the allowlist is still in effect when there is no access request", async () => {
+    mockFns.getRadarEvidence.mockResolvedValue({
+      itemId: "act-gate-allowlist",
+      product: "diligence_gate",
+      headline: "Waiting to enter",
+      whyNowCode: "diligence_gate",
+      metrics: {
+        opens24h: 0,
+        uniqueVisitors24h: 0,
+        forwardSignals24h: 0,
+        downloads24h: 0,
+      },
+      securityEvents: [
+        {
+          eventType: "not_in_allow_list",
+          email: "yqx-401@126.com",
+          createdAt: "2026-08-11T17:00:00Z",
+        },
+      ],
+    } satisfies RadarEvidencePack);
+
+    await renderRail(
+      makeItem({
+        id: "act-gate-allowlist",
+        product: "diligence_gate",
+        verb: "review",
+        actor: "yqx-401@126.com",
+        headline: "Waiting to enter",
+      }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("radar-evidence-gate-timeline")).toHaveTextContent(
+        "Hit the gate 1×. The allowlist is still in effect.",
+      );
+    });
+    expect(screen.getByTestId("radar-evidence-gate-timeline")).not.toHaveTextContent(
+      "still blocked",
+    );
+    expect(screen.getByTestId("radar-evidence-gate-timeline")).not.toHaveTextContent(
+      "waiting for approval",
+    );
   });
 
   it("skips deal / headline / why-now card echo for all products", async () => {
@@ -565,11 +676,11 @@ describe("RadarEvidenceRail", () => {
     expect(screen.queryByTestId("radar-evidence-metrics")).not.toBeInTheDocument();
   });
 
-  it("labels 24h metrics as share-level on a gate-hold leak card", async () => {
+  it("labels 24h metrics as share-level on a waiting-to-enter card", async () => {
     mockFns.getRadarEvidence.mockResolvedValue({
       itemId: "act-gate-hold",
-      product: "leak_watch",
-      headline: "Check sharing",
+      product: "diligence_gate",
+      headline: "Waiting to enter",
       metrics: {
         opens24h: 5,
         uniqueVisitors24h: 2,
@@ -588,21 +699,158 @@ describe("RadarEvidenceRail", () => {
     await renderRail(
       makeItem({
         id: "act-gate-hold",
-        product: "leak_watch",
-        confidence: "low",
+        product: "diligence_gate",
+        verb: "review",
         actor: "张姐",
-        headline: "Check sharing",
+        headline: "Waiting to enter",
       }),
     );
 
     await waitFor(() => {
-      expect(screen.getByTestId("radar-evidence-metrics-link-level")).toBeInTheDocument();
+      expect(screen.getByTestId("radar-evidence-share-activity")).toBeInTheDocument();
     });
+    const fold = screen.getByTestId("radar-evidence-share-activity");
+    expect(fold).not.toHaveAttribute("open");
+    expect(screen.getByTestId("radar-evidence-share-activity-summary")).toHaveTextContent(
+      "Share activity (this link, not the person held)",
+    );
     expect(screen.getByTestId("radar-evidence-metrics-link-level")).toHaveTextContent(
       "not the person held at the gate",
     );
     expect(screen.getByTestId("radar-evidence-security-events")).toHaveTextContent(
       "yqx-401@126.com",
+    );
+    fireEvent.click(screen.getByTestId("radar-evidence-share-activity-summary"));
+    expect(fold).toHaveAttribute("open");
+    expect(screen.getByTestId("radar-evidence-metrics")).toHaveTextContent("5");
+  });
+
+  it("folds visitors who got in on a waiting-to-enter card", async () => {
+    mockFns.getRadarEvidence.mockResolvedValue({
+      itemId: "act-gate-visitors",
+      product: "diligence_gate",
+      headline: "Waiting to enter",
+      metrics: {
+        opens24h: 0,
+        uniqueVisitors24h: 0,
+        forwardSignals24h: 0,
+        downloads24h: 0,
+      },
+      recentVisitors: [
+        {
+          visitorId: "v-other",
+          email: "analyst@acme.test",
+          totalViews: 4,
+          lastAccessAt: "2026-08-11T18:00:00Z",
+        },
+      ],
+      securityEvents: [
+        {
+          eventType: "not_in_allow_list",
+          email: "yqx-401@126.com",
+          createdAt: "2026-08-11T17:00:00Z",
+        },
+      ],
+    } satisfies RadarEvidencePack);
+
+    await renderRail(
+      makeItem({
+        id: "act-gate-visitors",
+        product: "diligence_gate",
+        verb: "review",
+        actor: "yqx-401@126.com",
+        headline: "Waiting to enter",
+      }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("radar-evidence-share-activity")).toBeInTheDocument();
+    });
+    const fold = screen.getByTestId("radar-evidence-share-activity");
+    expect(fold).not.toHaveAttribute("open");
+    expect(fold).toContainElement(screen.getByTestId("radar-evidence-recent-visitors"));
+    expect(screen.queryByTestId("radar-evidence-metrics")).not.toBeInTheDocument();
+    expect(screen.getByTestId("radar-evidence-recent-visitors")).toHaveTextContent(
+      "analyst@acme.test",
+    );
+  });
+
+  it("does not fold share activity on a pending-approve waiting-to-enter card", async () => {
+    mockFns.getRadarEvidence.mockResolvedValue({
+      itemId: "act-gate-approve",
+      product: "diligence_gate",
+      headline: "Approve access request",
+      metrics: {
+        opens24h: 5,
+        uniqueVisitors24h: 2,
+        forwardSignals24h: 0,
+        downloads24h: 0,
+      },
+    } satisfies RadarEvidencePack);
+
+    await renderRail(
+      makeItem({
+        id: "act-gate-approve",
+        product: "diligence_gate",
+        verb: "approve",
+        headline: "Approve access request",
+      }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("radar-evidence-metrics")).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("radar-evidence-share-activity")).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("radar-evidence-metrics-link-level"),
+    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("radar-evidence-metrics")).toHaveTextContent("5");
+  });
+
+  it("states pending approval when holds are entirely before the request", async () => {
+    mockFns.getRadarEvidence.mockResolvedValue({
+      itemId: "act-gate-before-pending",
+      product: "diligence_gate",
+      headline: "Waiting to enter",
+      whyNowCode: "diligence_gate",
+      accessRequest: {
+        email: "lp@vc.com",
+        reason: "Need the deck for IC",
+        status: "pending",
+        requestedAt: "2026-08-11T18:00:00Z",
+        surface: "document_link",
+      },
+      metrics: {
+        opens24h: 0,
+        uniqueVisitors24h: 0,
+        forwardSignals24h: 0,
+        downloads24h: 0,
+      },
+      securityEvents: [
+        {
+          eventType: "not_in_allow_list",
+          email: "lp@vc.com",
+          createdAt: "2026-08-11T17:00:00Z",
+        },
+      ],
+    } satisfies RadarEvidencePack);
+
+    await renderRail(
+      makeItem({
+        id: "act-gate-before-pending",
+        product: "diligence_gate",
+        verb: "review",
+        headline: "Waiting to enter",
+      }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("radar-evidence-gate-timeline")).toHaveTextContent(
+        "Hit the gate 1× before requesting access. The request is still waiting for approval.",
+      );
+    });
+    expect(screen.getByTestId("radar-evidence-gate-timeline")).not.toHaveTextContent(
+      "allowlist",
     );
   });
 });

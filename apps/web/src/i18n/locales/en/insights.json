@@ -4,7 +4,7 @@
     "pages": "Pages",
     "access": "Access",
     "keyPages": "Key pages",
-    "suggestions": "Suggestions"
+    "suggestions": "Go to Deal Radar"
   },
   "page": {
     "title": "Insights",
@@ -158,7 +158,7 @@
   "access": {
     "title": "Access audit",
     "description": "Permission and gate failures — slice by type, data room, link owner, and folder.",
-    "scopeHint": "This tab audits permission and gate holds only. Pending access requests are reviewed in Share and are not counted in Held at gate.",
+    "scopeHint": "This tab audits permission and gate holds only. Pending access requests are reviewed in Share and are not counted in Held at gate. Gray gate prompts are listed for history and are not counted.",
     "kpiTotal": "Held at gate",
     "kpiTotalHint": "Gate holds only · last {{days}} days (UTC)",
     "byTypeTitle": "By event type",
@@ -213,10 +213,11 @@
       "email_required": "Pending: enter email",
       "invalid_email_code": "Failed: invalid verification code",
       "nda_required": "Pending: sign NDA",
-      "password": "Password gate not passed",
+      "password": "Wrong password",
       "delivery_email_mismatch": "Entered email does not match verified email",
       "archived": "Link archived"
-    }
+    },
+    "gatePromptBadge": "Gate prompt · not a hold"
   },
   "keyPages": {
     "title": "Key pages",
@@ -347,6 +348,7 @@
     "keyPagesEngaged": "{{engaged}} engaged (≥{{seconds}}s) of {{total}} title matches",
     "keyPagesSkim": "Title matched, but dwell was under {{seconds}}s — not scored",
     "keyPageRow": "Page {{page}} · {{title}}",
+    "keyPageRowPageOnly": "Page {{page}}",
     "keyPageRowViews": "{{engaged}}/{{total}}",
     "factors": {
       "opens": "Opens",

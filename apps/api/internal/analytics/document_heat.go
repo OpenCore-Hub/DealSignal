@@ -337,7 +337,7 @@ func (s *Service) LinkKeyPageEvidence(ctx context.Context, linkID, workspaceID p
 	for _, row := range rows {
 		out.Pages = append(out.Pages, DocumentHeatKeyPage{
 			PageNumber:   row.PageNumber,
-			Title:        row.Title,
+			Title:        heat.DisplayablePageTitle(row.Title),
 			EngagedViews: row.EngagedViews,
 			TotalViews:   row.Views,
 		})
@@ -404,7 +404,7 @@ func (s *Service) documentKeyPageDetailsOrEmpty(ctx context.Context, workspaceID
 		out.Total += row.TotalViews
 		title := ""
 		if row.Title.Valid {
-			title = row.Title.String
+			title = heat.DisplayablePageTitle(row.Title.String)
 		}
 		out.Pages = append(out.Pages, DocumentHeatKeyPage{
 			PageNumber:   row.PageNumber,

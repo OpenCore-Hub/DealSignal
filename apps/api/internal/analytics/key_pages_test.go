@@ -173,26 +173,6 @@ func TestKeyPageComplianceByPageSQLExposesEngaged(t *testing.T) {
 	}
 }
 
-func TestDisplayablePageTitleHidesJSONDumps(t *testing.T) {
-	if got := displayablePageTitle("Financial Projections"); got != "Financial Projections" {
-		t.Fatalf("heading: %q", got)
-	}
-	if got := displayablePageTitle(`"Q2 Financials"`); got != `"Q2 Financials"` {
-		t.Fatalf("quoted heading: %q", got)
-	}
-	if got := displayablePageTitle(`KPI "ARR": growth`); got != `KPI "ARR": growth` {
-		t.Fatalf("colon heading: %q", got)
-	}
-	dump := `nk_ic": 0.012, "net_ir": -0.18}, "decision": "rejected"`
-	if got := displayablePageTitle(dump); got != "" {
-		t.Fatalf("json dump should hide, got %q", got)
-	}
-	quoted := `"parameters": {"window": 5, "volume_window": 20}`
-	if got := displayablePageTitle(quoted); got != "" {
-		t.Fatalf("quoted json should hide, got %q", got)
-	}
-}
-
 func TestServiceKeyPageComplianceHidesJSONPageTitles(t *testing.T) {
 	ws := uuid.New()
 	dump := `nk_ic": 0.012, "net_ir": -0.18}, "financial": 1`
@@ -217,5 +197,18 @@ func TestServiceKeyPageComplianceHidesJSONPageTitles(t *testing.T) {
 	}
 	if len(out.Events) != 1 || out.Events[0].PageTitle != "" || out.Events[0].PageNumber != 27 {
 		t.Fatalf("events=%+v", out.Events)
+	}
+}
+
+func TestPageAnalyticsDisplayTitleHidesJSONDumps(t *testing.T) {
+	dump := `{"parameters": {"window": 5, "volume_window": 20}, "m...`
+	if got := pageAnalyticsDisplayTitle(dump, 27); got != "Page 27" {
+		t.Fatalf("json dump got %q", got)
+	}
+	if got := pageAnalyticsDisplayTitle("Financial Projections", 3); got != "Financial Projections" {
+		t.Fatalf("heading got %q", got)
+	}
+	if got := pageAnalyticsDisplayTitle("", 4); got != "Page 4" {
+		t.Fatalf("empty got %q", got)
 	}
 }

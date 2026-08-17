@@ -14,7 +14,10 @@ import {
   parseRadarCircle,
   parseRadarFilter,
   productRankForCircle,
+  radarCtaKey,
+  radarEmailContactLabel,
   radarHeadlineKey,
+  radarOutcomeKey,
   radarWhyNowFallbackKey,
   radarWhyNowKey,
   type RadarFeed,
@@ -165,10 +168,53 @@ describe("radarQueue", () => {
     expect(parseRadarCircle("sales")).toBe("sales");
     expect(parseRadarCircle("nope")).toBe("founder");
     expect(defaultOutcomeForProduct("diligence_gate")).toBe("approved");
+    expect(defaultOutcomeForProduct("diligence_gate", "review")).toBe("acted");
+    expect(outcomesForProduct("diligence_gate", "review")).toEqual([
+      "acted",
+      "false_positive",
+    ]);
     expect(outcomesForProduct("leak_watch")).toEqual([
       "acted",
       "false_positive",
     ]);
+    expect(radarCtaKey("diligence_gate", "review")).toBe(
+      "radar.ctaByProduct.diligence_gate.review",
+    );
+    expect(radarCtaKey("leak_watch", "review")).toBe(
+      "radar.ctaByProduct.leak_watch.review",
+    );
+    expect(radarCtaKey("diligence_gate", "approve")).toBe("radar.cta.approve");
+    expect(radarCtaKey("abuse_guard", "review")).toBe("radar.cta.review");
+    expect(radarCtaKey("buying_window", "email")).toBe(
+      "radar.ctaByProduct.buying_window.email",
+    );
+    expect(radarCtaKey("buying_window", "open")).toBe(
+      "radar.ctaByProduct.buying_window.confirmRecipient",
+    );
+    expect(radarCtaKey("access_decay", "open")).toBe("radar.cta.open");
+    expect(radarEmailContactLabel({ contactEmail: "buyer@acme.test" })).toBe(
+      "buyer@acme.test",
+    );
+    expect(
+      radarEmailContactLabel({ actor: "张姐", contactEmail: "zhang@share.example" }),
+    ).toBe("张姐");
+    expect(radarEmailContactLabel({ actor: "张姐" })).toBeNull();
+    expect(radarEmailContactLabel({ contactEmail: "not-an-email" })).toBeNull();
+    expect(radarOutcomeKey("diligence_gate", "acted", "review")).toBe(
+      "radar.outcomeByProduct.diligence_gate.review.acted",
+    );
+    expect(radarOutcomeKey("diligence_gate", "false_positive", "review")).toBe(
+      "radar.outcomeByProduct.diligence_gate.review.false_positive",
+    );
+    expect(radarOutcomeKey("diligence_gate", "approved", "approve")).toBe(
+      "radar.outcome.approved",
+    );
+    expect(radarOutcomeKey("leak_watch", "false_positive")).toBe(
+      "radar.outcomeByProduct.leak_watch.false_positive",
+    );
+    expect(radarOutcomeKey("abuse_guard", "false_positive")).toBe(
+      "radar.outcome.false_positive",
+    );
   });
 
   it("builds scenario-specific whyNow and headline i18n keys", () => {

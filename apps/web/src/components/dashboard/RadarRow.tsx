@@ -19,11 +19,13 @@ import { radarRowIdentities } from "@/lib/radarEvidencePresentation";
 import {
   defaultOutcomeForProduct,
   outcomesForProduct,
+  radarCtaKey,
+  radarEmailContactLabel,
   radarHeadlineKey,
+  radarOutcomeKey,
   radarWhyNowFallbackKey,
   radarWhyNowKey,
   type RadarOutcome,
-  type RadarVerb,
   type RadarWorkItem,
 } from "@/lib/radarQueue";
 import type { ActionStatus } from "@/types";
@@ -59,23 +61,6 @@ function urgencyBar(item: RadarWorkItem): string {
   return "bg-muted-foreground/30";
 }
 
-function ctaLabelKey(cta: RadarVerb): string {
-  switch (cta) {
-    case "approve":
-      return "radar.cta.approve";
-    case "reply":
-      return "radar.cta.reply";
-    case "email":
-      return "radar.cta.email";
-    case "renew":
-      return "radar.cta.renew";
-    case "review":
-      return "radar.cta.review";
-    default:
-      return "radar.cta.open";
-  }
-}
-
 export function RadarRow({
   item,
   emphasized,
@@ -89,9 +74,11 @@ export function RadarRow({
   const { t } = useTranslation("dashboard");
   const { t: tCommon, i18n } = useTranslation("common");
   const overdue = item.slaDueAt ? isOverdue(item.slaDueAt) : false;
-  const outcomes = outcomesForProduct(item.product);
+  const outcomes = outcomesForProduct(item.product, item.verb);
   const completeDirectly = outcomes.length === 1;
   const identities = radarRowIdentities(item);
+  const emailContact = radarEmailContactLabel(item);
+  const showPrimary = item.verb !== "email" || Boolean(emailContact);
 
   return (
     <div
@@ -199,7 +186,7 @@ export function RadarRow({
       </button>
 
       <div className="flex shrink-0 items-center gap-1">
-        {item.verb !== "email" ? (
+        {showPrimary ? (
           <Button
             size="sm"
             variant="default"
@@ -209,7 +196,10 @@ export function RadarRow({
               onPrimary(item);
             }}
           >
-            {t(ctaLabelKey(item.verb))}
+            {t(radarCtaKey(item.product, item.verb), {
+              contact: emailContact ?? undefined,
+              defaultValue: t(`radar.cta.${item.verb}`),
+            })}
           </Button>
         ) : null}
 
@@ -225,7 +215,7 @@ export function RadarRow({
                   item.actionId,
                   "done",
                   undefined,
-                  defaultOutcomeForProduct(item.product),
+                  defaultOutcomeForProduct(item.product, item.verb),
                 );
               }}
             >
@@ -255,7 +245,9 @@ export function RadarRow({
                       onStatusChange(item.actionId, "done", undefined, outcome)
                     }
                   >
-                    {t(`radar.outcome.${outcome}`)}
+                    {t(radarOutcomeKey(item.product, outcome, item.verb), {
+                      defaultValue: t(`radar.outcome.${outcome}`),
+                    })}
                   </DropdownMenuItem>
                 ))}
               </DropdownMenuContent>

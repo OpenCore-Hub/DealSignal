@@ -1,12 +1,12 @@
 import type { RadarProduct } from "@/lib/radarQueue";
+import { isAccessGatePromptReason } from "@/lib/accessEventLabels";
 
-/** Gate-hold cards: blocked_attempt leak_watch, or waiting-to-enter. */
+/** Gate-hold cards: waiting-to-enter, including allowlist/block holds. */
 export function isRadarGateHoldItem(item: {
   product: RadarProduct;
-  confidence?: string;
+  verb?: string;
 }): boolean {
-  if (item.product === "diligence_gate") return true;
-  return item.product === "leak_watch" && item.confidence === "low";
+  return item.product === "diligence_gate" && item.verb === "review";
 }
 
 export function looksLikeEmail(value: string): boolean {
@@ -16,20 +16,30 @@ export function looksLikeEmail(value: string): boolean {
 
 /**
  * Card identities for a radar row.
- * Low-confidence leak_watch actors that are not emails are the share contact,
- * not the person held at the gate (that email lives on security events).
+ * Waiting-to-enter: a non-email actor is the share contact (legacy rows).
+ * An email actor is the person held; a distinct contactEmail is who the
+ * link was sent to.
  */
 export function radarRowIdentities(item: {
   product: RadarProduct;
-  confidence?: string;
   actor?: string;
+  contactEmail?: string;
 }): { primary: string | null; shareContact: string | null } {
   const actor = item.actor?.trim() ?? "";
+  const contactEmail = item.contactEmail?.trim() ?? "";
   if (!actor) return { primary: null, shareContact: null };
-  if (item.product === "leak_watch" && item.confidence === "low" && !looksLikeEmail(actor)) {
+  if (item.product !== "diligence_gate") {
+    return { primary: actor, shareContact: null };
+  }
+  if (!looksLikeEmail(actor)) {
     return { primary: null, shareContact: actor };
   }
-  return { primary: actor, shareContact: null };
+  const shareContact =
+    looksLikeEmail(contactEmail) &&
+    contactEmail.toLowerCase() !== actor.toLowerCase()
+      ? contactEmail
+      : null;
+  return { primary: actor, shareContact };
 }
 
 export type EvidenceSecurityEvent = {
@@ -139,14 +149,15 @@ export type GateTimelineSummary =
 
 /**
  * Decision narrative relative to the access-request timestamp.
- * Events without a request fall back to a simple hit count.
+ * Empty-form prompts are not holds and must not inflate "still blocked".
  */
 export function gateTimelineSummary(
   events: EvidenceSecurityEvent[] | undefined | null,
   requestedAt?: string | null,
 ): GateTimelineSummary | null {
-  if (!events?.length) return null;
-  const total = events.length;
+  const holds = (events ?? []).filter((e) => !isAccessGatePromptReason(e.reason));
+  if (!holds.length) return null;
+  const total = holds.length;
   if (!requestedAt) {
     return { kind: "events_only", total };
   }
@@ -156,7 +167,7 @@ export function gateTimelineSummary(
   }
   let before = 0;
   let after = 0;
-  for (const e of events) {
+  for (const e of holds) {
     const ts = new Date(e.createdAt).getTime();
     if (Number.isNaN(ts) || ts >= pivot) after += 1;
     else before += 1;
@@ -171,6 +182,36 @@ export function gateTimelineSummary(
     return { kind: "after_only", after, total };
   }
   return { kind: "events_only", total };
+}
+
+/**
+ * Timeline copy key. Pending is a fact when status is pending.
+ * Allowlist-in-effect is the no-request case. Do not say "still blocked"
+ * unless a fault is proven — this rail cannot prove that.
+ */
+export function gateTimelineI18nKey(
+  summary: GateTimelineSummary,
+  requestStatus?: string | null,
+): string {
+  const pending = requestStatus?.trim().toLowerCase() === "pending";
+  switch (summary.kind) {
+    case "before_and_after":
+      return pending
+        ? "radar.evidenceRail.gateTimeline.beforeAndAfterPending"
+        : "radar.evidenceRail.gateTimeline.beforeAndAfter";
+    case "before_only":
+      return pending
+        ? "radar.evidenceRail.gateTimeline.beforeOnlyPending"
+        : "radar.evidenceRail.gateTimeline.beforeOnly";
+    case "after_only":
+      return pending
+        ? "radar.evidenceRail.gateTimeline.afterOnlyPending"
+        : "radar.evidenceRail.gateTimeline.afterOnly";
+    case "events_only":
+      return pending
+        ? "radar.evidenceRail.gateTimeline.eventsOnlyPending"
+        : "radar.evidenceRail.gateTimeline.eventsOnly";
+  }
 }
 
 /** True when top pages span more than one document (bundle collision risk). */

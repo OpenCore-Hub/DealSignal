@@ -191,7 +191,7 @@ func (s *Service) KeyPageCompliance(ctx context.Context, workspaceID string, q K
 		item := KeyPageCompliancePage{
 			DocumentTitle:      r.DocumentTitle,
 			PageNumber:         r.PageNumber,
-			PageTitle:          displayablePageTitle(r.PageTitle),
+			PageTitle:          heat.DisplayablePageTitle(r.PageTitle),
 			Category:           rs.MatchCategory(r.PageTitle),
 			Views:              r.Views,
 			EngagedViews:       r.EngagedViews,
@@ -254,7 +254,7 @@ func (s *Service) KeyPageCompliance(ctx context.Context, workspaceID string, q K
 			VisitorEmail:    r.VisitorEmail,
 			DocumentTitle:   r.DocumentTitle,
 			PageNumber:      r.PageNumber,
-			PageTitle:       displayablePageTitle(r.PageTitle),
+			PageTitle:       heat.DisplayablePageTitle(r.PageTitle),
 			Category:        rs.MatchCategory(r.PageTitle),
 			DurationSeconds: r.DurationSeconds,
 			DealRoomName:    r.DealRoomName,

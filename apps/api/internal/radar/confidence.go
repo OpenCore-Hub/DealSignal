@@ -27,7 +27,7 @@ type LinkMetrics24h struct {
 //     or ≥2 downloads with ≥3 distinct IPs in 1h,
 //     or ≥3 capture attempts, or capture + forward/download
 //   - medium: ≥1 forward or ≥1 download or ≥1 capture attempt
-//   - low: otherwise (e.g. blocked_attempt alone)
+//   - low: otherwise (sharing signals without forward/download/capture)
 func scoreLeakConfidence(m LinkMetrics24h) Confidence {
 	forwards := m.ForwardSignals
 	downloads := m.Downloads

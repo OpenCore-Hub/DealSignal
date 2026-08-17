@@ -45,11 +45,11 @@ func TestDiligenceApplicantEmail(t *testing.T) {
 		t.Fatalf("title fallback=%q", got)
 	}
 	if got := diligenceApplicantEmail(WorkItem{
-		ContactEmail: "first@x.com",
-		Actor:        "second@x.com",
+		ContactEmail: "zhang@share.example",
+		Actor:        "yqx-401@126.com",
 		Headline:     "Approve access request from third@x.com for Pitch",
-	}); got != "first@x.com" {
-		t.Fatalf("prefer contactEmail, got %q", got)
+	}); got != "yqx-401@126.com" {
+		t.Fatalf("prefer gated visitor on Actor over share-contact, got %q", got)
 	}
 }
 
@@ -72,6 +72,23 @@ func TestContextKeyPageTitles(t *testing.T) {
 	}
 	titles := contextKeyPageTitles(raw)
 	if len(titles) != 2 || titles[0] != "Cap table" {
+		t.Fatalf("titles=%v", titles)
+	}
+}
+
+func TestContextKeyPageTitlesHidesJSONDumps(t *testing.T) {
+	raw, err := json.Marshal(map[string]any{
+		"keyPageTitles": []any{
+			"Cap table",
+			`{"parameters": {"window": 5, "volume_window": 20}}`,
+			"Financials",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	titles := contextKeyPageTitles(raw)
+	if len(titles) != 2 || titles[0] != "Cap table" || titles[1] != "Financials" {
 		t.Fatalf("titles=%v", titles)
 	}
 }

@@ -384,6 +384,14 @@ func TestKeyPageDisplayTitles(t *testing.T) {
 	if len(bundle) != 2 || bundle[0] != "Model.xlsx · Financials" || bundle[1] != "Memo.pdf · Financials" {
 		t.Fatalf("bundle titles must include file name, got %v", bundle)
 	}
+
+	hidden := keyPageDisplayTitles([]db.GetLinkKeyPageViewDetailsRow{
+		{DocumentID: xlsx, DocumentTitle: "Model.xlsx", Title: `{"parameters": {"window": 5}}`},
+		{DocumentID: xlsx, DocumentTitle: "Model.xlsx", Title: "Team"},
+	})
+	if len(hidden) != 1 || hidden[0] != "Team" {
+		t.Fatalf("json page titles must not appear in radar copy, got %v", hidden)
+	}
 }
 
 func (m suggestionMetrics) toMetricsInput() MetricsInput {

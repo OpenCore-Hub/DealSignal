@@ -1346,6 +1346,14 @@ type PageAnalytic struct {
 	ExitRate           float64
 }
 
+// pageAnalyticsDisplayTitle is API/UI copy. Heat matching still uses stored pages.title.
+func pageAnalyticsDisplayTitle(stored string, pageNumber int32) string {
+	if title := heat.DisplayablePageTitle(stored); title != "" {
+		return title
+	}
+	return fmt.Sprintf("Page %d", pageNumber)
+}
+
 type pageAnalyticsMetricRow struct {
 	PageNumber         int32
 	ViewCount          int64
@@ -1447,10 +1455,7 @@ func (s *Service) PageAnalyticsRange(ctx context.Context, documentID, workspaceI
 
 	out := make([]PageAnalytic, len(rows))
 	for i, r := range rows {
-		title := titleByPage[r.PageNumber]
-		if title == "" {
-			title = fmt.Sprintf("Page %d", r.PageNumber)
-		}
+		title := pageAnalyticsDisplayTitle(titleByPage[r.PageNumber], r.PageNumber)
 
 		var exitRate float64
 		if r.ViewCount > 0 {

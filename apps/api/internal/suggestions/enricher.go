@@ -50,10 +50,7 @@ func (e *LLMEnricher) Enrich(ctx context.Context, input EnrichInput) (reason, ac
 		lang = "en"
 	}
 
-	keyPages := strings.Join(input.Context.KeyPageTitles, ", ")
-	if keyPages == "" {
-		keyPages = "none"
-	}
+	keyPages := displayableKeyPagePrompt(input.Context.KeyPageTitles)
 
 	prompt := fmt.Sprintf(`You are a sales-signal copywriter for a document-sharing workspace.
 Given the signal type, document title, engagement context, and a draft reason/action,
@@ -112,6 +109,19 @@ Respond with valid JSON only: {"reason":"...","action":"..."}`,
 		return "", "", false
 	}
 	return out.Reason, out.Action, true
+}
+
+func displayableKeyPagePrompt(titles []string) string {
+	out := make([]string, 0, len(titles))
+	for _, title := range titles {
+		if label := heat.DisplayablePageTitle(title); label != "" {
+			out = append(out, label)
+		}
+	}
+	if len(out) == 0 {
+		return "none"
+	}
+	return strings.Join(out, ", ")
 }
 
 func extractJSONFromMarkdown(s string) string {

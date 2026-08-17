@@ -25,6 +25,7 @@
     "keyPagesEngaged": "{{engaged}} engaged (≥{{seconds}}s) of {{total}} title matches",
     "keyPagesSkim": "Title matched, but dwell was under {{seconds}}s — not scored",
     "keyPageRow": "p{{page}} · {{title}}",
+    "keyPageRowPageOnly": "p{{page}}",
     "keyPageRowViews": "{{engaged}}/{{total}}",
     "tabs": {
       "overview": "Overview",

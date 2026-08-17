@@ -552,7 +552,7 @@ func (s *Service) contactKeyPageEvidence(ctx context.Context, workspaceID pgtype
 	for _, row := range rows {
 		out.Pages = append(out.Pages, ContactKeyPage{
 			PageNumber:   row.PageNumber,
-			Title:        row.Title,
+			Title:        heat.DisplayablePageTitle(row.Title),
 			EngagedViews: row.EngagedViews,
 			TotalViews:   row.TotalViews,
 		})

@@ -14,6 +14,7 @@ import {
   accessEventPrimaryLabel,
   accessEventSecondaryLabel,
   accessEventTypeLabel,
+  isAccessGatePromptReason,
 } from "@/lib/accessEventLabels";
 import { documentsSharePath } from "@/lib/documentsSharePath";
 import { useAsyncData } from "@/hooks/useAsyncData";
@@ -123,7 +124,9 @@ export function InsightsAccessPage() {
     );
   }
 
-  const hasEvents = data.totalEvents > 0;
+  const hasHoldKpi = data.totalEvents > 0;
+  const hasEventRows = data.events.length > 0;
+  const showEmpty = !hasHoldKpi && !hasEventRows;
   const byMember = data.byMember ?? [];
   const hasActiveFilters = Boolean(eventType || memberId);
   const pendingCount = pendingShareRequests?.length ?? 0;
@@ -320,7 +323,7 @@ export function InsightsAccessPage() {
         </div>
       )}
 
-      {!hasEvents ? (
+      {showEmpty ? (
         <EmptyState
           icon={<ShieldWarning size={48} />}
           title={t("access.emptyTitle")}
@@ -347,8 +350,13 @@ export function InsightsAccessPage() {
                 {data.events.map((e) => {
                   const primary = accessEventPrimaryLabel(t, e.eventType, e.reason);
                   const secondary = accessEventSecondaryLabel(t, e.eventType, e.reason);
+                  const prompt = isAccessGatePromptReason(e.reason);
                   return (
-                    <tr key={e.id} className="border-b border-border/60 last:border-0">
+                    <tr
+                      key={e.id}
+                      className="border-b border-border/60 last:border-0"
+                      data-access-gate-prompt={prompt ? "true" : undefined}
+                    >
                       <td className="whitespace-nowrap px-2 py-2 text-muted-foreground">
                         {new Date(e.createdAt).toLocaleString(locale, {
                           month: "short",
@@ -358,7 +366,9 @@ export function InsightsAccessPage() {
                         })}
                       </td>
                       <td className="px-2 py-2">
-                        <div className="font-medium">{primary}</div>
+                        <div className={prompt ? "font-medium text-muted-foreground" : "font-medium"}>
+                          {primary}
+                        </div>
                         {secondary ? (
                           <div className="text-caption text-muted-foreground">{secondary}</div>
                         ) : e.reason && e.eventType !== "security_gate_failed" ? (

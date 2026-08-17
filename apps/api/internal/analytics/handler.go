@@ -152,7 +152,7 @@ func documentKeyPagesJSON(kp DocumentHeatKeyPages) gin.H {
 	for _, p := range kp.Pages {
 		pages = append(pages, gin.H{
 			"pageNumber":   p.PageNumber,
-			"title":        p.Title,
+			"title":        heat.DisplayablePageTitle(p.Title),
 			"engagedViews": p.EngagedViews,
 			"totalViews":   p.TotalViews,
 		})

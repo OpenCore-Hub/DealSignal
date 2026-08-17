@@ -32,16 +32,13 @@ vi.mock("@/lib/api", async () => {
 const mockAudit: AccessAudit = {
   rangeDays: 30,
   generatedAt: "2026-08-08T04:00:00Z",
-  totalEvents: 2,
-  byType: [
-    { eventType: "security_gate_failed", count: 1 },
-    { eventType: "invalid_password", count: 1 },
-  ],
+  totalEvents: 1,
+  byType: [{ eventType: "invalid_password", count: 1 }],
   byDealRoom: [
     { dealRoomId: "room-1", dealRoomName: "Series A", count: 1 },
     { dealRoomId: null, dealRoomName: "", count: 1, scope: "library" },
   ],
-  byMember: [{ memberId: "member-1", memberEmail: "owner@example.com", count: 2 }],
+  byMember: [{ memberId: "member-1", memberEmail: "owner@example.com", count: 1 }],
   byFolder: [
     {
       folderPath: "Finance",
@@ -133,9 +130,12 @@ describe("InsightsAccessPage", () => {
     await waitFor(() => expect(getAccessAuditMock).toHaveBeenCalled());
     expect(screen.queryByText("By data room")).not.toBeInTheDocument();
     expect(screen.getByText("Held at gate")).toBeInTheDocument();
-    expect(screen.getByTestId("access-scope-hint")).toBeInTheDocument();
+    expect(screen.getByTestId("access-scope-hint")).toHaveTextContent(
+      "Gray gate prompts are listed for history and are not counted",
+    );
     expect(screen.getByText("Pending: verify email")).toBeInTheDocument();
-    expect(screen.getAllByText("Unclassified gate hold").length).toBeGreaterThan(0);
+    expect(screen.getByText("Gate prompt · not a hold")).toBeInTheDocument();
+    expect(document.querySelector("[data-access-gate-prompt='true']")).toBeTruthy();
     expect(screen.getAllByText("Invalid password").length).toBeGreaterThan(0);
     expect(screen.getAllByText("buyer@example.com").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Pitch Deck").length).toBeGreaterThan(0);
@@ -162,9 +162,10 @@ describe("InsightsAccessPage", () => {
     expect(getPendingLinkAccessRequestsMock).toHaveBeenCalledWith({ scope: "document" });
     const cta = screen.getByRole("link", { name: /Open Share/i });
     expect(cta).toHaveAttribute("href", "/acme/documents?tab=shared");
-    // Denied KPI stays audit totalEvents (2), not pending request count (1).
+    // Held-at-gate KPI stays audit totalEvents (1 hold), not pending request count (1)
+    // and not the gray prompt row still listed below.
     expect(screen.getByText("Held at gate").closest("[data-slot='card']")).toHaveTextContent(
-      /^[\s\S]*2[\s\S]*Gate holds only/,
+      /^[\s\S]*1[\s\S]*Gate holds only/,
     );
   });
 
@@ -188,5 +189,25 @@ describe("InsightsAccessPage", () => {
         expect.objectContaining({ memberId: "member-1", days: 30 }),
       ),
     );
+  });
+
+  it("still lists gray gate prompts when the hold KPI is zero", async () => {
+    getAccessAuditMock.mockResolvedValue({
+      ...mockAudit,
+      totalEvents: 0,
+      byType: [],
+      byDealRoom: [],
+      byMember: [],
+      byFolder: [],
+      events: [mockAudit.events[0]],
+    });
+    await renderPage();
+    await waitFor(() => expect(getAccessAuditMock).toHaveBeenCalled());
+    expect(screen.getByText("Held at gate").closest("[data-slot='card']")).toHaveTextContent(
+      /^[\s\S]*0[\s\S]*Gate holds only/,
+    );
+    expect(screen.queryByText("No gate holds")).not.toBeInTheDocument();
+    expect(screen.getByText("Pending: verify email")).toBeInTheDocument();
+    expect(screen.getByText("Gate prompt · not a hold")).toBeInTheDocument();
   });
 });

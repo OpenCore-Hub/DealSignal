@@ -160,7 +160,7 @@ export function RadarQueue({
           focus.actionId,
           "done",
           undefined,
-          defaultOutcomeForProduct(focus.product),
+          defaultOutcomeForProduct(focus.product, focus.verb),
         );
         return;
       }

@@ -12,6 +12,7 @@ import (
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/heat"
+	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -605,4 +606,29 @@ func queryNamedSQL(sql, name string) string {
 		return rest
 	}
 	return rest[:len(marker)+next]
+}
+
+func TestDocumentKeyPagesJSONHidesJSONTitles(t *testing.T) {
+	dump := `{"parameters": {"window": 5, "volume_window": 20}, "m...`
+	got := documentKeyPagesJSON(DocumentHeatKeyPages{
+		Engaged:    1,
+		Total:      1,
+		MinSeconds: 3,
+		Pages: []DocumentHeatKeyPage{{
+			PageNumber:   27,
+			Title:        dump,
+			EngagedViews: 1,
+			TotalViews:   1,
+		}},
+	})
+	pages, ok := got["pages"].([]gin.H)
+	if !ok || len(pages) != 1 {
+		t.Fatalf("pages=%T %+v", got["pages"], got["pages"])
+	}
+	if pages[0]["title"] != "" {
+		t.Fatalf("title=%v, want empty", pages[0]["title"])
+	}
+	if pages[0]["pageNumber"] != int32(27) {
+		t.Fatalf("pageNumber=%v", pages[0]["pageNumber"])
+	}
 }

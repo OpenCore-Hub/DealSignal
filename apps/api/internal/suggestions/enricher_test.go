@@ -64,3 +64,12 @@ func TestLLMEnricherNilClient(t *testing.T) {
 		t.Fatal("expected enrich to fall back when LLM is nil")
 	}
 }
+
+func TestDisplayableKeyPagePromptHidesJSONDumps(t *testing.T) {
+	if got := displayableKeyPagePrompt([]string{"Financials", `{"parameters": {"window": 5}}`, "Team"}); got != "Financials, Team" {
+		t.Fatalf("got %q", got)
+	}
+	if got := displayableKeyPagePrompt([]string{`{"window": 5}`}); got != "none" {
+		t.Fatalf("json-only got %q", got)
+	}
+}

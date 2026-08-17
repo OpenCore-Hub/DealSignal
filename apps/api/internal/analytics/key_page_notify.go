@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/heat"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -82,7 +83,7 @@ func (s *Service) ResolveKeyPageNotification(
 
 	meta := map[string]string{
 		"page_number":            strconv.Itoa(int(pageNumber)),
-		"page_title":             title,
+		"page_title":             heat.DisplayablePageTitle(title),
 		"category":               category,
 		"duration_seconds":       strconv.Itoa(int(durationSeconds)),
 		"engaged_key_page_views": strconv.FormatInt(count, 10),

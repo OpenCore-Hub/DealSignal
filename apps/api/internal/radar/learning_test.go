@@ -115,6 +115,7 @@ func TestProductFromOutcomeKindStructuredEventTypes(t *testing.T) {
 		{suggestions.SubtypeAnomaly, ProductLeakWatch},
 		{suggestions.SubtypeForward, ProductLeakWatch},
 		{"approve", ProductDiligenceGate},
+		{suggestions.SubtypeBlockedAttempt, ProductDiligenceGate},
 	}
 	for _, tc := range cases {
 		if got := productFromOutcomeKind(tc.kind); got != tc.want {
