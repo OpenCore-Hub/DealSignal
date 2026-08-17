@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
 import { useTranslation } from "react-i18next";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { AuthStage, AuthSubmit, railFromNamespace } from "@/components/auth/AuthStage";
 import { api } from "@/lib/api";
 import { safeAuthRedirect } from "@/lib/inviteAuth";
 
@@ -24,31 +23,20 @@ function VerifyEmailCard({
         ? t("verifyEmail.error")
         : t("verifyEmail.verifying");
 
-  const messageClass =
-    status === "success"
-      ? "text-green-600 dark:text-green-400"
-      : status === "error"
-        ? "text-error-500"
-        : "text-muted-foreground";
-
   return (
-    <div className="flex min-h-[100dvh] flex-col items-center justify-center bg-background p-6">
-      <div className="w-full max-w-md">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-h2">{title}</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <p className={`text-sm ${messageClass}`}>{message}</p>
-            {status !== "loading" && (
-              <Button onClick={onContinue} className="w-full">
-                {status === "success" ? t("verifyEmail.continue") : t("register.signIn")}
-              </Button>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-    </div>
+    <AuthStage
+      rail={railFromNamespace(t, "stage")}
+      kicker={t("verifyEmail.kicker")}
+      title={title}
+      lede={status === "loading" ? message : undefined}
+    >
+      {status !== "loading" ? <p className={status === "error" ? "auth-error" : "auth-lede"}>{message}</p> : null}
+      {status !== "loading" ? (
+        <AuthSubmit type="button" onClick={onContinue}>
+          {status === "success" ? t("verifyEmail.continue") : t("register.signIn")}
+        </AuthSubmit>
+      ) : null}
+    </AuthStage>
   );
 }
 

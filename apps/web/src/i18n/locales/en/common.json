@@ -277,6 +277,32 @@
   "selectWorkspace": "Select workspace",
   "selectWorkspaceDescription": "Choose a workspace to continue.",
   "createWorkspace": "Create workspace",
+  "createWorkspaceKicker": "House",
+  "workspaceStage": {
+    "brand": "DealSignal",
+    "folio": "House 01",
+    "kicker": "Your house",
+    "headline": "Name the room you will run.",
+    "lede": "A workspace holds every data room, every trail, every seat.",
+    "footnote": "You can change the mark later. The name is the first signal.",
+    "signals": {
+      "0": {
+        "index": "01",
+        "title": "Owner",
+        "body": "You become the first operator of this house."
+      },
+      "1": {
+        "index": "02",
+        "title": "Mark",
+        "body": "A color visitors will learn before they learn your logo."
+      },
+      "2": {
+        "index": "03",
+        "title": "Trial",
+        "body": "Verify email to open the 14-day clock. Until then, Free."
+      }
+    }
+  },
   "verifyEmailForTrial": "Verify your email to start the 14-day trial. Until then this workspace stays on the Free plan.",
   "creating": "Creating...",
   "workspaceName": "Workspace name",

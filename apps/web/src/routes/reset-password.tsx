@@ -1,10 +1,14 @@
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { useTranslation } from "react-i18next";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import {
+  AuthField,
+  AuthInput,
+  AuthStage,
+  AuthSubmit,
+  AuthTextLink,
+  railFromNamespace,
+} from "@/components/auth/AuthStage";
 import { api } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/apiErrors";
 
@@ -54,74 +58,67 @@ export function ResetPasswordPage() {
 
   if (!token) {
     return (
-      <div className="flex min-h-[100dvh] flex-col items-center justify-center bg-background p-6">
-        <div className="w-full max-w-md">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-h2">{t("resetPassword.title")}</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <p className="text-sm text-error-500">{t("resetPassword.errorInvalidToken")}</p>
-              <Button className="w-full" onClick={() => navigate("/forgot-password")}>
-                {t("resetPassword.requestNew")}
-              </Button>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+      <AuthStage
+        rail={railFromNamespace(t, "stage")}
+        kicker={t("resetPassword.kicker")}
+        title={t("resetPassword.title")}
+        lede={t("resetPassword.errorInvalidToken")}
+        footer={
+          <p>
+            <AuthTextLink onClick={() => navigate("/forgot-password")}>
+              {t("resetPassword.requestNew")}
+            </AuthTextLink>
+          </p>
+        }
+      >
+        <AuthSubmit type="button" onClick={() => navigate("/forgot-password")}>
+          {t("resetPassword.requestNew")}
+        </AuthSubmit>
+      </AuthStage>
     );
   }
 
   return (
-    <div className="flex min-h-[100dvh] flex-col items-center justify-center bg-background p-6">
-      <div className="w-full max-w-md">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-h2">{t("resetPassword.title")}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="password">{t("resetPassword.password")}</Label>
-                <Input
-                  id="password"
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder={t("resetPassword.passwordPlaceholder")}
-                  autoComplete="new-password"
-                  required
-                />
-                <p className="text-caption text-muted-foreground">{t("register.passwordRules")}</p>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="confirm">{t("resetPassword.confirm")}</Label>
-                <Input
-                  id="confirm"
-                  type="password"
-                  value={confirm}
-                  onChange={(e) => setConfirm(e.target.value)}
-                  placeholder={t("resetPassword.confirmPlaceholder")}
-                  autoComplete="new-password"
-                  required
-                />
-              </div>
-              {error ? <p className="text-sm text-error-500">{error}</p> : null}
-              <Button type="submit" className="w-full" disabled={loading}>
-                {loading ? t("resetPassword.submitting") : t("resetPassword.submit")}
-              </Button>
-              <Button
-                type="button"
-                variant="link"
-                className="w-full"
-                onClick={() => navigate("/forgot-password")}
-              >
-                {t("resetPassword.requestNew")}
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
-      </div>
-    </div>
+    <AuthStage
+      rail={railFromNamespace(t, "stage")}
+      kicker={t("resetPassword.kicker")}
+      title={t("resetPassword.title")}
+      footer={
+        <p>
+          <AuthTextLink onClick={() => navigate("/forgot-password")}>
+            {t("resetPassword.requestNew")}
+          </AuthTextLink>
+        </p>
+      }
+    >
+      <form onSubmit={handleSubmit}>
+        <AuthField id="password" label={t("resetPassword.password")} hint={t("register.passwordRules")}>
+          <AuthInput
+            id="password"
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder={t("resetPassword.passwordPlaceholder")}
+            autoComplete="new-password"
+            required
+          />
+        </AuthField>
+        <AuthField id="confirm" label={t("resetPassword.confirm")}>
+          <AuthInput
+            id="confirm"
+            type="password"
+            value={confirm}
+            onChange={(e) => setConfirm(e.target.value)}
+            placeholder={t("resetPassword.confirmPlaceholder")}
+            autoComplete="new-password"
+            required
+          />
+        </AuthField>
+        {error ? <p className="auth-error">{error}</p> : null}
+        <AuthSubmit type="submit" disabled={loading}>
+          {loading ? t("resetPassword.submitting") : t("resetPassword.submit")}
+        </AuthSubmit>
+      </form>
+    </AuthStage>
   );
 }

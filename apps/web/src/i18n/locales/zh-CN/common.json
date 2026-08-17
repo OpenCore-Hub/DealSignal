@@ -276,6 +276,32 @@
   "selectWorkspace": "选择工作区",
   "selectWorkspaceDescription": "选择一个工作区以继续。",
   "createWorkspace": "创建工作区",
+  "createWorkspaceKicker": "本营",
+  "workspaceStage": {
+    "brand": "DealSignal",
+    "folio": "本营 01",
+    "kicker": "你的本营",
+    "headline": "先给这座房子起名。",
+    "lede": "工作区装着每一间数据室、每一条轨迹、每一个席位。",
+    "footnote": "标识以后还能改。名字是第一个信号。",
+    "signals": {
+      "0": {
+        "index": "01",
+        "title": "室主",
+        "body": "你将成为这座房子的第一位操作者。"
+      },
+      "1": {
+        "index": "02",
+        "title": "印记",
+        "body": "访客会先记住这个颜色，再记住你的标志。"
+      },
+      "2": {
+        "index": "03",
+        "title": "试用",
+        "body": "验证邮箱后开启 14 天。此前保持 Free。"
+      }
+    }
+  },
   "verifyEmailForTrial": "请先验证邮箱以开启 14 天试用。验证前此工作区保持 Free 套餐。",
   "creating": "创建中...",
   "workspaceName": "工作区名称",

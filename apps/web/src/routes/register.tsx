@@ -1,10 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { useTranslation } from "react-i18next";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import {
+  AuthField,
+  AuthInput,
+  AuthNotice,
+  AuthStage,
+  AuthSubmit,
+  AuthTextLink,
+  railFromNamespace,
+} from "@/components/auth/AuthStage";
 import { TurnstileWidget, type TurnstileWidgetHandle } from "@/components/auth/TurnstileWidget";
 import { api } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/apiErrors";
@@ -116,98 +121,90 @@ export function RegisterPage() {
     }
   };
 
+  const goForgot = () => {
+    const current = (lockEmail ? invitedEmail : email).trim();
+    const params = new URLSearchParams();
+    if (current.includes("@")) params.set("email", current);
+    const qs = params.toString();
+    navigate(qs ? `/forgot-password?${qs}` : "/forgot-password");
+  };
+
   return (
-    <div className="flex min-h-[100dvh] flex-col items-center justify-center bg-background p-6">
-      <div className="w-full max-w-md">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-h2">{t("register.title")}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {lockEmail ? (
-              <div className="mb-4 rounded-md bg-muted p-3 text-sm text-muted-foreground">{t("register.inviteBanner")}</div>
-            ) : null}
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="email">{t("register.email")}</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  value={email}
-                  onChange={(e) => {
-                    if (!lockEmail) setEmail(e.target.value);
-                  }}
-                  placeholder={t("register.emailPlaceholder")}
-                  autoComplete="email"
-                  readOnly={lockEmail}
-                  aria-readonly={lockEmail || undefined}
-                  required
-                />
-                {lockEmail ? <p className="text-caption text-muted-foreground">{t("register.emailLockedHint")}</p> : null}
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="password">{t("register.password")}</Label>
-                <Input
-                  id="password"
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder={t("register.passwordPlaceholder")}
-                  autoComplete="new-password"
-                  required
-                />
-                <p className="text-caption text-muted-foreground">{t("register.passwordRules")}</p>
-              </div>
-              {siteKey ? (
-                <TurnstileWidget
-                  ref={captchaRef}
-                  siteKey={siteKey}
-                  action="register"
-                  onToken={setCaptchaToken}
-                  onError={() => setError(t("register.errorCaptchaFailed"))}
-                />
-              ) : null}
-              {error && <p className="text-sm text-error-500">{error}</p>}
-              <Button type="submit" className="w-full" disabled={loading || siteKey === null || Boolean(siteKey && !captchaToken)}>
-                {loading ? t("register.submitting") : t("register.submit")}
-              </Button>
-              <p className="text-center text-sm text-muted-foreground">
-                {t("register.hasAccount")}{" "}
-                <Button
-                  variant="link"
-                  className="p-0"
-                  onClick={() => {
-                    navigate(
-                      buildInviteAuthPath("login", {
-                        redirect: searchParams.get("redirect"),
-                        email: invitedEmail || undefined,
-                      }),
-                    );
-                  }}
-                >
-                  {t("register.signIn")}
-                </Button>
-              </p>
-              <p className="text-center text-sm text-muted-foreground">
-                <Button
-                  type="button"
-                  variant="link"
-                  className="p-0"
-                  onClick={() => {
-                    const current = (lockEmail ? invitedEmail : email).trim();
-                    const params = new URLSearchParams();
-                    if (current.includes("@")) params.set("email", current);
-                    const qs = params.toString();
-                    navigate(qs ? `/forgot-password?${qs}` : "/forgot-password");
-                  }}
-                >
-                  {t("register.forgotPassword")}
-                </Button>
-              </p>
-            </form>
-          </CardContent>
-        </Card>
-      </div>
-    </div>
+    <AuthStage
+      rail={railFromNamespace(t, "stage")}
+      kicker={t("register.kicker")}
+      title={t("register.title")}
+      notice={lockEmail ? <AuthNotice tone="invite">{t("register.inviteBanner")}</AuthNotice> : null}
+      footer={
+        <p>
+          {t("register.hasAccount")}{" "}
+          <AuthTextLink
+            onClick={() => {
+              navigate(
+                buildInviteAuthPath("login", {
+                  redirect: searchParams.get("redirect"),
+                  email: invitedEmail || undefined,
+                }),
+              );
+            }}
+          >
+            {t("register.signIn")}
+          </AuthTextLink>
+        </p>
+      }
+    >
+      <form onSubmit={handleSubmit}>
+        <AuthField
+          id="email"
+          label={t("register.email")}
+          hint={lockEmail ? t("register.emailLockedHint") : undefined}
+        >
+          <AuthInput
+            id="email"
+            type="email"
+            value={email}
+            onChange={(e) => {
+              if (!lockEmail) setEmail(e.target.value);
+            }}
+            placeholder={t("register.emailPlaceholder")}
+            autoComplete="email"
+            readOnly={lockEmail}
+            aria-readonly={lockEmail || undefined}
+            required
+          />
+        </AuthField>
+        <AuthField
+          id="password"
+          label={t("register.password")}
+          action={<AuthTextLink onClick={goForgot}>{t("register.forgotPassword")}</AuthTextLink>}
+          hint={t("register.passwordRules")}
+        >
+          <AuthInput
+            id="password"
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder={t("register.passwordPlaceholder")}
+            autoComplete="new-password"
+            required
+          />
+        </AuthField>
+        {siteKey ? (
+          <div className="mt-6">
+            <TurnstileWidget
+              ref={captchaRef}
+              siteKey={siteKey}
+              action="register"
+              onToken={setCaptchaToken}
+              onError={() => setError(t("register.errorCaptchaFailed"))}
+            />
+          </div>
+        ) : null}
+        {error ? <p className="auth-error">{error}</p> : null}
+        <AuthSubmit type="submit" disabled={loading || siteKey === null || Boolean(siteKey && !captchaToken)}>
+          {loading ? t("register.submitting") : t("register.submit")}
+        </AuthSubmit>
+      </form>
+    </AuthStage>
   );
 }

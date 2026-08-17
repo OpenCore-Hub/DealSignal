@@ -1,10 +1,14 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
-import { Buildings } from "@phosphor-icons/react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import {
+  AuthField,
+  AuthInput,
+  AuthNotice,
+  AuthStage,
+  AuthSubmit,
+  AuthTextLink,
+  railFromNamespace,
+} from "@/components/auth/AuthStage";
 import { api } from "@/lib/api";
 import { ApiError } from "@/lib/apiClient";
 import { apiErrorMessage } from "@/lib/apiErrors";
@@ -83,70 +87,67 @@ export function CreateWorkspacePage() {
   };
 
   return (
-    <div className="flex min-h-[100dvh] flex-col items-center justify-center bg-background p-6">
-      <div className="w-full max-w-md">
-        <Button variant="ghost" className="mb-4" onClick={() => navigate(-1)}>
-          {t("back")}
-        </Button>
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-h2">
-              <Buildings size={24} />
-              {t("createWorkspace")}
-            </CardTitle>
-            {needsEmailVerify ? (
-              <p className="text-sm text-muted-foreground">{t("verifyEmailForTrial")}</p>
-            ) : null}
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="name">{t("workspaceName")}</Label>
-                <Input
-                  id="name"
-                  value={name}
-                  onChange={(e) => handleNameChange(e.target.value)}
-                  placeholder={t("workspaceNamePlaceholder")}
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="slug">{t("workspaceSlug")}</Label>
-                <Input
-                  id="slug"
-                  value={slug}
-                  onChange={(e) => {
-                    setSlug(slugify(e.target.value));
-                    setSlugError(null);
-                  }}
-                  placeholder={t("workspaceSlugPlaceholder")}
-                  required
-                  aria-invalid={Boolean(slugError)}
-                  aria-describedby={slugError ? "workspace-slug-error" : undefined}
-                />
-                {slugError && (
-                  <p id="workspace-slug-error" className="text-caption text-error-500">
-                    {slugError}
-                  </p>
-                )}
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="brandColor">{t("brandColor")}</Label>
-                <Input
-                  id="brandColor"
-                  type="color"
-                  value={brandColor}
-                  onChange={(e) => setBrandColor(e.target.value)}
-                />
-              </div>
-              {error && <p className="text-caption text-error-500">{error}</p>}
-              <Button type="submit" className="w-full" disabled={loading || !name.trim() || !slug.trim()}>
-                {loading ? t("creating") : t("createWorkspace")}
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
-      </div>
-    </div>
+    <AuthStage
+      rail={railFromNamespace(t, "workspaceStage")}
+      kicker={t("createWorkspaceKicker")}
+      title={t("createWorkspace")}
+      notice={needsEmailVerify ? <AuthNotice tone="invite">{t("verifyEmailForTrial")}</AuthNotice> : null}
+      footer={
+        <p>
+          <AuthTextLink onClick={() => navigate(-1)}>{t("back")}</AuthTextLink>
+        </p>
+      }
+    >
+      <form onSubmit={handleSubmit}>
+        <AuthField id="name" label={t("workspaceName")}>
+          <AuthInput
+            id="name"
+            value={name}
+            onChange={(e) => handleNameChange(e.target.value)}
+            placeholder={t("workspaceNamePlaceholder")}
+            required
+          />
+        </AuthField>
+        <AuthField
+          id="slug"
+          label={t("workspaceSlug")}
+          hint={
+            slugError ? (
+              <p id="workspace-slug-error" className="auth-error">
+                {slugError}
+              </p>
+            ) : undefined
+          }
+        >
+          <AuthInput
+            id="slug"
+            value={slug}
+            onChange={(e) => {
+              setSlug(slugify(e.target.value));
+              setSlugError(null);
+            }}
+            placeholder={t("workspaceSlugPlaceholder")}
+            required
+            aria-invalid={Boolean(slugError)}
+            aria-describedby={slugError ? "workspace-slug-error" : undefined}
+          />
+        </AuthField>
+        <AuthField id="brandColor" label={t("brandColor")}>
+          <div className="auth-color-row">
+            <input
+              id="brandColor"
+              type="color"
+              value={brandColor}
+              onChange={(e) => setBrandColor(e.target.value)}
+            />
+            <span className="auth-color-hex">{brandColor}</span>
+          </div>
+        </AuthField>
+        {error ? <p className="auth-error">{error}</p> : null}
+        <AuthSubmit type="submit" disabled={loading || !name.trim() || !slug.trim()}>
+          {loading ? t("creating") : t("createWorkspace")}
+        </AuthSubmit>
+      </form>
+    </AuthStage>
   );
 }

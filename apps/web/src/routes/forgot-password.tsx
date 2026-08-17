@@ -1,10 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { useTranslation } from "react-i18next";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import {
+  AuthField,
+  AuthInput,
+  AuthStage,
+  AuthSubmit,
+  AuthTextLink,
+  railFromNamespace,
+} from "@/components/auth/AuthStage";
 import { TurnstileWidget, type TurnstileWidgetHandle } from "@/components/auth/TurnstileWidget";
 import { api } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/apiErrors";
@@ -63,56 +67,48 @@ export function ForgotPasswordPage() {
   };
 
   return (
-    <div className="flex min-h-[100dvh] flex-col items-center justify-center bg-background p-6">
-      <div className="w-full max-w-md">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-h2">{t("forgotPassword.title")}</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <p className="text-sm text-muted-foreground">{t("forgotPassword.body")}</p>
-            {sent ? (
-              <p className="text-sm text-muted-foreground">{t("forgotPassword.sent")}</p>
-            ) : (
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="email">{t("forgotPassword.email")}</Label>
-                  <Input
-                    id="email"
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder={t("forgotPassword.emailPlaceholder")}
-                    autoComplete="email"
-                    required
-                  />
-                </div>
-                {siteKey ? (
-                  <TurnstileWidget
-                    ref={captchaRef}
-                    siteKey={siteKey}
-                    action="register"
-                    hintKey="forgotPassword.captchaHint"
-                    onToken={setCaptchaToken}
-                    onError={() => setError(t("register.errorCaptchaFailed"))}
-                  />
-                ) : null}
-                {error ? <p className="text-sm text-error-500">{error}</p> : null}
-                <Button
-                  type="submit"
-                  className="w-full"
-                  disabled={loading || siteKey === null || Boolean(siteKey && !captchaToken)}
-                >
-                  {loading ? t("forgotPassword.submitting") : t("forgotPassword.submit")}
-                </Button>
-              </form>
-            )}
-            <Button variant="link" className="w-full" onClick={() => navigate("/login")}>
-              {t("forgotPassword.backToLogin")}
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-    </div>
+    <AuthStage
+      rail={railFromNamespace(t, "stage")}
+      kicker={t("forgotPassword.kicker")}
+      title={t("forgotPassword.title")}
+      lede={sent ? t("forgotPassword.sent") : t("forgotPassword.body")}
+      footer={
+        <p>
+          <AuthTextLink onClick={() => navigate("/login")}>{t("forgotPassword.backToLogin")}</AuthTextLink>
+        </p>
+      }
+    >
+      {sent ? null : (
+        <form onSubmit={handleSubmit}>
+          <AuthField id="email" label={t("forgotPassword.email")}>
+            <AuthInput
+              id="email"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder={t("forgotPassword.emailPlaceholder")}
+              autoComplete="email"
+              required
+            />
+          </AuthField>
+          {siteKey ? (
+            <div className="mt-6">
+              <TurnstileWidget
+                ref={captchaRef}
+                siteKey={siteKey}
+                action="register"
+                hintKey="forgotPassword.captchaHint"
+                onToken={setCaptchaToken}
+                onError={() => setError(t("register.errorCaptchaFailed"))}
+              />
+            </div>
+          ) : null}
+          {error ? <p className="auth-error">{error}</p> : null}
+          <AuthSubmit type="submit" disabled={loading || siteKey === null || Boolean(siteKey && !captchaToken)}>
+            {loading ? t("forgotPassword.submitting") : t("forgotPassword.submit")}
+          </AuthSubmit>
+        </form>
+      )}
+    </AuthStage>
   );
 }
