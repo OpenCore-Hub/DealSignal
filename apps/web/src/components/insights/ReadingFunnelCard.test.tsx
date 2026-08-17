@@ -57,7 +57,7 @@ describe("ReadingFunnelCard", () => {
     expect(screen.getByText("Reading funnel")).toBeInTheDocument();
     expect(screen.getByText("50%")).toBeInTheDocument();
     expect(screen.getByTestId("reading-funnel-drop")).toHaveTextContent(/page 2/i);
-    expect(screen.getByText("p1")).toBeInTheDocument();
+    expect(screen.getByText("Page 1")).toBeInTheDocument();
   });
 
   it("renders empty state when there are no sessions", async () => {

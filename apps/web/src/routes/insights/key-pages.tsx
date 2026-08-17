@@ -25,6 +25,7 @@ import {
 } from "@/lib/heat/keyPageExtrasDraft";
 import { useAsyncData } from "@/hooks/useAsyncData";
 import { useTranslation } from "react-i18next";
+import { displayablePageTitle } from "@/lib/insights/pageTitleDisplay";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import type { Circle } from "@/types";
@@ -47,6 +48,23 @@ function categoryLabel(
   const key = `keyPages.categories.${category}`;
   const labeled = t(key);
   return labeled === key ? category : labeled;
+}
+
+function PageTitleCell({ title, page }: { title: string; page: number }) {
+  const { t } = useTranslation("insights");
+  const label = displayablePageTitle(title);
+  return (
+    <td className="max-w-[16rem] px-2 py-2">
+      {label ? (
+        <div className="truncate" title={label}>
+          {label}
+        </div>
+      ) : null}
+      <div className="text-caption text-muted-foreground">
+        {t("keyPages.pageNumber", { page })}
+      </div>
+    </td>
+  );
 }
 
 function downloadKeyPagesCsv(events: KeyPageComplianceEvent[], filename: string) {
@@ -77,7 +95,7 @@ function downloadKeyPagesCsv(events: KeyPageComplianceEvent[], filename: string)
         e.visitorId ?? "",
         e.documentTitle,
         String(e.pageNumber),
-        e.pageTitle,
+        displayablePageTitle(e.pageTitle),
         e.category,
         String(e.durationSeconds),
         e.dealRoomName,
@@ -512,12 +530,7 @@ export function InsightsKeyPagesPage() {
                       <td className="max-w-[220px] truncate px-2 py-2 font-medium">
                         {p.documentTitle || t("access.unknownDocument")}
                       </td>
-                      <td className="px-2 py-2">
-                        <div className="truncate">{p.pageTitle}</div>
-                        <div className="text-caption text-muted-foreground">
-                          {t("keyPages.pageNumber", { page: p.pageNumber })}
-                        </div>
-                      </td>
+                      <PageTitleCell title={p.pageTitle} page={p.pageNumber} />
                       <td className="px-2 py-2">{categoryLabel(t, p.category)}</td>
                       <td className="px-2 py-2 tabular-nums" title={t("keyPages.colViewsHint")}>
                         {t("keyPages.colViewsSplit", {
@@ -581,12 +594,7 @@ export function InsightsKeyPagesPage() {
                           {e.dealRoomName || t("access.libraryScope")}
                         </div>
                       </td>
-                      <td className="px-2 py-2">
-                        <div className="truncate">{e.pageTitle}</div>
-                        <div className="text-caption text-muted-foreground">
-                          {t("keyPages.pageNumber", { page: e.pageNumber })}
-                        </div>
-                      </td>
+                      <PageTitleCell title={e.pageTitle} page={e.pageNumber} />
                       <td className="px-2 py-2">{categoryLabel(t, e.category)}</td>
                       <td className="px-2 py-2 tabular-nums text-muted-foreground">
                         <div>{t("keyPages.avgDwellValue", { seconds: e.durationSeconds })}</div>

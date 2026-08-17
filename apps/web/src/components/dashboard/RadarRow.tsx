@@ -15,6 +15,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { isOverdue, daysOverdue } from "@/lib/calculations";
+import { radarRowIdentities } from "@/lib/radarEvidencePresentation";
 import {
   defaultOutcomeForProduct,
   outcomesForProduct,
@@ -90,6 +91,7 @@ export function RadarRow({
   const overdue = item.slaDueAt ? isOverdue(item.slaDueAt) : false;
   const outcomes = outcomesForProduct(item.product);
   const completeDirectly = outcomes.length === 1;
+  const identities = radarRowIdentities(item);
 
   return (
     <div
@@ -111,9 +113,9 @@ export function RadarRow({
         onClick={() => (onSelect ?? onPrimary)(item)}
       >
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-          {item.actor ? (
+          {identities.primary ? (
             <span className="text-sm font-semibold text-foreground">
-              {item.actor}
+              {identities.primary}
             </span>
           ) : null}
           <span className="text-sm font-medium text-foreground">
@@ -170,6 +172,14 @@ export function RadarRow({
               </span>
             ))}
           </div>
+        ) : null}
+        {identities.shareContact ? (
+          <p
+            className="text-caption mt-0.5 text-muted-foreground"
+            data-testid="radar-share-contact"
+          >
+            {t("radar.shareContact", { name: identities.shareContact })}
+          </p>
         ) : null}
         <p className="text-caption mt-1 text-muted-foreground">
           {item.dealName || t("radar.dealFallback")}

@@ -5,33 +5,33 @@
   },
   "radar": {
     "title": "交易雷达",
-    "upNext": "今日关注",
+    "upNext": "其余待办",
     "openCount_one": "{{count}} 项待处理",
     "openCount_other": "{{count}} 项待处理",
     "filtersLabel": "队列筛选",
     "filters": {
       "all": "全部",
-      "buying_window": "热意向",
-      "diligence_gate": "尽调闸门",
-      "commitment_ask": "承诺问答",
-      "leak_watch": "泄密盯梢",
-      "access_decay": "访问衰减",
-      "abuse_guard": "滥用守卫"
+      "buying_window": "正热",
+      "diligence_gate": "等进入",
+      "commitment_ask": "待回复",
+      "leak_watch": "核对分发",
+      "access_decay": "权限将到期",
+      "abuse_guard": "用量异常"
     },
     "products": {
-      "buying_window": "热意向",
-      "diligence_gate": "尽调闸门",
-      "commitment_ask": "承诺问答",
-      "leak_watch": "泄密盯梢",
-      "access_decay": "访问衰减",
-      "abuse_guard": "滥用守卫"
+      "buying_window": "正热",
+      "diligence_gate": "等进入",
+      "commitment_ask": "待回复",
+      "leak_watch": "核对分发",
+      "access_decay": "权限将到期",
+      "abuse_guard": "用量异常"
     },
     "cta": {
       "approve": "审批",
       "reply": "回复",
       "email": "写邮件",
       "renew": "续期",
-      "review": "查看",
+      "review": "核对",
       "open": "打开"
     },
     "evidence": "证据",
@@ -44,234 +44,235 @@
     "clearedToday": "今日已完成",
     "analyzeInInsights": "去洞察分析",
     "undo": "撤销",
-    "nextUpLabel": "下一步优先",
+    "nextUpLabel": "现在就做",
     "byDeal": "按交易",
     "strandCount_one": "{{count}} 项",
     "strandCount_other": "{{count}} 项",
     "showMoreInStrand_one": "再显示 {{count}} 项",
     "showMoreInStrand_other": "再显示 {{count}} 项",
-    "dealFallback": "工作区",
+    "dealFallback": "未命名分享",
+    "shareContact": "链接对象 {{name}}",
     "whyNow": {
-      "sla_overdue": "已逾 SLA {{hours}} 小时 — 先清这一项",
+      "sla_overdue": "已超过处理时限 {{hours}} 小时。先处理这一条。",
       "coalesced": "近 24 小时合并了 {{count}} 条相关信号",
-      "buying_window": "意向正热 — 趁热度未冷跟进",
-      "diligence_gate": "有人堵在闸门 — 尽快批或拒",
-      "commitment_ask": "承诺级提问待当日答复",
-      "leak_watch": "材料可能外传 — 先审再继续触达",
-      "access_decay": "访问通道在衰减 — 续期或确认废弃",
-      "abuse_guard": "提问/访问压力异常 — 检查配额与策略"
+      "buying_window": "现在正热。趁还在看的时候跟进。",
+      "diligence_gate": "有人还进不去。先决定要不要让他进来。",
+      "commitment_ask": "有提问等你今天回复。",
+      "leak_watch": "有转发、下载或未授权进入的迹象。先核对再跟进。",
+      "access_decay": "这条分享快到期了。续上，或确认可以关掉。",
+      "abuse_guard": "提问或打开次数明显高于平时。先看配额。"
     },
     "scenario": {
       "startup-fundraising": {
         "label": "初创融资",
         "whyNow": {
-          "buying_window": "投资人意向正热 — 趁窗口未冷跟进",
-          "diligence_gate": "投资人堵在数据室闸门 — 立刻放行尽调",
-          "commitment_ask": "尽调提问待创始人当日答复",
-          "leak_watch": "融资材料可能外传 — 先遏制再触达",
-          "access_decay": "投资人访问在衰减 — 续期或收口流程",
-          "abuse_guard": "本轮融资访问/提问压力异常 — 检查配额"
+          "buying_window": "投资人现在正热。趁还在看的时候跟进。",
+          "diligence_gate": "投资人还在门外。先决定要不要放。",
+          "commitment_ask": "有尽调提问等你今天回复。",
+          "leak_watch": "有转发、下载或未授权进入的迹象。先核对再跟进。",
+          "access_decay": "投资人访问快到期了。续上，或确认可以收口。",
+          "abuse_guard": "这一轮提问或打开次数明显高于平时。先看配额。"
         },
         "headline": {
-          "unlock_investor_gate": "放行投资人尽调访问",
-          "follow_warm_investor": "跟进意向正热的投资人",
-          "answer_diligence_ask": "当日答复尽调提问",
-          "contain_fundraising_leak": "遏制融资材料外传",
-          "renew_investor_access": "续期衰减中的投资人访问",
-          "review_raise_abuse": "审查本轮异常访问压力"
+          "unlock_investor_gate": "投资人还在等进入",
+          "follow_warm_investor": "跟进正热的投资人",
+          "answer_diligence_ask": "今天回复这条尽调提问",
+          "contain_fundraising_leak": "核对这条融资分享给了谁",
+          "renew_investor_access": "续期即将到期的投资人访问",
+          "review_raise_abuse": "核对这一轮的用量异常"
         }
       },
       "series-a-plus": {
         "label": "A 轮及以后",
         "whyNow": {
-          "buying_window": "后期轮次兴趣升温 — 推进下一 IC 步骤",
-          "diligence_gate": "后期评审者被闸住 — 清权限保节奏",
-          "commitment_ask": "条款/尽调提问待当日答复",
-          "leak_watch": "后期材料可能外传 — 检查分发范围",
-          "access_decay": "辛迪加访问在衰减 — 续期活跃评审",
-          "abuse_guard": "提问/访问压力异常 — 收紧策略"
+          "buying_window": "后期轮次兴趣升温。趁还在看的时候推进投委会下一步。",
+          "diligence_gate": "后期评审者还进不去。先决定要不要放。",
+          "commitment_ask": "有条款或尽调提问等你今天回复。",
+          "leak_watch": "有转发、下载或未授权进入的迹象。先核对流向。",
+          "access_decay": "联合投资人访问快到期了。给还在看的人续期。",
+          "abuse_guard": "提问或打开次数明显高于平时。先看策略。"
         },
         "headline": {
-          "clear_later_stage_gate": "清后期评审闸门",
-          "push_ic_next_step": "趁热推进下一 IC 步骤",
-          "answer_term_ask": "当日答复条款/尽调提问",
-          "review_later_stage_leak": "审查后期材料外传风险",
-          "renew_syndicate_access": "续期衰减中的辛迪加访问",
-          "review_raise_abuse": "审查本轮异常访问压力"
+          "clear_later_stage_gate": "后期评审者还在等进入",
+          "push_ic_next_step": "趁热推进投委会下一步",
+          "answer_term_ask": "今天回复这条条款或尽调提问",
+          "review_later_stage_leak": "核对后期材料给了谁",
+          "renew_syndicate_access": "续期即将到期的联合投资人访问",
+          "review_raise_abuse": "核对这一轮的用量异常"
         }
       },
       "ma-acquisition": {
         "label": "并购收购",
         "whyNow": {
-          "buying_window": "买方互动正热 — 趁意向在推进流程",
-          "diligence_gate": "买方堵在闸门 — 立刻解锁尽调",
-          "commitment_ask": "并购尽调提问待当日答复",
-          "leak_watch": "交易材料可能外传 — 先遏制再触达买方",
-          "access_decay": "买方访问在衰减 — 续期或确认暂停",
-          "abuse_guard": "本交易访问压力异常 — 检查配额"
+          "buying_window": "买方互动正热。趁还在看的时候推进流程。",
+          "diligence_gate": "买方还进不去。先决定要不要放。",
+          "commitment_ask": "有并购尽调提问等你今天回复。",
+          "leak_watch": "有转发、下载或未授权进入的迹象。先核对再跟进买方。",
+          "access_decay": "买方访问快到期了。续上，或确认已经暂停。",
+          "abuse_guard": "这一单提问或打开次数明显高于平时。先看配额。"
         },
         "headline": {
-          "unlock_buyer_dd": "解锁买方尽调访问",
-          "renew_buyer_access": "续期衰减中的买方访问",
-          "contain_deal_leak": "遏制交易材料外传",
-          "answer_ma_ask": "当日答复并购尽调提问",
+          "unlock_buyer_dd": "买方还在等进入",
+          "renew_buyer_access": "续期即将到期的买方访问",
+          "contain_deal_leak": "核对这条交易分享给了谁",
+          "answer_ma_ask": "今天回复这条并购尽调提问",
           "advance_buyer_process": "趁意向推进买方流程",
-          "review_deal_abuse": "审查本交易异常访问压力"
+          "review_deal_abuse": "核对本交易的用量异常"
         }
       },
       "sales-dataroom": {
         "label": "销售数据室",
         "whyNow": {
-          "buying_window": "买方评估窗口已开 — 趁商业意向未冷跟进",
-          "diligence_gate": "潜客在等访问权限 — 尽快批准保住节奏",
-          "commitment_ask": "商务/安全提问待当日答复",
-          "leak_watch": "对客材料可能外传 — 下一次通话前先审",
-          "access_decay": "潜客访问在衰减 — 续期或确认掉单",
-          "abuse_guard": "潜客提问/访问压力异常 — 检查配额"
+          "buying_window": "买方评估窗口已开。趁还在看的时候跟进。",
+          "diligence_gate": "潜客还进不去。先决定要不要放。",
+          "commitment_ask": "有商务或安全提问等你今天回复。",
+          "leak_watch": "有转发、下载或未授权进入的迹象。下次通话前先核对。",
+          "access_decay": "潜客访问快到期了。续上，或确认已经掉单。",
+          "abuse_guard": "潜客提问或打开次数明显高于平时。先看配额。"
         },
         "headline": {
-          "follow_warm_buyer": "跟进意向正热的买方",
-          "approve_prospect_access": "批准潜客访问",
-          "answer_commercial_ask": "答复商务/安全提问",
-          "renew_prospect_access": "续期衰减中的潜客访问",
-          "review_customer_leak": "审查对客材料外传风险",
-          "review_prospect_abuse": "审查潜客异常访问压力"
+          "follow_warm_buyer": "跟进正热的买方",
+          "approve_prospect_access": "潜客还在等进入",
+          "answer_commercial_ask": "回复这条商务或安全提问",
+          "renew_prospect_access": "续期即将到期的潜客访问",
+          "review_customer_leak": "核对对客材料给了谁",
+          "review_prospect_abuse": "核对潜客的用量异常"
         }
       },
       "raising-first-fund": {
         "label": "首募基金",
         "whyNow": {
-          "buying_window": "LP 意向正热 — 趁配置注意力未散跟进",
-          "diligence_gate": "LP 堵在闸门 — 立刻解锁尽调",
-          "commitment_ask": "LP 尽调提问待当日答复",
-          "leak_watch": "基金材料可能外传 — 先遏制再触达 LP",
-          "access_decay": "LP 访问在衰减 — 续期活跃评审",
-          "abuse_guard": "LP 提问/访问压力异常 — 检查配额"
+          "buying_window": "LP 现在正热。趁还在看的时候跟进。",
+          "diligence_gate": "LP 还进不去。先决定要不要放。",
+          "commitment_ask": "有 LP 尽调提问等你今天回复。",
+          "leak_watch": "有转发、下载或未授权进入的迹象。先核对再跟进 LP。",
+          "access_decay": "LP 访问快到期了。给还在看的人续期。",
+          "abuse_guard": "LP 提问或打开次数明显高于平时。先看配额。"
         },
         "headline": {
-          "follow_warm_lp": "跟进意向正热的 LP",
-          "contain_fundraise_leak": "遏制募资材料外传",
-          "answer_lp_ask": "当日答复 LP 尽调提问",
-          "unlock_lp_gate": "解锁 LP 尽调访问",
-          "renew_lp_access": "续期衰减中的 LP 访问",
-          "review_lp_abuse": "审查 LP 异常访问压力"
+          "follow_warm_lp": "跟进正热的 LP",
+          "contain_fundraise_leak": "核对这条基金分享给了谁",
+          "answer_lp_ask": "今天回复这条 LP 尽调提问",
+          "unlock_lp_gate": "LP 还在等进入",
+          "renew_lp_access": "续期即将到期的 LP 访问",
+          "review_lp_abuse": "核对 LP 的用量异常"
         }
       },
       "fund-management": {
         "label": "基金管理",
         "whyNow": {
-          "buying_window": "干系人互动正热 — 趁注意力在跟进",
-          "diligence_gate": "干系人被闸住 — 清权限保住汇报节奏",
-          "commitment_ask": "汇报/合规提问待当日答复",
-          "leak_watch": "基金材料可能外传 — 检查分发",
-          "access_decay": "汇报访问在衰减 — 续期或废弃通道",
-          "abuse_guard": "提问/访问压力异常 — 检查配额"
+          "buying_window": "干系人互动正热。趁还在看的时候跟进。",
+          "diligence_gate": "干系人还进不去。先决定要不要放。",
+          "commitment_ask": "有汇报或合规提问等你今天回复。",
+          "leak_watch": "有转发、下载或未授权进入的迹象。先核对流向。",
+          "access_decay": "汇报访问快到期了。续上，或确认可以关掉。",
+          "abuse_guard": "提问或打开次数明显高于平时。先看配额。"
         },
         "headline": {
-          "renew_reporting_access": "续期衰减中的汇报访问",
-          "answer_reporting_ask": "答复汇报/合规提问",
-          "contain_fund_leak": "遏制基金材料外传",
+          "renew_reporting_access": "续期即将到期的汇报访问",
+          "answer_reporting_ask": "回复这条汇报或合规提问",
+          "contain_fund_leak": "核对这条基金分享给了谁",
           "follow_lp_engagement": "跟进 LP 互动热度",
-          "clear_lp_reporting_gate": "清 LP 汇报闸门",
-          "review_lp_abuse": "审查 LP 异常访问压力"
+          "clear_lp_reporting_gate": "LP 还在等进入汇报",
+          "review_lp_abuse": "核对 LP 的用量异常"
         }
       },
       "portfolio-management": {
         "label": "投后组合",
         "whyNow": {
-          "buying_window": "组合互动正热 — 趁窗口未关跟进",
-          "diligence_gate": "投后干系人被闸住 — 立刻清权限",
-          "commitment_ask": "投后提问待当日答复",
-          "leak_watch": "组合材料可能外传 — 更新前先遏制",
-          "access_decay": "投后访问在衰减 — 续期活跃干系人",
-          "abuse_guard": "提问/访问压力异常 — 检查配额"
+          "buying_window": "组合互动正热。趁还在看的时候跟进。",
+          "diligence_gate": "投后干系人还进不去。先决定要不要放。",
+          "commitment_ask": "有投后提问等你今天回复。",
+          "leak_watch": "有转发、下载或未授权进入的迹象。更新前先核对。",
+          "access_decay": "投后访问快到期了。给还在看的人续期。",
+          "abuse_guard": "提问或打开次数明显高于平时。先看配额。"
         },
         "headline": {
           "follow_portfolio_engagement": "趁热跟进投后互动",
-          "clear_portfolio_gate": "清投后干系人闸门",
-          "answer_portfolio_ask": "当日答复投后提问",
-          "contain_portfolio_leak": "遏制组合材料外传",
-          "renew_portfolio_access": "续期衰减中的投后访问",
-          "review_portfolio_abuse": "审查投后异常访问压力"
+          "clear_portfolio_gate": "投后干系人还在等进入",
+          "answer_portfolio_ask": "今天回复这条投后提问",
+          "contain_portfolio_leak": "核对组合材料给了谁",
+          "renew_portfolio_access": "续期即将到期的投后访问",
+          "review_portfolio_abuse": "核对接后的用量异常"
         }
       },
       "real-estate-transaction": {
         "label": "不动产交易",
         "whyNow": {
-          "sla_overdue": "交易 SLA 已逾期 {{hours}} 小时 — 先清对手方闸门",
+          "sla_overdue": "已超过处理时限 {{hours}} 小时。先处理对手方这一条。",
           "coalesced": "过去 24 小时合并了 {{count}} 条相关交易信号",
-          "buying_window": "对手方意向正热 — 趁尽调窗口推进",
-          "diligence_gate": "对手方堵在闸门 — 立刻解锁尽调",
-          "commitment_ask": "交易提问待当日答复",
-          "leak_watch": "交易材料可能外传 — 检查分发",
-          "access_decay": "对手方访问在衰减 — 续期或确认暂停",
-          "abuse_guard": "提问/访问压力异常 — 检查配额"
+          "buying_window": "对手方现在正热。趁尽调窗口推进。",
+          "diligence_gate": "对手方还进不去。先决定要不要放。",
+          "commitment_ask": "有交易提问等你今天回复。",
+          "leak_watch": "有转发、下载或未授权进入的迹象。先核对流向。",
+          "access_decay": "对手方访问快到期了。续上，或确认已经暂停。",
+          "abuse_guard": "提问或打开次数明显高于平时。先看配额。"
         },
         "headline": {
-          "unlock_counterparty_gate": "解锁对手方尽调访问",
-          "renew_counterparty_access": "续期衰减中的对手方访问",
-          "contain_property_leak": "遏制不动产材料外传",
-          "answer_transaction_ask": "当日答复交易提问",
+          "unlock_counterparty_gate": "对手方还在等进入",
+          "renew_counterparty_access": "续期即将到期的对手方访问",
+          "contain_property_leak": "核对不动产材料给了谁",
+          "answer_transaction_ask": "今天回复这条交易提问",
           "advance_transaction": "趁热推进交易",
-          "review_transaction_abuse": "审查交易异常访问压力"
+          "review_transaction_abuse": "核对本交易的用量异常"
         }
       },
       "project-management": {
         "label": "项目管理",
         "whyNow": {
-          "sla_overdue": "项目 SLA 已逾期 {{hours}} 小时 — 先清阻塞项",
+          "sla_overdue": "已超过处理时限 {{hours}} 小时。先处理卡住的这一条。",
           "coalesced": "过去 24 小时合并了 {{count}} 条相关项目信号",
-          "buying_window": "干系人注意力在高位 — 趁窗口跟进",
-          "diligence_gate": "协作者被闸住 — 清权限解除阻塞",
-          "commitment_ask": "项目提问待当日答复",
-          "leak_watch": "项目材料可能外传 — 检查分享范围",
-          "access_decay": "协作者访问在衰减 — 续期或废弃通道",
-          "abuse_guard": "提问/访问压力异常 — 检查配额"
+          "buying_window": "干系人注意力在高位。趁还在看的时候跟进。",
+          "diligence_gate": "协作者还进不去。先决定要不要放。",
+          "commitment_ask": "有项目提问等你今天回复。",
+          "leak_watch": "有转发、下载或未授权进入的迹象。先核对流向。",
+          "access_decay": "协作者访问快到期了。续上，或确认可以关掉。",
+          "abuse_guard": "提问或打开次数明显高于平时。先看配额。"
         },
         "headline": {
-          "answer_project_ask": "当日答复项目提问",
-          "renew_collaborator_access": "续期衰减中的协作者访问",
-          "clear_collaborator_gate": "清掉协作者访问闸门",
+          "answer_project_ask": "今天回复这条项目提问",
+          "renew_collaborator_access": "续期即将到期的协作者访问",
+          "clear_collaborator_gate": "协作者还在等进入",
           "follow_project_engagement": "趁热跟进项目互动",
-          "review_project_share": "审查项目材料分享范围",
-          "review_project_abuse": "审查项目异常访问压力"
+          "review_project_share": "核对项目材料给了谁",
+          "review_project_abuse": "核对本项目的用量异常"
         }
       },
       "custom": {
         "label": "自定义房间",
         "whyNow": {
-          "buying_window": "互动正热 — 趁意向未冷跟进",
-          "diligence_gate": "有人堵在闸门 — 尽快批或拒",
-          "commitment_ask": "提问待当日答复",
-          "leak_watch": "材料可能外传 — 继续前先审",
-          "access_decay": "访问在衰减 — 续期或确认废弃",
-          "abuse_guard": "提问/访问压力异常 — 检查配额"
+          "buying_window": "互动正热。趁还在看的时候跟进。",
+          "diligence_gate": "有人还进不去。先决定要不要让他进来。",
+          "commitment_ask": "有提问等你今天回复。",
+          "leak_watch": "有转发、下载或未授权进入的迹象。先核对再继续。",
+          "access_decay": "访问快到期了。续上，或确认可以关掉。",
+          "abuse_guard": "提问或打开次数明显高于平时。先看配额。"
         }
       }
     },
     "evidenceChips": {
-      "forward": "转发",
+      "forward": "转发标记",
       "download": "下载",
       "capture": "截屏尝试",
       "key_page": "关键页",
       "ask": "提问",
       "engagement": "互动",
-      "gate": "闸门",
-      "access": "访问",
-      "abuse": "滥用",
+      "gate": "门禁",
+      "access": "权限",
+      "abuse": "限流",
       "coalesced": "合并 {{count}} 条"
     },
     "evidenceRail": {
       "title": "证据",
-      "empty": "选择一条雷达工单，查看为何此刻重要。",
+      "empty": "点一条待办，看现在为什么要处理。",
       "loading": "正在加载证据…",
       "error": "证据加载失败。",
       "degraded": "部分证据未能加载——空计数不代表零互动。",
       "degradedSections": {
         "metrics": "24h 指标",
-        "top_pages": "高频页面",
+        "top_pages": "打开最多的页",
         "recent_visitors": "最近访客",
-        "security_events": "安全事件",
+        "security_events": "门禁记录",
         "link_id": "链接身份",
         "access_request": "访问申请"
       },
@@ -286,51 +287,51 @@
           "room": "数据室成员申请"
         }
       },
-      "gateEvents": "门禁事件",
+      "gateEvents": "门禁记录",
       "gateTimeline": {
-        "beforeAndAfter": "申请前撞门禁 {{before}} 次，申请后仍撞 {{after}} 次——仍被拦住。",
-        "beforeOnly": "申请前撞门禁 {{before}} 次。",
-        "afterOnly": "提出申请后仍撞门禁 {{after}} 次——仍被拦住。",
-        "eventsOnly": "撞门禁 {{total}} 次——仍被拦住。"
+        "beforeAndAfter": "申请前碰到门禁 {{before}} 次，申请后还有 {{after}} 次。名单仍然有效，所以还会被拦。",
+        "beforeOnly": "申请前碰到门禁 {{before}} 次。",
+        "afterOnly": "提出申请后还有 {{after}} 次门禁拦住。若仍在等审批，这是预期的。",
+        "eventsOnly": "碰到门禁 {{total}} 次。若名单未改，这是预期的。"
       },
       "coalesced": {
         "count": "{{count}}×"
       },
-      "gateNoSuccessfulOpens": "尚无成功打开——访客仍被挡在门禁外。",
+      "gateNoSuccessfulOpens": "还没有成功打开——访客仍在门外。",
       "emptyPrimary": {
-        "leak_watch": "该链接近 24h 尚无转发/下载佐证——请从信号触发侧复核。",
-        "abuse_guard": "该链接近 24h 尚无截屏或限流事件。",
-        "access_decay": "该链接近 24h 尚无过期/撤销访问事件。",
-        "buying_window": "该链接近 24h 尚无打开或关键页互动记录。",
-        "commitment_ask": "提问待主机回复——互动指标为次要证据。"
+        "leak_watch": "近 24 小时没有转发或下载。先看门禁记录，不要当成外传已发生。",
+        "abuse_guard": "这条分享近 24 小时还没有截屏或限流记录。",
+        "access_decay": "这条分享近 24 小时还没有过期或撤销记录。",
+        "buying_window": "这条分享近 24 小时还没有打开或关键页记录。",
+        "commitment_ask": "提问还在等回复——打开次数只是次要证据。"
       },
       "keyPages": "关键页",
-      "topPages": "高频页面（累计）",
-      "recentVisitors": "最近访客",
-      "securityEvents": "安全事件",
-      "anonymousVisitor": "匿名访客",
+      "topPages": "打开最多的页（累计，不限近 24 小时）",
+      "recentVisitors": "已进入的访客",
+      "securityEvents": "门禁记录",
+      "anonymousVisitor": "未留邮箱",
       "page": "第 {{page}} 页",
       "pageOnDocument": "{{title}} · 第 {{page}} 页",
-      "views_one": "{{count}} 次查看",
-      "views_other": "{{count}} 次查看",
+      "views_one": "{{count}} 次浏览",
+      "views_other": "{{count}} 次浏览",
       "openFull": "打开完整证据",
       "openShareInbox": "去分享中审批",
       "eventTypes": {
         "capture_attempt": "截屏尝试",
-        "forward_signal": "转发信号",
+        "forward_signal": "转发标记",
         "expired_link_accessed": "访问已过期链接",
         "max_access_reached": "达到最大访问次数",
         "revoked_link_accessed": "访问已撤销链接",
-        "blocked_email": "邮箱被拦",
+        "blocked_email": "已拉黑",
         "blocked_domain": "域名被拦",
-        "security_gate_failed": "安全门禁失败",
+        "security_gate_failed": "未分类的门禁拦住",
         "not_in_allow_list": "不在允许名单",
         "ask_ai_rate_limited": "Ask AI 限流",
         "ask_escalated": "提问已升级",
         "ask_formal_submitted": "正式提问已提交",
         "abnormal_access_pattern": "异常访问",
         "rate_limit_exceeded": "触发限流",
-        "unknown": "安全事件"
+        "unknown": "门禁记录"
       },
       "reasons": {
         "printscreen": "Print Screen",
@@ -338,20 +339,21 @@
         "mac_capture": "Mac 截屏",
         "win_snip": "Windows 截图",
         "other": "其他",
-        "email_code_required": "需要邮箱验证",
-        "email_required": "需要填写邮箱",
-        "invalid_email_code": "验证码无效",
-        "nda_required": "需要签署 NDA",
-        "password": "需要密码或密码错误",
-        "delivery_email_mismatch": "投递邮箱不匹配",
+        "email_code_required": "待完成：验证邮箱",
+        "email_required": "待完成：填写邮箱",
+        "invalid_email_code": "未通过：验证码不正确",
+        "nda_required": "待完成：签署 NDA",
+        "password": "密码门禁未过",
+        "delivery_email_mismatch": "填写邮箱与验证邮箱不一致",
         "unknown": "原因未知"
       },
       "metrics": {
         "opens24h": "24h 打开",
         "visitors24h": "24h 访客",
-        "forwards24h": "24h 转发",
+        "forwards24h": "24h 转发标记",
         "downloads24h": "24h 下载",
-        "captures24h": "24h 截屏尝试"
+        "captures24h": "24h 截屏尝试",
+        "linkLevel": "这是整条分享近 24 小时的数字，不是这次拦住的人。"
       }
     },
     "toast": {
@@ -361,31 +363,31 @@
       "undoFailed": "撤销失败 — 请刷新后重试",
       "primaryUnavailable": "此事项暂无可用跳转 — 请使用证据栏或在此完成。"
     },
-    "lensLabel": "角色透镜",
+    "lensLabel": "角色",
     "lens": {
-      "founder": "创始人",
-      "investor_ir": "投资人 IR",
+      "founder": "融资",
+      "investor_ir": "投后",
       "sales": "销售"
     },
     "confidence": {
-      "low": "低置信",
-      "medium": "中置信",
-      "high": "高置信"
+      "low": "证据不足",
+      "medium": "有转发或下载",
+      "high": "多条分发标记"
     },
     "outcome": {
       "choose": "选择完成原因",
       "acted": "已处理",
-      "false_positive": "误报",
+      "false_positive": "无需处理",
       "renewed": "已续期",
       "approved": "已审批",
       "replied": "已回复",
       "other": "其他"
     },
     "inboxZero": {
-      "title": "今日通道干净",
-      "description": "今天已清完 {{count}} 项。趋势与内容诊断在洞察里继续看——不占这条行动通道。"
+      "title": "今天没有要处理的了",
+      "description": "今天已处理完 {{count}} 项。趋势仍在洞察里，不占这条待办。"
     },
-    "noiseHint": "{{product}} 已按闭环结果软降权（近 {{sample}} 次完成中误报 {{rate}}%）。",
+    "noiseHint": "{{product}} 你常标成「无需处理」，已暂时往下排（近 {{sample}} 次里 {{rate}}%）。",
     "feedDegraded": "部分排序信号未能加载——空过滤/指标不代表干净零值。",
     "feedDegradedSections": {
       "internal_emails": "成员邮箱过滤",
@@ -401,12 +403,12 @@
     "activeRooms": "活跃数据室",
     "weeklyVisitors": "本周访客",
     "pendingQuestions": "待处理 Q&A",
-    "highIntentContacts": "高意向联系人",
+    "highIntentContacts": "正热的联系人",
     "aria": {
       "activeRooms": "{{count}} 个活跃数据室",
       "weeklyVisitors": "{{count}} 位本周访客",
       "pendingQuestions": "{{count}} 个待处理问题",
-      "highIntentContacts": "{{count}} 位高意向联系人"
+      "highIntentContacts": "{{count}} 位正热的联系人"
     }
   },
   "riskAlerts": {
@@ -417,9 +419,9 @@
       "expired": "过期链接",
       "access_exhausted": "访问次数耗尽",
       "access_revoked": "已撤销链接",
-      "blocked_attempt": "被拦截访问",
+      "blocked_attempt": "门禁拦住",
       "anomaly": "异常访问",
-      "forward": "可能转发"
+      "forward": "转发标记"
     },
     "metadata": {
       "distinct_ips": "不同 IP 数",
@@ -444,7 +446,7 @@
   },
   "attention": {
     "actions": "待办",
-    "signals": "高意向信号",
+    "signals": "正热信号",
     "risks": "风险"
   },
   "room": {
@@ -471,7 +473,7 @@
   "empty": {
     "signals": {
       "title": "暂无信号",
-      "description": "上传并分享文档后，AI 会自动识别高意向投资人/客户并生成信号。",
+      "description": "上传并分享文档后，AI 会自动识别正热的投资人/客户并生成信号。",
       "action": "上传第一份文档"
     },
     "actions": {
@@ -509,17 +511,17 @@
       "unknownContact": "未知访客",
       "unknownIntent": "未知意图",
       "hot_signal": "{{contact}} 打开了 {{opens}} 次，停留 {{duration}}，查看了 {{keyPages}}",
-      "key_page": "{{contact}} 阅读了敏感页（{{keyPages}}）",
+      "key_page": "{{contact}} 打开了关键页：{{keyPages}}",
       "follow_up": "{{contact}} · {{opens}} 次打开 · {{duration}} · {{keyPages}}",
       "risk_alert": "{{opens}} 次打开 · {{duration}} · {{keyPageCount}} 个关键页",
       "question": "{{actor}} 提问了 {{intent}}：{{question}}"
     },
     "types": {
-      "hot_signal": "高意向信号",
+      "hot_signal": "正热信号",
       "risk_alert": "风险预警",
       "follow_up": "跟进建议",
-      "hot": "高意向信号",
-      "key_page": "敏感页阅读",
+      "hot": "正热信号",
+      "key_page": "关键页",
       "warm": "温信号",
       "cold": "冷信号",
       "risk": "风险提醒"
@@ -542,7 +544,7 @@
   },
   "heatMap": {
     "linkCount_other": "{{count}} 个链接",
-    "accessCount_other": "{{count}} 次访问",
+    "accessCount_other": "{{count}} 次浏览",
     "viewAll": "查看全部"
   },
   "activity": {

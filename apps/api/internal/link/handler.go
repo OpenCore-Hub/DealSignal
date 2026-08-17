@@ -988,6 +988,23 @@ func (h *Handler) CreateAccessRequest(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{"data": ar})
 }
 
+// auditPublicEmailCheck records allowlist/block denials from the NDA pre-check
+// with the same event types as Access. Gate prompts and infra errors stay silent.
+func (h *Handler) auditPublicEmailCheck(ctx context.Context, c *gin.Context, link db.Link, email string, err error) {
+	if err == nil || !link.ID.Valid {
+		return
+	}
+	if !errors.Is(err, ErrNotAllowedEmail) && !errors.Is(err, ErrBlockedEmail) {
+		return
+	}
+	ip, ua := "", ""
+	if c != nil && c.Request != nil {
+		ip = c.ClientIP()
+		ua = c.Request.UserAgent()
+	}
+	h.recordSecurityEventFromAccessError(ctx, link, err, makeVisitorID(email, ua), email, ip, ua)
+}
+
 // CheckPublicEmail verifies whether an email is allowed by the link's access
 // rules before the visitor enters the NDA review step.
 func (h *Handler) CheckPublicEmail(c *gin.Context) {
@@ -1002,6 +1019,7 @@ func (h *Handler) CheckPublicEmail(c *gin.Context) {
 	}
 	link, err := h.service.CheckPublicEmail(ctx, token, req.Email, c.ClientIP())
 	if err != nil {
+		h.auditPublicEmailCheck(ctx, c, link, req.Email, err)
 		requiresEmail, requiresEmailVerification, requiresNda := false, false, false
 		requiresPassword := false
 		isDealRoom := false

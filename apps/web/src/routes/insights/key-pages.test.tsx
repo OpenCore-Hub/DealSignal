@@ -196,6 +196,31 @@ describe("InsightsKeyPagesPage", () => {
     expect(screen.queryByText("buyer@example.com")?.closest("tr")?.textContent).not.toMatch(/Skim/);
   });
 
+  it("hides JSON page-title dumps and keeps the page number", async () => {
+    getKeyPageComplianceMock.mockResolvedValue({
+      ...mockReport,
+      pages: [
+        {
+          ...mockReport.pages[0],
+          pageNumber: 27,
+          pageTitle: 'nk_ic": 0.012, "net_ir": -0.18}, "decision": "rejected"',
+        },
+      ],
+      events: [
+        {
+          ...mockReport.events[0],
+          pageNumber: 27,
+          pageTitle: '"parameters": {"window": 5, "volume_window": 20}, "r...',
+        },
+      ],
+    });
+    await renderPage();
+    await waitFor(() => expect(getKeyPageComplianceMock).toHaveBeenCalled());
+    expect(screen.queryByText(/net_ir/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/parameters/)).not.toBeInTheDocument();
+    expect(screen.getAllByText("Page 27").length).toBeGreaterThan(0);
+  });
+
   it("saves per-category workspace extras", async () => {
     await renderPage();
     await openKeywordsCard();
@@ -223,7 +248,7 @@ describe("InsightsKeyPagesPage", () => {
   it("switches circle when Sales is selected", async () => {
     await renderPage();
     await waitFor(() => expect(screen.getByText("buyer@example.com")).toBeInTheDocument());
-    const viewCircleGroup = screen.getByRole("group", { name: /Keyword circle/i });
+    const viewCircleGroup = screen.getByRole("group", { name: /^Role$/i });
     fireEvent.click(viewCircleGroup.querySelector("button:nth-child(3)")!);
     await waitFor(() =>
       expect(getKeyPageComplianceMock).toHaveBeenLastCalledWith(

@@ -9,6 +9,7 @@ import {
   coalesceSecurityEvents,
   evidenceEmptyPrimaryKey,
   gateTimelineSummary,
+  isRadarGateHoldItem,
   topPagesSpanMultipleDocuments,
   type CoalescedSecurityEvent,
   type GateTimelineSummary,
@@ -186,7 +187,16 @@ export function RadarEvidenceRail({
           ) : null}
 
           {data.metrics && metricsActive ? (
-            <dl className="grid grid-cols-2 gap-2" data-testid="radar-evidence-metrics">
+            <div data-testid="radar-evidence-metrics">
+              {isRadarGateHoldItem(item) ? (
+                <p
+                  className="mb-2 text-caption text-muted-foreground"
+                  data-testid="radar-evidence-metrics-link-level"
+                >
+                  {t("radar.evidenceRail.metrics.linkLevel")}
+                </p>
+              ) : null}
+            <dl className="grid grid-cols-2 gap-2">
               <Metric
                 label={t("radar.evidenceRail.metrics.opens24h")}
                 value={data.metrics.opens24h}
@@ -210,6 +220,7 @@ export function RadarEvidenceRail({
                 />
               ) : null}
             </dl>
+            </div>
           ) : null}
 
           {/* Product-primary empty copy — never lead with four zero tiles. */}

@@ -132,10 +132,10 @@ describe("InsightsAccessPage", () => {
     await renderPage();
     await waitFor(() => expect(getAccessAuditMock).toHaveBeenCalled());
     expect(screen.queryByText("By data room")).not.toBeInTheDocument();
-    expect(screen.getByText("Denied attempts")).toBeInTheDocument();
+    expect(screen.getByText("Held at gate")).toBeInTheDocument();
     expect(screen.getByTestId("access-scope-hint")).toBeInTheDocument();
-    expect(screen.getByText("Email verification required")).toBeInTheDocument();
-    expect(screen.getAllByText("Security gate failed").length).toBeGreaterThan(0);
+    expect(screen.getByText("Pending: verify email")).toBeInTheDocument();
+    expect(screen.getAllByText("Unclassified gate hold").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Invalid password").length).toBeGreaterThan(0);
     expect(screen.getAllByText("buyer@example.com").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Pitch Deck").length).toBeGreaterThan(0);
@@ -163,8 +163,8 @@ describe("InsightsAccessPage", () => {
     const cta = screen.getByRole("link", { name: /Open Share/i });
     expect(cta).toHaveAttribute("href", "/acme/documents?tab=shared");
     // Denied KPI stays audit totalEvents (2), not pending request count (1).
-    expect(screen.getByText("Denied attempts").closest("[data-slot='card']")).toHaveTextContent(
-      /^[\s\S]*2[\s\S]*Gate failures only/,
+    expect(screen.getByText("Held at gate").closest("[data-slot='card']")).toHaveTextContent(
+      /^[\s\S]*2[\s\S]*Gate holds only/,
     );
   });
 

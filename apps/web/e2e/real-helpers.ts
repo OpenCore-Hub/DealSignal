@@ -282,6 +282,22 @@ export async function authenticatePage(page: Page) {
 
   await page.context().addCookies(playwrightCookies);
 
+  // Vite proxies /api onto the app origin so HttpOnly session cookies must
+  // live there (production nginx is the same). Keep API-host copies for any
+  // direct browser calls that still use VITE_API_BASE_URL.
+  await page.context().addCookies(
+    cookieJar.map((c) => ({
+      name: c.name,
+      value: c.value,
+      url: APP_ORIGIN,
+      path: c.path || "/",
+      httpOnly: c.httpOnly ?? false,
+      secure: APP_ORIGIN.startsWith("https:"),
+      expires: c.expires,
+      sameSite: "Lax" as const,
+    })),
+  );
+
   // Router gate reads non-HttpOnly auth_session on the Vite origin; API host/port
   // often differs (e.g. 127.0.0.1:8090 vs localhost:5173).
   await page.context().addCookies([

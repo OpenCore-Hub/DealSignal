@@ -5,33 +5,33 @@
   },
   "radar": {
     "title": "Deal Radar",
-    "upNext": "Today's focus",
+    "upNext": "The rest",
     "openCount_one": "{{count}} open",
     "openCount_other": "{{count}} open",
     "filtersLabel": "Queue filters",
     "filters": {
       "all": "All",
-      "buying_window": "Hot intent",
-      "diligence_gate": "Diligence gate",
-      "commitment_ask": "Ask",
-      "leak_watch": "Leak watch",
-      "access_decay": "Access decay",
-      "abuse_guard": "Abuse guard"
+      "buying_window": "Warm now",
+      "diligence_gate": "Waiting to enter",
+      "commitment_ask": "Needs a reply",
+      "leak_watch": "Check sharing",
+      "access_decay": "Access expiring",
+      "abuse_guard": "Usage spike"
     },
     "products": {
-      "buying_window": "Hot intent",
-      "diligence_gate": "Diligence gate",
-      "commitment_ask": "Commitment ask",
-      "leak_watch": "Leak watch",
-      "access_decay": "Access decay",
-      "abuse_guard": "Abuse guard"
+      "buying_window": "Warm now",
+      "diligence_gate": "Waiting to enter",
+      "commitment_ask": "Needs a reply",
+      "leak_watch": "Check sharing",
+      "access_decay": "Access expiring",
+      "abuse_guard": "Usage spike"
     },
     "cta": {
       "approve": "Approve",
       "reply": "Reply",
       "email": "Email",
       "renew": "Renew",
-      "review": "Review",
+      "review": "Check",
       "open": "Open"
     },
     "evidence": "Evidence",
@@ -44,234 +44,235 @@
     "clearedToday": "Cleared today",
     "analyzeInInsights": "Analyze in Insights",
     "undo": "Undo",
-    "nextUpLabel": "Do this next",
+    "nextUpLabel": "Do this now",
     "byDeal": "By deal",
     "strandCount_one": "{{count}} item",
     "strandCount_other": "{{count}} items",
     "showMoreInStrand_one": "Show {{count}} more",
     "showMoreInStrand_other": "Show {{count}} more",
-    "dealFallback": "Workspace",
+    "dealFallback": "Untitled share",
+    "shareContact": "Share contact {{name}}",
     "whyNow": {
-      "sla_overdue": "SLA overdue by {{hours}}h — clear this first",
+      "sla_overdue": "Past the handling window by {{hours}}h. Do this one first.",
       "coalesced": "{{count}} related signals merged in the last 24h",
-      "buying_window": "Hot intent — follow up while interest is warm",
-      "diligence_gate": "Someone is blocked at the gate — approve or reject",
-      "commitment_ask": "A commitment-grade ask is waiting for a reply today",
-      "leak_watch": "Possible material leak — review before continuing outreach",
-      "access_decay": "Access channel is decaying — renew or confirm retirement",
-      "abuse_guard": "Ask / access pressure looks abusive — review quotas"
+      "buying_window": "Interest is warm. Follow up while they are still looking.",
+      "diligence_gate": "Someone still cannot get in. Decide whether to let them in.",
+      "commitment_ask": "A question is waiting for a reply today.",
+      "leak_watch": "Forward, download, or blocked-access signals — check before the next outreach.",
+      "access_decay": "This share is about to expire. Renew it, or confirm it can close.",
+      "abuse_guard": "Asks or opens are well above the usual. Check quotas first."
     },
     "scenario": {
       "startup-fundraising": {
         "label": "Startup fundraising",
         "whyNow": {
-          "buying_window": "Investor intent is warm — follow up before the window cools",
-          "diligence_gate": "An investor is blocked at the room gate — unblock diligence now",
-          "commitment_ask": "A diligence ask needs a founder reply today",
-          "leak_watch": "Fundraising materials may have leaked — contain before the next outreach",
-          "access_decay": "Investor access is decaying — renew or close the process",
-          "abuse_guard": "Access or ask pressure looks abusive on this raise — review quotas"
+          "buying_window": "Investor interest is warm. Follow up while they are still looking.",
+          "diligence_gate": "An investor still cannot get in. Decide whether to let them in.",
+          "commitment_ask": "A diligence question is waiting for a reply today.",
+          "leak_watch": "Forward, download, or blocked-access signals — check before the next outreach.",
+          "access_decay": "Investor access is about to expire. Renew it, or close the process.",
+          "abuse_guard": "Asks or opens on this raise are well above the usual. Check quotas first."
         },
         "headline": {
-          "unlock_investor_gate": "Unlock investor diligence access",
+          "unlock_investor_gate": "An investor is still waiting to enter",
           "follow_warm_investor": "Follow up with a warm investor",
-          "answer_diligence_ask": "Answer a diligence ask today",
-          "contain_fundraising_leak": "Contain a fundraising material leak",
-          "renew_investor_access": "Renew decaying investor access",
-          "review_raise_abuse": "Review abusive access on this raise"
+          "answer_diligence_ask": "Reply to this diligence question today",
+          "contain_fundraising_leak": "Check who can see this fundraising share",
+          "renew_investor_access": "Renew investor access that is about to expire",
+          "review_raise_abuse": "Check unusual usage on this raise"
         }
       },
       "series-a-plus": {
         "label": "Series A+",
         "whyNow": {
-          "buying_window": "Later-stage interest is peaking — push for the next IC step",
-          "diligence_gate": "A later-stage reviewer is gated — clear access to keep momentum",
-          "commitment_ask": "A term / diligence ask needs a same-day reply",
-          "leak_watch": "Later-stage materials may have leaked — review distribution",
-          "access_decay": "Syndicate access is decaying — renew active reviewers",
-          "abuse_guard": "Ask or access pressure looks abusive — tighten policy"
+          "buying_window": "Later-stage interest is peaking. Push the next investment-committee step while they are still looking.",
+          "diligence_gate": "A later-stage reviewer still cannot get in. Decide whether to let them in.",
+          "commitment_ask": "A term or diligence question is waiting for a reply today.",
+          "leak_watch": "Forward, download, or blocked-access signals — check distribution first.",
+          "access_decay": "Co-investor access is about to expire. Renew the people still looking.",
+          "abuse_guard": "Asks or opens are well above the usual. Tighten policy if needed."
         },
         "headline": {
-          "clear_later_stage_gate": "Clear a later-stage reviewer gate",
-          "push_ic_next_step": "Push the next IC step while interest is hot",
-          "answer_term_ask": "Answer a term / diligence ask today",
-          "review_later_stage_leak": "Review a later-stage material leak",
-          "renew_syndicate_access": "Renew decaying syndicate access",
-          "review_raise_abuse": "Review abusive access on this raise"
+          "clear_later_stage_gate": "A later-stage reviewer is still waiting to enter",
+          "push_ic_next_step": "Push the next investment-committee step while interest is warm",
+          "answer_term_ask": "Reply to this term or diligence question today",
+          "review_later_stage_leak": "Check who can see later-stage materials",
+          "renew_syndicate_access": "Renew co-investor access that is about to expire",
+          "review_raise_abuse": "Check unusual usage on this raise"
         }
       },
       "ma-acquisition": {
         "label": "M&A acquisition",
         "whyNow": {
-          "buying_window": "Buyer engagement is hot — advance the process while interest holds",
-          "diligence_gate": "A buyer is blocked at the gate — unlock diligence immediately",
-          "commitment_ask": "An M&A diligence ask needs a same-day answer",
-          "leak_watch": "Deal materials may have leaked — contain before the next buyer touch",
-          "access_decay": "Buyer access is decaying — renew or confirm the process is paused",
-          "abuse_guard": "Access pressure looks abusive on this deal — review quotas"
+          "buying_window": "Buyer engagement is warm. Advance the process while they are still looking.",
+          "diligence_gate": "A buyer still cannot get in. Decide whether to let them in.",
+          "commitment_ask": "An M&A diligence question is waiting for a reply today.",
+          "leak_watch": "Forward, download, or blocked-access signals — check before the next buyer touch.",
+          "access_decay": "Buyer access is about to expire. Renew it, or confirm the process is paused.",
+          "abuse_guard": "Asks or opens on this deal are well above the usual. Check quotas first."
         },
         "headline": {
-          "unlock_buyer_dd": "Unlock buyer diligence access",
-          "renew_buyer_access": "Renew decaying buyer access",
-          "contain_deal_leak": "Contain a deal-material leak",
-          "answer_ma_ask": "Answer an M&A diligence ask today",
+          "unlock_buyer_dd": "A buyer is still waiting to enter",
+          "renew_buyer_access": "Renew buyer access that is about to expire",
+          "contain_deal_leak": "Check who can see this deal share",
+          "answer_ma_ask": "Reply to this M&A diligence question today",
           "advance_buyer_process": "Advance the buyer process while interest holds",
-          "review_deal_abuse": "Review abusive access on this deal"
+          "review_deal_abuse": "Check unusual usage on this deal"
         }
       },
       "sales-dataroom": {
         "label": "Sales data room",
         "whyNow": {
-          "buying_window": "Buyer evaluation window is open — follow up while commercial intent is warm",
-          "diligence_gate": "A prospect is waiting for access — approve to keep the deal moving",
-          "commitment_ask": "A commercial or security ask needs a same-day reply",
-          "leak_watch": "Customer-facing materials may have leaked — review before the next call",
-          "access_decay": "Prospect access is decaying — renew or confirm they dropped",
-          "abuse_guard": "Prospect ask / access pressure looks abusive — review quotas"
+          "buying_window": "The buyer evaluation window is open. Follow up while they are still looking.",
+          "diligence_gate": "A prospect still cannot get in. Decide whether to let them in.",
+          "commitment_ask": "A commercial or security question is waiting for a reply today.",
+          "leak_watch": "Forward, download, or blocked-access signals — check before the next call.",
+          "access_decay": "Prospect access is about to expire. Renew it, or confirm they dropped.",
+          "abuse_guard": "Prospect asks or opens are well above the usual. Check quotas first."
         },
         "headline": {
           "follow_warm_buyer": "Follow up with a warm buyer",
-          "approve_prospect_access": "Approve prospect access",
-          "answer_commercial_ask": "Answer a commercial / security ask",
-          "renew_prospect_access": "Renew decaying prospect access",
-          "review_customer_leak": "Review a customer-facing material leak",
-          "review_prospect_abuse": "Review abusive prospect access"
+          "approve_prospect_access": "A prospect is still waiting to enter",
+          "answer_commercial_ask": "Reply to this commercial or security question",
+          "renew_prospect_access": "Renew prospect access that is about to expire",
+          "review_customer_leak": "Check who can see customer-facing materials",
+          "review_prospect_abuse": "Check unusual prospect usage"
         }
       },
       "raising-first-fund": {
         "label": "Raising first fund",
         "whyNow": {
-          "buying_window": "LP interest is warm — follow up before allocation attention shifts",
-          "diligence_gate": "An LP is blocked at the gate — unlock diligence now",
-          "commitment_ask": "An LP diligence ask needs a same-day reply",
-          "leak_watch": "Fund materials may have leaked — contain before the next LP touch",
-          "access_decay": "LP access is decaying — renew active reviewers",
-          "abuse_guard": "LP ask / access pressure looks abusive — review quotas"
+          "buying_window": "LP interest is warm. Follow up while they are still looking.",
+          "diligence_gate": "An LP still cannot get in. Decide whether to let them in.",
+          "commitment_ask": "An LP diligence question is waiting for a reply today.",
+          "leak_watch": "Forward, download, or blocked-access signals — check before the next LP touch.",
+          "access_decay": "LP access is about to expire. Renew the people still looking.",
+          "abuse_guard": "LP asks or opens are well above the usual. Check quotas first."
         },
         "headline": {
           "follow_warm_lp": "Follow up with a warm LP",
-          "contain_fundraise_leak": "Contain a fundraise material leak",
-          "answer_lp_ask": "Answer an LP diligence ask today",
-          "unlock_lp_gate": "Unlock LP diligence access",
-          "renew_lp_access": "Renew decaying LP access",
-          "review_lp_abuse": "Review abusive LP access"
+          "contain_fundraise_leak": "Check who can see this fund share",
+          "answer_lp_ask": "Reply to this LP diligence question today",
+          "unlock_lp_gate": "An LP is still waiting to enter",
+          "renew_lp_access": "Renew LP access that is about to expire",
+          "review_lp_abuse": "Check unusual LP usage"
         }
       },
       "fund-management": {
         "label": "Fund management",
         "whyNow": {
-          "buying_window": "Stakeholder engagement is warm — follow up while attention is high",
-          "diligence_gate": "A stakeholder is gated — clear access to keep reporting on track",
-          "commitment_ask": "A reporting or compliance ask needs a same-day reply",
-          "leak_watch": "Fund materials may have leaked — review distribution",
-          "access_decay": "Reporting access is decaying — renew or retire the channel",
-          "abuse_guard": "Ask / access pressure looks abusive — review quotas"
+          "buying_window": "Stakeholder engagement is warm. Follow up while they are still looking.",
+          "diligence_gate": "A stakeholder still cannot get in. Decide whether to let them in.",
+          "commitment_ask": "A reporting or compliance question is waiting for a reply today.",
+          "leak_watch": "Forward, download, or blocked-access signals — check distribution first.",
+          "access_decay": "Reporting access is about to expire. Renew it, or confirm it can close.",
+          "abuse_guard": "Asks or opens are well above the usual. Check quotas first."
         },
         "headline": {
-          "renew_reporting_access": "Renew decaying reporting access",
-          "answer_reporting_ask": "Answer a reporting / compliance ask",
-          "contain_fund_leak": "Contain a fund material leak",
+          "renew_reporting_access": "Renew reporting access that is about to expire",
+          "answer_reporting_ask": "Reply to this reporting or compliance question",
+          "contain_fund_leak": "Check who can see this fund share",
           "follow_lp_engagement": "Follow warm LP engagement",
-          "clear_lp_reporting_gate": "Clear an LP reporting gate",
-          "review_lp_abuse": "Review abusive LP access"
+          "clear_lp_reporting_gate": "An LP is still waiting to enter reporting",
+          "review_lp_abuse": "Check unusual LP usage"
         }
       },
       "portfolio-management": {
         "label": "Portfolio management",
         "whyNow": {
-          "buying_window": "Portfolio engagement is warm — follow up while the window is open",
-          "diligence_gate": "A portfolio stakeholder is gated — clear access now",
-          "commitment_ask": "A portfolio ask needs a same-day reply",
-          "leak_watch": "Portfolio materials may have leaked — contain before the next update",
-          "access_decay": "Portfolio access is decaying — renew active stakeholders",
-          "abuse_guard": "Ask / access pressure looks abusive — review quotas"
+          "buying_window": "Portfolio engagement is warm. Follow up while they are still looking.",
+          "diligence_gate": "A portfolio stakeholder still cannot get in. Decide whether to let them in.",
+          "commitment_ask": "A portfolio question is waiting for a reply today.",
+          "leak_watch": "Forward, download, or blocked-access signals — check before the next update.",
+          "access_decay": "Portfolio access is about to expire. Renew the people still looking.",
+          "abuse_guard": "Asks or opens are well above the usual. Check quotas first."
         },
         "headline": {
           "follow_portfolio_engagement": "Follow portfolio engagement while warm",
-          "clear_portfolio_gate": "Clear a portfolio stakeholder gate",
-          "answer_portfolio_ask": "Answer a portfolio ask today",
-          "contain_portfolio_leak": "Contain a portfolio material leak",
-          "renew_portfolio_access": "Renew decaying portfolio access",
-          "review_portfolio_abuse": "Review abusive portfolio access"
+          "clear_portfolio_gate": "A portfolio stakeholder is still waiting to enter",
+          "answer_portfolio_ask": "Reply to this portfolio question today",
+          "contain_portfolio_leak": "Check who can see portfolio materials",
+          "renew_portfolio_access": "Renew portfolio access that is about to expire",
+          "review_portfolio_abuse": "Check unusual portfolio usage"
         }
       },
       "real-estate-transaction": {
         "label": "Real estate transaction",
         "whyNow": {
-          "sla_overdue": "Transaction SLA overdue by {{hours}}h — clear the counterparty gate first",
+          "sla_overdue": "Past the handling window by {{hours}}h. Do the counterparty item first.",
           "coalesced": "{{count}} related transaction signals merged in the last 24h",
-          "buying_window": "Counterparty interest is warm — advance while diligence is open",
-          "diligence_gate": "A counterparty is blocked at the gate — unlock diligence now",
-          "commitment_ask": "A transaction ask needs a same-day reply",
-          "leak_watch": "Deal materials may have leaked — review distribution",
-          "access_decay": "Counterparty access is decaying — renew or confirm pause",
-          "abuse_guard": "Ask / access pressure looks abusive — review quotas"
+          "buying_window": "Counterparty interest is warm. Advance while they are still looking.",
+          "diligence_gate": "A counterparty still cannot get in. Decide whether to let them in.",
+          "commitment_ask": "A transaction question is waiting for a reply today.",
+          "leak_watch": "Forward, download, or blocked-access signals — check distribution first.",
+          "access_decay": "Counterparty access is about to expire. Renew it, or confirm pause.",
+          "abuse_guard": "Asks or opens are well above the usual. Check quotas first."
         },
         "headline": {
-          "unlock_counterparty_gate": "Unlock counterparty diligence access",
-          "renew_counterparty_access": "Renew decaying counterparty access",
-          "contain_property_leak": "Contain a property material leak",
-          "answer_transaction_ask": "Answer a transaction ask today",
+          "unlock_counterparty_gate": "A counterparty is still waiting to enter",
+          "renew_counterparty_access": "Renew counterparty access that is about to expire",
+          "contain_property_leak": "Check who can see property materials",
+          "answer_transaction_ask": "Reply to this transaction question today",
           "advance_transaction": "Advance the transaction while warm",
-          "review_transaction_abuse": "Review abusive transaction access"
+          "review_transaction_abuse": "Check unusual usage on this transaction"
         }
       },
       "project-management": {
         "label": "Project management",
         "whyNow": {
-          "sla_overdue": "Project SLA overdue by {{hours}}h — clear the blocker first",
+          "sla_overdue": "Past the handling window by {{hours}}h. Do the blocker first.",
           "coalesced": "{{count}} related project signals merged in the last 24h",
-          "buying_window": "Stakeholder attention is high — follow up while the window is open",
-          "diligence_gate": "A collaborator is gated — clear access to unblock the project",
-          "commitment_ask": "A project ask needs a same-day reply",
-          "leak_watch": "Project materials may have leaked — review sharing",
-          "access_decay": "Collaborator access is decaying — renew or retire the channel",
-          "abuse_guard": "Ask / access pressure looks abusive — review quotas"
+          "buying_window": "Stakeholder attention is high. Follow up while they are still looking.",
+          "diligence_gate": "A collaborator still cannot get in. Decide whether to let them in.",
+          "commitment_ask": "A project question is waiting for a reply today.",
+          "leak_watch": "Forward, download, or blocked-access signals — check sharing first.",
+          "access_decay": "Collaborator access is about to expire. Renew it, or confirm it can close.",
+          "abuse_guard": "Asks or opens are well above the usual. Check quotas first."
         },
         "headline": {
-          "answer_project_ask": "Answer a project ask today",
-          "renew_collaborator_access": "Renew decaying collaborator access",
-          "clear_collaborator_gate": "Clear a collaborator access gate",
+          "answer_project_ask": "Reply to this project question today",
+          "renew_collaborator_access": "Renew collaborator access that is about to expire",
+          "clear_collaborator_gate": "A collaborator is still waiting to enter",
           "follow_project_engagement": "Follow project engagement while warm",
-          "review_project_share": "Review project material sharing",
-          "review_project_abuse": "Review abusive project access"
+          "review_project_share": "Check who can see project materials",
+          "review_project_abuse": "Check unusual usage on this project"
         }
       },
       "custom": {
         "label": "Custom room",
         "whyNow": {
-          "buying_window": "Engagement is warm — follow up while intent holds",
-          "diligence_gate": "Someone is blocked at the gate — approve or reject",
-          "commitment_ask": "An ask is waiting for a reply today",
-          "leak_watch": "Materials may have leaked — review before continuing",
-          "access_decay": "Access is decaying — renew or confirm retirement",
-          "abuse_guard": "Ask / access pressure looks abusive — review quotas"
+          "buying_window": "Engagement is warm. Follow up while they are still looking.",
+          "diligence_gate": "Someone still cannot get in. Decide whether to let them in.",
+          "commitment_ask": "A question is waiting for a reply today.",
+          "leak_watch": "Forward, download, or blocked-access signals — check before continuing.",
+          "access_decay": "Access is about to expire. Renew it, or confirm it can close.",
+          "abuse_guard": "Asks or opens are well above the usual. Check quotas first."
         }
       }
     },
     "evidenceChips": {
-      "forward": "Forward",
+      "forward": "Forward marker",
       "download": "Download",
       "capture": "Capture attempt",
       "key_page": "Key page",
       "ask": "Ask",
       "engagement": "Engagement",
       "gate": "Gate",
-      "access": "Access",
-      "abuse": "Abuse",
+      "access": "Permission",
+      "abuse": "Rate limit",
       "coalesced": "{{count}} merged"
     },
     "evidenceRail": {
       "title": "Evidence",
-      "empty": "Select a radar item to inspect why it matters.",
+      "empty": "Select a to-do to see why it needs action now.",
       "loading": "Loading evidence…",
       "error": "Could not load evidence.",
-      "degraded": "Some evidence facets failed to load — empty counters are not zero engagement.",
+      "degraded": "Some evidence could not load — empty counters are not zero engagement.",
       "degradedSections": {
         "metrics": "24h metrics",
-        "top_pages": "Top pages",
+        "top_pages": "Most-opened pages",
         "recent_visitors": "Recent visitors",
-        "security_events": "Security events",
+        "security_events": "Gate records",
         "link_id": "Link identity",
         "access_request": "Access request"
       },
@@ -286,33 +287,33 @@
           "room": "Data room membership"
         }
       },
-      "gateEvents": "Gate events",
+      "gateEvents": "Gate records",
       "gateTimeline": {
-        "beforeAndAfter": "Hit the gate {{before}}× before requesting, then {{after}}× after — still blocked.",
+        "beforeAndAfter": "Hit the gate {{before}}× before requesting, then {{after}}× after. The allowlist is still in effect, so more holds are expected.",
         "beforeOnly": "Hit the gate {{before}}× before requesting access.",
-        "afterOnly": "Requested access, then hit the gate {{after}}× — still blocked.",
-        "eventsOnly": "Hit the gate {{total}}× — still blocked."
+        "afterOnly": "Requested access, then hit the gate {{after}}×. If approval is still pending, that is expected.",
+        "eventsOnly": "Hit the gate {{total}}×. If the list is unchanged, that is expected."
       },
       "coalesced": {
         "count": "{{count}}×"
       },
-      "gateNoSuccessfulOpens": "No successful opens yet — the visitor is still at the gate.",
+      "gateNoSuccessfulOpens": "No successful opens yet — the visitor is still outside.",
       "emptyPrimary": {
-        "leak_watch": "No corroborating 24h forward/download activity on this link yet — review from the signal trigger.",
-        "abuse_guard": "No capture or rate-limit events in the last 24h on this link yet.",
-        "access_decay": "No expired/revoked access events in the last 24h on this link yet.",
-        "buying_window": "No 24h opens or key-page engagement recorded on this link yet.",
-        "commitment_ask": "Ask is waiting on a host reply — engagement metrics are secondary."
+        "leak_watch": "No forwards or downloads in the last 24h. Check the gate record — this is not confirmed sharing.",
+        "abuse_guard": "No capture or rate-limit events in the last 24h on this share yet.",
+        "access_decay": "No expired or revoked events in the last 24h on this share yet.",
+        "buying_window": "No opens or key-page records in the last 24h on this share yet.",
+        "commitment_ask": "The question is still waiting for a reply — opens are secondary evidence."
       },
       "keyPages": "Key pages",
-      "topPages": "Top pages (all time)",
-      "recentVisitors": "Recent visitors",
-      "securityEvents": "Security events",
-      "anonymousVisitor": "Anonymous visitor",
+      "topPages": "Most-opened pages (all time, not last 24h)",
+      "recentVisitors": "Visitors who got in",
+      "securityEvents": "Gate records",
+      "anonymousVisitor": "No email left",
       "page": "Page {{page}}",
-      "pageOnDocument": "{{title}} · p.{{page}}",
-      "views_one": "{{count}} view",
-      "views_other": "{{count}} views",
+      "pageOnDocument": "{{title}} · Page {{page}}",
+      "views_one": "{{count}} page view",
+      "views_other": "{{count}} page views",
       "openFull": "Open full evidence",
       "openShareInbox": "Review in Share",
       "eventTypes": {
@@ -321,16 +322,16 @@
         "expired_link_accessed": "Expired link accessed",
         "max_access_reached": "Max access reached",
         "revoked_link_accessed": "Revoked link accessed",
-        "blocked_email": "Blocked email",
+        "blocked_email": "Blocked",
         "blocked_domain": "Blocked domain",
-        "security_gate_failed": "Security gate failed",
-        "not_in_allow_list": "Not on allow list",
+        "security_gate_failed": "Unclassified gate hold",
+        "not_in_allow_list": "Not on the allowlist",
         "ask_ai_rate_limited": "Ask AI rate limited",
         "ask_escalated": "Ask escalated",
         "ask_formal_submitted": "Formal ask submitted",
         "abnormal_access_pattern": "Abnormal access",
         "rate_limit_exceeded": "Rate limit exceeded",
-        "unknown": "Security event"
+        "unknown": "Gate record"
       },
       "reasons": {
         "printscreen": "Print screen",
@@ -338,20 +339,21 @@
         "mac_capture": "Mac capture",
         "win_snip": "Windows snip",
         "other": "Other",
-        "email_code_required": "Email verification required",
-        "email_required": "Email required",
-        "invalid_email_code": "Invalid verification code",
-        "nda_required": "NDA required",
-        "password": "Password required or incorrect",
-        "delivery_email_mismatch": "Delivery email mismatch",
+        "email_code_required": "Pending: verify email",
+        "email_required": "Pending: enter email",
+        "invalid_email_code": "Failed: invalid verification code",
+        "nda_required": "Pending: sign NDA",
+        "password": "Password gate not passed",
+        "delivery_email_mismatch": "Entered email does not match verified email",
         "unknown": "Reason unavailable"
       },
       "metrics": {
         "opens24h": "Opens (24h)",
         "visitors24h": "Visitors (24h)",
-        "forwards24h": "Forwards (24h)",
+        "forwards24h": "Forward markers (24h)",
         "downloads24h": "Downloads (24h)",
-        "captures24h": "Capture attempts (24h)"
+        "captures24h": "Capture attempts (24h)",
+        "linkLevel": "These counts are for this share over the last 24 hours, not the person held at the gate."
       }
     },
     "toast": {
@@ -361,31 +363,31 @@
       "undoFailed": "Could not undo — refresh and try again",
       "primaryUnavailable": "No open destination for this item — use Evidence or complete it here."
     },
-    "lensLabel": "Role lens",
+    "lensLabel": "Role",
     "lens": {
-      "founder": "Founder",
-      "investor_ir": "Investor IR",
+      "founder": "Fundraising",
+      "investor_ir": "Post-investment",
       "sales": "Sales"
     },
     "confidence": {
-      "low": "Low confidence",
-      "medium": "Medium confidence",
-      "high": "High confidence"
+      "low": "Thin evidence",
+      "medium": "Forward or download",
+      "high": "Multiple sharing markers"
     },
     "outcome": {
       "choose": "Choose completion reason",
       "acted": "Acted",
-      "false_positive": "False positive",
+      "false_positive": "No action needed",
       "renewed": "Renewed",
       "approved": "Approved",
       "replied": "Replied",
       "other": "Other"
     },
     "inboxZero": {
-      "title": "Lane clear for today",
-      "description": "You cleared {{count}} item(s) today. Trends and content diagnosis stay in Insights — not in this action lane."
+      "title": "Nothing to handle today",
+      "description": "You cleared {{count}} item(s) today. Trends stay in Insights — not in this to-do list."
     },
-    "noiseHint": "{{product}} was soft-demoted ({{rate}}% false positive over {{sample}} closed items).",
+    "noiseHint": "{{product}} is often marked No action needed, so it is ranked lower for now ({{rate}}% of the last {{sample}}).",
     "feedDegraded": "Some ranking signals failed to load — empty filters/metrics are not clean zero.",
     "feedDegradedSections": {
       "internal_emails": "Member email filter",
@@ -401,12 +403,12 @@
     "activeRooms": "Active rooms",
     "weeklyVisitors": "Weekly visitors",
     "pendingQuestions": "Pending Q&A",
-    "highIntentContacts": "High-intent contacts",
+    "highIntentContacts": "Warm contacts",
     "aria": {
       "activeRooms": "{{count}} active rooms",
       "weeklyVisitors": "{{count}} weekly visitors",
       "pendingQuestions": "{{count}} pending questions",
-      "highIntentContacts": "{{count}} high-intent contacts"
+      "highIntentContacts": "{{count}} warm contacts"
     }
   },
   "riskAlerts": {
@@ -417,9 +419,9 @@
       "expired": "Expired link",
       "access_exhausted": "Access limit reached",
       "access_revoked": "Revoked link",
-      "blocked_attempt": "Blocked attempt",
+      "blocked_attempt": "Held at gate",
       "anomaly": "Anomaly",
-      "forward": "Possible forward"
+      "forward": "Forward marker"
     },
     "metadata": {
       "distinct_ips": "Distinct IPs",
@@ -444,7 +446,7 @@
   },
   "attention": {
     "actions": "Actions",
-    "signals": "High-intent signals",
+    "signals": "Warm signals",
     "risks": "Risks"
   },
   "room": {
@@ -473,7 +475,7 @@
   "empty": {
     "signals": {
       "title": "No signals yet",
-      "description": "Upload and share documents, and AI will automatically identify high-intent investors/customers and generate signals.",
+      "description": "Upload and share documents, and AI will automatically identify warm investors/customers and generate signals.",
       "action": "Upload your first document"
     },
     "actions": {
@@ -511,17 +513,17 @@
       "unknownContact": "Unknown visitor",
       "unknownIntent": "Unknown intent",
       "hot_signal": "{{contact}} opened {{opens}} times, spent {{duration}}, viewed {{keyPages}}",
-      "key_page": "{{contact}} viewed sensitive key pages ({{keyPages}})",
+      "key_page": "{{contact}} opened key pages: {{keyPages}}",
       "follow_up": "{{contact}} · {{opens}} opens · {{duration}} · {{keyPages}}",
       "risk_alert": "{{opens}} opens · {{duration}} · {{keyPageCount}} key pages",
       "question": "{{actor}} asked about {{intent}}: {{question}}"
     },
     "types": {
-      "hot_signal": "High-intent signal",
+      "hot_signal": "Warm signal",
       "risk_alert": "Risk alert",
       "follow_up": "Follow-up suggestion",
-      "hot": "High-intent signal",
-      "key_page": "Sensitive key-page read",
+      "hot": "Warm signal",
+      "key_page": "Key page",
       "warm": "Warm signal",
       "cold": "Cold signal",
       "risk": "Risk alert"

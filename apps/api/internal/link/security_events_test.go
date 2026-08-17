@@ -61,6 +61,22 @@ func TestSecurityEventFromError_AccessRuleFailures(t *testing.T) {
 			wantType:   "invite_token_failed",
 			wantReason: "invitation does not belong to link",
 		},
+		{
+			name: "email required prompt",
+			err:  ErrRequiresEmail,
+		},
+		{
+			name: "email code required prompt",
+			err:  ErrRequiresEmailCode,
+		},
+		{
+			name: "nda required prompt",
+			err:  ErrRequiresNDA,
+		},
+		{
+			name: "password required prompt",
+			err:  ErrRequiresPassword,
+		},
 	}
 
 	for _, tc := range tests {
@@ -114,6 +130,64 @@ func TestRecordSecurityEventFromAccessError_SingleBlockedEmailEvent(t *testing.T
 	}
 	if sink.events[0].eventType != "blocked_email" {
 		t.Fatalf("expected blocked_email event, got %+v", sink.events[0])
+	}
+}
+
+func TestRecordSecurityEventFromAccessError_SkipsGatePrompts(t *testing.T) {
+	prompts := []error{ErrRequiresEmail, ErrRequiresEmailCode, ErrRequiresNDA, ErrRequiresPassword}
+	for _, err := range prompts {
+		sink := &askHostSecuritySink{}
+		h := &Handler{analytics: nil}
+		h.SetSecuritySink(sink)
+		h.recordSecurityEventFromAccessError(
+			context.Background(),
+			db.Link{ID: pgtype.UUID{Bytes: [16]byte{1}, Valid: true}},
+			err,
+			"visitor-1",
+			"guest@example.com",
+			"203.0.113.1",
+			"test-agent",
+		)
+		if len(sink.events) != 0 {
+			t.Fatalf("%v must not write an audit event, got %+v", err, sink.events)
+		}
+	}
+}
+
+func TestAuditPublicEmailCheck_RecordsAllowlistDenialsOnly(t *testing.T) {
+	link := db.Link{ID: pgtype.UUID{Bytes: [16]byte{9}, Valid: true}}
+	cases := []struct {
+		name     string
+		err      error
+		wantType string
+	}{
+		{name: "not allowed", err: ErrNotAllowedEmail, wantType: "not_in_allow_list"},
+		{name: "blocked", err: ErrBlockedEmail, wantType: "blocked_email"},
+		{name: "expired is not a check-email denial", err: ErrLinkExpired},
+		{name: "invalid email prompt", err: ErrRequiresEmail},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sink := &askHostSecuritySink{}
+			h := &Handler{analytics: nil}
+			h.SetSecuritySink(sink)
+			h.auditPublicEmailCheck(context.Background(), nil, link, "wrong@example.com", tc.err)
+			if tc.wantType == "" {
+				if len(sink.events) != 0 {
+					t.Fatalf("expected no event, got %+v", sink.events)
+				}
+				return
+			}
+			if len(sink.events) != 1 {
+				t.Fatalf("expected 1 event, got %+v", sink.events)
+			}
+			if sink.events[0].eventType != tc.wantType {
+				t.Fatalf("eventType=%q want %q", sink.events[0].eventType, tc.wantType)
+			}
+			if sink.events[0].email != "wrong@example.com" {
+				t.Fatalf("email=%q", sink.events[0].email)
+			}
+		})
 	}
 }
 

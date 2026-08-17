@@ -44,6 +44,9 @@ async function renderRow(
       "radar.cta.review": "Review",
       "radar.evidence": "Evidence",
       "radar.dealFallback": "Untitled deal",
+      "radar.shareContact": "Share contact {{name}}",
+      "radar.products.leak_watch": "Check sharing",
+      "radar.confidence.low": "Thin evidence",
       "radar.outcome.choose": "Choose outcome",
       "radar.outcome.acted": "Acted",
       "radar.snoozeHours.24": "Snooze 24h",
@@ -117,5 +120,22 @@ describe("RadarRow", () => {
     const label = screen.getByTestId("radar-product-label");
     expect(label).toHaveAttribute("aria-hidden", "true");
     expect(label.className).toMatch(/invisible/);
+  });
+
+  it("does not treat a share contact name as the person held at the gate", async () => {
+    await renderRow(
+      makeItem({
+        product: "leak_watch",
+        confidence: "low",
+        verb: "review",
+        actor: "张姐",
+        headline: "Check who can see this fundraising share",
+        headlineCode: undefined,
+      }),
+    );
+    expect(screen.queryByText("张姐")).not.toBeInTheDocument();
+    expect(screen.getByTestId("radar-share-contact")).toHaveTextContent(
+      "Share contact 张姐",
+    );
   });
 });

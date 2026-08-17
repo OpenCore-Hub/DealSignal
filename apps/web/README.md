@@ -13,8 +13,13 @@ pnpm dev
 By default the dev server uses MSW mocks. To point to the real backend:
 
 ```bash
-VITE_API_BASE_URL=http://localhost:8080 pnpm dev
+VITE_API_BASE_URL=http://127.0.0.1:8090 pnpm dev
 ```
+
+The browser still calls same-origin `/api`. Vite proxies that path to the
+configured origin so login cookies stay first-party (production nginx does
+the same). Use the same hostname you type in the address bar (`localhost`
+vs `127.0.0.1`) only for the *page*; the API origin can differ.
 
 ## Available scripts
 

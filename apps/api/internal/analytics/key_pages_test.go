@@ -113,6 +113,9 @@ func TestServiceKeyPageCompliance(t *testing.T) {
 	if len(out.Pages) != 1 || out.Pages[0].Category != "financials" {
 		t.Fatalf("pages=%+v", out.Pages)
 	}
+	if out.Pages[0].PageTitle != "Financial Projections" {
+		t.Fatalf("page title=%q", out.Pages[0].PageTitle)
+	}
 	if out.Pages[0].Views != 3 || out.Pages[0].EngagedViews != 2 {
 		t.Fatalf("page views=%d engaged=%d", out.Pages[0].Views, out.Pages[0].EngagedViews)
 	}
@@ -167,5 +170,52 @@ func TestKeyPageComplianceByPageSQLExposesEngaged(t *testing.T) {
 	}
 	if !strings.Contains(block, "AS views") {
 		t.Fatal("compliance by-page must keep total title-match views")
+	}
+}
+
+func TestDisplayablePageTitleHidesJSONDumps(t *testing.T) {
+	if got := displayablePageTitle("Financial Projections"); got != "Financial Projections" {
+		t.Fatalf("heading: %q", got)
+	}
+	if got := displayablePageTitle(`"Q2 Financials"`); got != `"Q2 Financials"` {
+		t.Fatalf("quoted heading: %q", got)
+	}
+	if got := displayablePageTitle(`KPI "ARR": growth`); got != `KPI "ARR": growth` {
+		t.Fatalf("colon heading: %q", got)
+	}
+	dump := `nk_ic": 0.012, "net_ir": -0.18}, "decision": "rejected"`
+	if got := displayablePageTitle(dump); got != "" {
+		t.Fatalf("json dump should hide, got %q", got)
+	}
+	quoted := `"parameters": {"window": 5, "volume_window": 20}`
+	if got := displayablePageTitle(quoted); got != "" {
+		t.Fatalf("quoted json should hide, got %q", got)
+	}
+}
+
+func TestServiceKeyPageComplianceHidesJSONPageTitles(t *testing.T) {
+	ws := uuid.New()
+	dump := `nk_ic": 0.012, "net_ir": -0.18}, "financial": 1`
+	svc := NewService(&mockAnalyticsQuerier{
+		keyPageSummary: db.GetWorkspaceKeyPageComplianceSummaryRow{TotalViews: 1, DistinctPages: 1},
+		keyPageByPage: []db.ListWorkspaceKeyPageComplianceByPageRow{
+			{DocumentTitle: "Research", PageNumber: 27, PageTitle: dump, Views: 1},
+		},
+		keyPageEvents: []db.ListWorkspaceKeyPageComplianceEventsRow{
+			{VisitorEmail: "zhangludu@gmail.com", DocumentTitle: "Research", PageNumber: 27, PageTitle: dump},
+		},
+	}, nil, testCfg())
+	out, err := svc.KeyPageCompliance(context.Background(), ws.String(), KeyPageComplianceQuery{Days: 30})
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if len(out.Pages) != 1 || out.Pages[0].PageTitle != "" || out.Pages[0].PageNumber != 27 {
+		t.Fatalf("pages=%+v", out.Pages)
+	}
+	if out.Pages[0].Category != "financials" {
+		t.Fatalf("matching must use stored title, category=%q", out.Pages[0].Category)
+	}
+	if len(out.Events) != 1 || out.Events[0].PageTitle != "" || out.Events[0].PageNumber != 27 {
+		t.Fatalf("events=%+v", out.Events)
 	}
 }

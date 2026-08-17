@@ -1,5 +1,37 @@
 import type { RadarProduct } from "@/lib/radarQueue";
 
+/** Gate-hold cards: blocked_attempt leak_watch, or waiting-to-enter. */
+export function isRadarGateHoldItem(item: {
+  product: RadarProduct;
+  confidence?: string;
+}): boolean {
+  if (item.product === "diligence_gate") return true;
+  return item.product === "leak_watch" && item.confidence === "low";
+}
+
+export function looksLikeEmail(value: string): boolean {
+  const s = value.trim();
+  return s.includes("@") && !/\s/.test(s);
+}
+
+/**
+ * Card identities for a radar row.
+ * Low-confidence leak_watch actors that are not emails are the share contact,
+ * not the person held at the gate (that email lives on security events).
+ */
+export function radarRowIdentities(item: {
+  product: RadarProduct;
+  confidence?: string;
+  actor?: string;
+}): { primary: string | null; shareContact: string | null } {
+  const actor = item.actor?.trim() ?? "";
+  if (!actor) return { primary: null, shareContact: null };
+  if (item.product === "leak_watch" && item.confidence === "low" && !looksLikeEmail(actor)) {
+    return { primary: null, shareContact: actor };
+  }
+  return { primary: actor, shareContact: null };
+}
+
 export type EvidenceSecurityEvent = {
   eventType: string;
   reason?: string;

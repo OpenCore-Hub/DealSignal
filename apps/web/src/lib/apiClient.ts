@@ -1,4 +1,5 @@
 import i18next from "i18next";
+import { resolveBrowserApiBaseUrl } from "@/lib/apiBaseUrl";
 
 export interface ApiErrorDetails {
   field: string;
@@ -93,8 +94,10 @@ export interface UploadRequestOptions extends RequestOptions {
 }
 
 function getBaseUrl(): string {
-  const env = import.meta.env.VITE_API_BASE_URL as string | undefined;
-  return env?.replace(/\/+$/, "") ?? "";
+  return resolveBrowserApiBaseUrl(import.meta.env.VITE_API_BASE_URL, {
+    dev: import.meta.env.DEV,
+    vitest: Boolean(import.meta.env.VITEST),
+  });
 }
 
 let refreshPromise: Promise<void> | null = null;

@@ -164,7 +164,7 @@ describe("InsightsOverviewPage", () => {
     );
     const gateKpi = screen.getByTestId("insights-scenario-kpi-gate_pending");
     expect(gateKpi).toHaveTextContent("1");
-    expect(gateKpi).toHaveTextContent(/Pending gates/i);
+    expect(gateKpi).toHaveTextContent(/Pending approvals/i);
     expect(screen.getByTestId("insights-scenario-kpi-active_rooms")).toHaveTextContent(
       /Active rooms/i,
     );
@@ -172,7 +172,7 @@ describe("InsightsOverviewPage", () => {
       /Key-page views/i,
     );
     expect(screen.getByTestId("insights-scenario-kpi-open_signals")).toHaveTextContent(
-      /Open signals/i,
+      /Open follow-ups/i,
     );
     expect(within(screen.getByTestId("insights-scenario-pack")).queryByText(/^Metric$/)).toBeNull();
     expect(screen.getByText(/Startup fundraising/i)).toBeInTheDocument();
@@ -197,7 +197,7 @@ describe("InsightsOverviewPage", () => {
     expect(screen.getByText(/Workspace members are excluded/i)).toBeInTheDocument();
     expect(screen.getByText(/Median dwell/i)).toBeInTheDocument();
     expect(screen.getByText(/48s/i)).toBeInTheDocument();
-    expect(screen.getByText(/Completion rate/i)).toBeInTheDocument();
+    expect(screen.getByText(/Reached last page/i)).toBeInTheDocument();
     expect(screen.getByText("50%")).toBeInTheDocument();
     expect(screen.getByText(/2 of 4 measurable sessions/i)).toBeInTheDocument();
     expect(
@@ -269,14 +269,14 @@ describe("InsightsOverviewPage", () => {
     });
     const pack = screen.getByTestId("insights-scenario-pack");
     expect(pack).toHaveAttribute("data-pack-depth", "lite");
-    expect(pack).toHaveTextContent(/Lite depth/i);
-    expect(pack).toHaveTextContent(/Same six Deal Radar products/i);
-    expect(pack).toHaveTextContent(/lifetime heat/i);
-    expect(pack).toHaveTextContent(/Title & ownership/i);
+    expect(pack).toHaveTextContent(/· Lite/);
+    expect(pack).toHaveTextContent(/Same to-do list/i);
+    expect(pack).toHaveTextContent(/lifetime/i);
+    expect(pack).toHaveTextContent(/Property title/i);
     expect(pack).toHaveTextContent(/Leases & tenancies/i);
     const gateKpi = screen.getByTestId("insights-scenario-kpi-gate_pending");
     expect(gateKpi).toHaveTextContent("2");
-    expect(gateKpi).toHaveTextContent(/Pending gates/i);
+    expect(gateKpi).toHaveTextContent(/Pending approvals/i);
     expect(screen.getByTestId("insights-scenario-key-page-rules")).toHaveTextContent(
       /Why these pages count as key pages/i,
     );

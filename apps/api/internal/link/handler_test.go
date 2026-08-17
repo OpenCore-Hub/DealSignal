@@ -522,9 +522,11 @@ func TestSecurityEventFromErrorMapping(t *testing.T) {
 		{"disabled", ErrLinkDisabled, "revoked_link_accessed", "", false},
 		{"max access", ErrLinkMaxAccessReached, "max_access_reached", "", false},
 		{"invalid email code", ErrInvalidEmailCode, "security_gate_failed", "invalid_email_code", true},
-		{"email required", ErrRequiresEmail, "security_gate_failed", "email_required", true},
-		{"email code required", ErrRequiresEmailCode, "security_gate_failed", "email_code_required", true},
-		{"nda required", ErrRequiresNDA, "security_gate_failed", "nda_required", true},
+		{"email required prompt", ErrRequiresEmail, "", "", false},
+		{"email code required prompt", ErrRequiresEmailCode, "", "", false},
+		{"nda required prompt", ErrRequiresNDA, "", "", false},
+		{"password required prompt", ErrRequiresPassword, "", "", false},
+		{"invalid password", ErrInvalidPassword, "security_gate_failed", "password", true},
 		{"unmapped", errors.New("something else"), "", "", false},
 	}
 

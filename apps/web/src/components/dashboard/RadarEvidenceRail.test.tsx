@@ -51,6 +51,8 @@ async function renderRail(item: RadarWorkItem | null) {
       "radar.evidenceRail.metrics.visitors24h": "Visitors (24h)",
       "radar.evidenceRail.metrics.forwards24h": "Forwards (24h)",
       "radar.evidenceRail.metrics.downloads24h": "Downloads (24h)",
+      "radar.evidenceRail.metrics.linkLevel":
+        "These counts are for this share over the last 24 hours, not the person held at the gate.",
       "radar.evidenceRail.recentVisitors": "Recent visitors",
       "radar.evidenceRail.keyPages": "Key pages",
       "radar.evidenceRail.topPages": "Top pages",
@@ -145,6 +147,7 @@ describe("RadarEvidenceRail", () => {
     );
     expect(screen.getByText("9")).toBeInTheDocument();
     expect(screen.getByText("3")).toBeInTheDocument();
+    expect(screen.queryByTestId("radar-evidence-metrics-link-level")).not.toBeInTheDocument();
     expect(screen.getByTestId("radar-evidence-open")).toHaveAttribute(
       "href",
       "/acme/links/link-1",
@@ -560,6 +563,47 @@ describe("RadarEvidenceRail", () => {
       expect(screen.getByTestId("radar-evidence-empty-primary")).toBeInTheDocument();
     });
     expect(screen.queryByTestId("radar-evidence-metrics")).not.toBeInTheDocument();
+  });
+
+  it("labels 24h metrics as share-level on a gate-hold leak card", async () => {
+    mockFns.getRadarEvidence.mockResolvedValue({
+      itemId: "act-gate-hold",
+      product: "leak_watch",
+      headline: "Check sharing",
+      metrics: {
+        opens24h: 5,
+        uniqueVisitors24h: 2,
+        forwardSignals24h: 0,
+        downloads24h: 0,
+      },
+      securityEvents: [
+        {
+          eventType: "not_in_allow_list",
+          email: "yqx-401@126.com",
+          createdAt: "2026-08-11T17:00:00Z",
+        },
+      ],
+    } satisfies RadarEvidencePack);
+
+    await renderRail(
+      makeItem({
+        id: "act-gate-hold",
+        product: "leak_watch",
+        confidence: "low",
+        actor: "张姐",
+        headline: "Check sharing",
+      }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("radar-evidence-metrics-link-level")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("radar-evidence-metrics-link-level")).toHaveTextContent(
+      "not the person held at the gate",
+    );
+    expect(screen.getByTestId("radar-evidence-security-events")).toHaveTextContent(
+      "yqx-401@126.com",
+    );
   });
 });
 

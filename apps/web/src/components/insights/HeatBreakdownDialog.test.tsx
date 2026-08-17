@@ -88,7 +88,7 @@ describe("HeatBreakdownDialog", () => {
     expect(screen.getByText("Key pages")).toBeInTheDocument();
     expect(screen.getByText(/88 pts/)).toBeInTheDocument();
     expect(screen.getByText("Rising")).toBeInTheDocument();
-    expect(screen.getByText(/Founder · engagement factors/i)).toBeInTheDocument();
+    expect(screen.getByText(/Fundraising · engagement factors/i)).toBeInTheDocument();
     expect(screen.queryByText("File extras")).not.toBeInTheDocument();
     expect(screen.queryByText("Reading depth")).not.toBeInTheDocument();
     expect(screen.queryByText("Key-page evidence")).not.toBeInTheDocument();
@@ -138,7 +138,7 @@ describe("HeatBreakdownDialog", () => {
       expect(screen.getByText("Key-page evidence")).toBeInTheDocument();
     });
     expect(screen.getByText(/Title matched, but dwell was under 3s/i)).toBeInTheDocument();
-    expect(screen.getByText(/p1 · Financials/i)).toBeInTheDocument();
+    expect(screen.getByText(/Page 1 · Financials/i)).toBeInTheDocument();
     expect(screen.queryByText("File extras")).not.toBeInTheDocument();
   });
 
@@ -192,7 +192,7 @@ describe("HeatBreakdownDialog", () => {
     });
     expect(getDocumentHeatScoreMock).toHaveBeenCalledWith("doc-1");
     expect(getLinkHeatScoreMock).not.toHaveBeenCalled();
-    expect(screen.getByText(/Founder · reading on this file/i)).toBeInTheDocument();
+    expect(screen.getByText(/Fundraising · reading on this file/i)).toBeInTheDocument();
     expect(screen.getByText("Investor share")).toBeInTheDocument();
     expect(screen.getByText(/12 page views/i)).toBeInTheDocument();
     expect(screen.getByText(/61 pts/)).toBeInTheDocument();
@@ -202,7 +202,7 @@ describe("HeatBreakdownDialog", () => {
     expect(screen.getByText("Cross-domain attention")).toBeInTheDocument();
     expect(screen.getByText("Key-page evidence")).toBeInTheDocument();
     expect(screen.getByText(/Title matched, but dwell was under 3s/i)).toBeInTheDocument();
-    expect(screen.getByText(/p1 · Financials/i)).toBeInTheDocument();
+    expect(screen.getByText(/Page 1 · Financials/i)).toBeInTheDocument();
   });
 
   it("hides document extras when overlay is all zeros", async () => {

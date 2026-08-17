@@ -62,9 +62,9 @@ describe("ReadingSessionsCard", () => {
     );
     expect(screen.getByTestId("reading-sessions")).toBeInTheDocument();
     expect(screen.getByText("buyer@example.com")).toBeInTheDocument();
-    expect(screen.getByText("Completed")).toBeInTheDocument();
-    expect(screen.getByText("p1")).toBeInTheDocument();
-    expect(screen.getByText("p5")).toBeInTheDocument();
+    expect(screen.getByText("Reached the last page")).toBeInTheDocument();
+    expect(screen.getByText("Page 1")).toBeInTheDocument();
+    expect(screen.getByText("Page 5")).toBeInTheDocument();
   });
 
   it("renders empty state", async () => {

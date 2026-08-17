@@ -4,8 +4,52 @@ import {
   coalesceSecurityEvents,
   evidenceEmptyPrimaryKey,
   gateTimelineSummary,
+  isRadarGateHoldItem,
+  radarRowIdentities,
   topPagesSpanMultipleDocuments,
 } from "./radarEvidencePresentation";
+describe("radarRowIdentities", () => {
+  it("keeps a named actor on warm cards", () => {
+    expect(
+      radarRowIdentities({
+        product: "buying_window",
+        actor: "张姐",
+      }),
+    ).toEqual({ primary: "张姐", shareContact: null });
+  });
+
+  it("does not treat a contact name as the person held at the gate", () => {
+    expect(
+      radarRowIdentities({
+        product: "leak_watch",
+        confidence: "low",
+        actor: "张姐",
+      }),
+    ).toEqual({ primary: null, shareContact: "张姐" });
+  });
+
+  it("keeps an email-shaped actor on a gate-hold leak card", () => {
+    expect(
+      radarRowIdentities({
+        product: "leak_watch",
+        confidence: "low",
+        actor: "yqx-401@126.com",
+      }),
+    ).toEqual({ primary: "yqx-401@126.com", shareContact: null });
+  });
+});
+
+describe("isRadarGateHoldItem", () => {
+  it("is true for waiting-to-enter and low-confidence leak_watch", () => {
+    expect(isRadarGateHoldItem({ product: "diligence_gate" })).toBe(true);
+    expect(isRadarGateHoldItem({ product: "leak_watch", confidence: "low" })).toBe(
+      true,
+    );
+    expect(
+      isRadarGateHoldItem({ product: "leak_watch", confidence: "medium" }),
+    ).toBe(false);
+  });
+});
 
 const events = [
   {

@@ -37,13 +37,11 @@ func securityEventFromError(err error) (eventType, reason string, gateFailure bo
 		return "max_access_reached", "", false
 	case errors.Is(err, ErrInvalidEmailCode):
 		return "security_gate_failed", "invalid_email_code", true
-	case errors.Is(err, ErrRequiresEmail):
-		return "security_gate_failed", "email_required", true
-	case errors.Is(err, ErrRequiresEmailCode):
-		return "security_gate_failed", "email_code_required", true
-	case errors.Is(err, ErrRequiresNDA):
-		return "security_gate_failed", "nda_required", true
-	case errors.Is(err, ErrRequiresPassword), errors.Is(err, ErrInvalidPassword):
+	case errors.Is(err, ErrRequiresEmail), errors.Is(err, ErrRequiresEmailCode),
+		errors.Is(err, ErrRequiresNDA), errors.Is(err, ErrRequiresPassword):
+		// Empty-form gate prompts ("fill this in") are not audit denials.
+		return "", "", false
+	case errors.Is(err, ErrInvalidPassword):
 		return "security_gate_failed", "password", true
 	case errors.Is(err, ErrBlockedEmail):
 		return "blocked_email", "", true

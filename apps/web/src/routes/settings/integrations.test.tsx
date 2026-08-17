@@ -303,9 +303,9 @@ describe("SettingsIntegrationsPage", () => {
     await renderPage();
 
     await waitFor(() => {
-      expect(screen.getByText("Sensitive-page Slack alerts")).toBeInTheDocument();
+      expect(screen.getByText("Key-page Slack alerts")).toBeInTheDocument();
     });
 
-    expect(screen.getByRole("switch", { name: /sensitive-page slack alerts/i })).toBeDisabled();
+    expect(screen.getByRole("switch", { name: /key-page slack alerts/i })).toBeDisabled();
   });
 });
