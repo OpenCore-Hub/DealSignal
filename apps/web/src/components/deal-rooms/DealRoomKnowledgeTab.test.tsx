@@ -353,7 +353,7 @@ describe("DealRoomKnowledgeTab", () => {
     render(
       <MemoryRouter>
         <I18nextProvider i18n={i18nInstance}>
-          <DealRoomKnowledgeTab roomId="room-1" />
+          <DealRoomKnowledgeTab roomId="room-1" canContribute />
         </I18nextProvider>
       </MemoryRouter>,
     );
@@ -406,7 +406,7 @@ describe("DealRoomKnowledgeTab", () => {
     render(
       <MemoryRouter initialEntries={["/deal-rooms/room-1"]}>
         <I18nextProvider i18n={i18nInstance}>
-          <DealRoomKnowledgeTab roomId="room-1" />
+          <DealRoomKnowledgeTab roomId="room-1" canContribute />
           <LocationDisplay />
         </I18nextProvider>
       </MemoryRouter>,
@@ -569,7 +569,7 @@ describe("DealRoomKnowledgeTab", () => {
     render(
       <MemoryRouter initialEntries={["/deal-rooms/room-1"]}>
         <I18nextProvider i18n={i18nInstance}>
-          <DealRoomKnowledgeTab roomId="room-1" />
+          <DealRoomKnowledgeTab roomId="room-1" canContribute />
         </I18nextProvider>
       </MemoryRouter>,
     );
@@ -644,7 +644,7 @@ describe("DealRoomKnowledgeTab", () => {
     render(
       <MemoryRouter>
         <I18nextProvider i18n={i18nInstance}>
-          <DealRoomKnowledgeTab roomId="room-1" />
+          <DealRoomKnowledgeTab roomId="room-1" canContribute />
         </I18nextProvider>
       </MemoryRouter>,
     );
@@ -685,7 +685,7 @@ describe("DealRoomKnowledgeTab", () => {
     render(
       <MemoryRouter>
         <I18nextProvider i18n={i18nInstance}>
-          <DealRoomKnowledgeTab roomId="room-1" />
+          <DealRoomKnowledgeTab roomId="room-1" canContribute />
         </I18nextProvider>
       </MemoryRouter>,
     );
@@ -737,7 +737,7 @@ describe("DealRoomKnowledgeTab", () => {
     render(
       <MemoryRouter>
         <I18nextProvider i18n={i18nInstance}>
-          <DealRoomKnowledgeTab roomId="room-1" />
+          <DealRoomKnowledgeTab roomId="room-1" canContribute />
         </I18nextProvider>
       </MemoryRouter>,
     );
@@ -779,7 +779,7 @@ describe("DealRoomKnowledgeTab", () => {
     render(
       <MemoryRouter>
         <I18nextProvider i18n={i18nInstance}>
-          <DealRoomKnowledgeTab roomId="room-1" />
+          <DealRoomKnowledgeTab roomId="room-1" canContribute />
         </I18nextProvider>
       </MemoryRouter>,
     );
@@ -937,7 +937,7 @@ describe("docx citation open without page", () => {
     render(
       <MemoryRouter initialEntries={["/deal-rooms/room-1"]}>
         <I18nextProvider i18n={i18nInstance}>
-          <DealRoomKnowledgeTab roomId="room-1" />
+          <DealRoomKnowledgeTab roomId="room-1" canContribute />
           <LocationDisplay />
         </I18nextProvider>
       </MemoryRouter>,
@@ -1008,7 +1008,7 @@ describe("docx citation open without page", () => {
     render(
       <MemoryRouter>
         <I18nextProvider i18n={i18nInstance}>
-          <DealRoomKnowledgeTab roomId="room-1" />
+          <DealRoomKnowledgeTab roomId="room-1" canContribute />
         </I18nextProvider>
       </MemoryRouter>,
     );
@@ -1075,7 +1075,7 @@ describe("docx citation open without page", () => {
     render(
       <MemoryRouter>
         <I18nextProvider i18n={i18nInstance}>
-          <DealRoomKnowledgeTab roomId="room-1" />
+          <DealRoomKnowledgeTab roomId="room-1" canContribute />
         </I18nextProvider>
       </MemoryRouter>,
     );
@@ -1138,7 +1138,7 @@ describe("docx citation open without page", () => {
     render(
       <MemoryRouter>
         <I18nextProvider i18n={i18nInstance}>
-          <DealRoomKnowledgeTab roomId="room-1" />
+          <DealRoomKnowledgeTab roomId="room-1" canContribute />
         </I18nextProvider>
       </MemoryRouter>,
     );
@@ -1185,7 +1185,7 @@ describe("docx citation open without page", () => {
     render(
       <MemoryRouter>
         <I18nextProvider i18n={i18nInstance}>
-          <DealRoomKnowledgeTab roomId="room-1" />
+          <DealRoomKnowledgeTab roomId="room-1" canContribute />
         </I18nextProvider>
       </MemoryRouter>,
     );
@@ -1294,7 +1294,7 @@ describe("docx citation open without page", () => {
     render(
       <MemoryRouter>
         <I18nextProvider i18n={i18nInstance}>
-          <DealRoomKnowledgeTab roomId="room-1" />
+          <DealRoomKnowledgeTab roomId="room-1" canContribute />
         </I18nextProvider>
       </MemoryRouter>,
     );
@@ -1369,7 +1369,7 @@ describe("docx citation open without page", () => {
     render(
       <MemoryRouter>
         <I18nextProvider i18n={i18nInstance}>
-          <DealRoomKnowledgeTab roomId="room-1" />
+          <DealRoomKnowledgeTab roomId="room-1" canContribute />
         </I18nextProvider>
       </MemoryRouter>,
     );

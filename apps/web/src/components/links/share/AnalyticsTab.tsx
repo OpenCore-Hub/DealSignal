@@ -17,12 +17,12 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatDuration, formatRelativeTime } from "@/lib/formatters";
-import { calculateUniqueVisitors } from "@/lib/calculations";
 import { formatAskDeflectionRate, hasAskActivity } from "@/lib/linkAskSummary";
 import { api } from "@/lib/api";
 import { ApiError } from "@/lib/apiClient";
 import { apiErrorMessage } from "@/lib/apiErrors";
 import { useWorkspaceAccess } from "@/hooks/useWorkspaceAccess";
+import { canManageAskHost } from "@/lib/dealRoomCapabilities";
 import { LinkAccessLog } from "../LinkAccessLog";
 import { ManagementTab } from "./ManagementTab";
 import { AskSecurityEventsPanel } from "./AskSecurityEventsPanel";
@@ -72,9 +72,14 @@ async function fetchManagementData(linkId: string) {
   };
 }
 
-export function AnalyticsTab({ link, logs }: AnalyticsTabProps) {
+export function AnalyticsTab({ link }: AnalyticsTabProps) {
   const { t } = useTranslation("linkShare");
-  const { canWrite } = useWorkspaceAccess();
+  const { canManage } = useWorkspaceAccess();
+  const canManageAsk = canManageAskHost({
+    dealRoomId: link.dealRoomId,
+    workspaceCanManage: canManage,
+    linkCanManageAsk: link.canManageAsk,
+  });
   const [analytics, setAnalytics] = useState<LinkAnalytics | null>(null);
   const [analyticsLoading, setAnalyticsLoading] = useState(true);
   const [pendingHostCount, setPendingHostCount] = useState(0);
@@ -111,8 +116,6 @@ export function AnalyticsTab({ link, logs }: AnalyticsTabProps) {
   const deliveryScrollRef = useRef<HTMLDivElement | null>(null);
   const deliverySentinelRef = useRef<HTMLDivElement | null>(null);
 
-  const uniqueVisitors = useMemo(() => calculateUniqueVisitors(logs), [logs]);
-
   const showDeliveryTab =
     Boolean(link.requireEmailVerification) ||
     deliveryContacts.length > 0 ||
@@ -132,7 +135,7 @@ export function AnalyticsTab({ link, logs }: AnalyticsTabProps) {
       setSection("delivery");
       return;
     }
-    if (canWrite && pendingEngageCount > 0) {
+    if (canManageAsk && pendingEngageCount > 0) {
       setSection("engage");
     }
   }, [
@@ -141,14 +144,14 @@ export function AnalyticsTab({ link, logs }: AnalyticsTabProps) {
     remediableCount,
     pendingEngageCount,
     showDeliveryTab,
-    canWrite,
+    canManageAsk,
   ]);
 
   useEffect(() => {
-    if (!canWrite && section === "engage") {
+    if (!canManageAsk && section === "engage") {
       setSection("visitors");
     }
-  }, [canWrite, section]);
+  }, [canManageAsk, section]);
 
   useEffect(() => {
     visitorsSeededForLinkRef.current = null;
@@ -494,7 +497,7 @@ export function AnalyticsTab({ link, logs }: AnalyticsTabProps) {
 
   useEffect(() => {
     let cancelled = false;
-    if (!canWrite) {
+    if (!canManageAsk) {
       setPendingHostCount(0);
       setFileRequests([]);
       setManagementLoading(false);
@@ -516,10 +519,10 @@ export function AnalyticsTab({ link, logs }: AnalyticsTabProps) {
     return () => {
       cancelled = true;
     };
-  }, [link.id, t, canWrite]);
+  }, [link.id, t, canManageAsk]);
 
   const refreshManagement = async () => {
-    if (!canWrite) return;
+    if (!canManageAsk) return;
     setManagementLoading(true);
     try {
       const data = await fetchManagementData(link.id);
@@ -549,12 +552,12 @@ export function AnalyticsTab({ link, logs }: AnalyticsTabProps) {
   const stats = [
     {
       label: t("analytics.views"),
-      value: analytics?.total_views ?? link.accessCount ?? 0,
+      value: analytics ? analytics.total_views : analyticsLoading ? "—" : 0,
       icon: <Eye size={18} />,
     },
     {
       label: t("analytics.uniqueVisitors"),
-      value: analytics?.unique_visitors ?? uniqueVisitors,
+      value: analytics ? analytics.unique_visitors : analyticsLoading ? "—" : 0,
       icon: <Users size={18} />,
     },
     {
@@ -588,6 +591,7 @@ export function AnalyticsTab({ link, logs }: AnalyticsTabProps) {
           />
         ))}
       </div>
+      <p className="text-caption text-muted-foreground">{t("analytics.actorHint")}</p>
 
       <Tabs
         value={section}
@@ -611,7 +615,7 @@ export function AnalyticsTab({ link, logs }: AnalyticsTabProps) {
               ) : null}
             </TabsTrigger>
           ) : null}
-          {canWrite ? (
+          {canManageAsk ? (
             <TabsTrigger value="engage" className="gap-1.5">
               {t("analytics.tabs.engage")}
               {pendingEngageCount > 0 ? (
@@ -706,7 +710,11 @@ export function AnalyticsTab({ link, logs }: AnalyticsTabProps) {
                   className="max-h-[320px] space-y-3 overflow-y-auto pr-1"
                   aria-busy={loadingMoreActivity}
                 >
-                  <LinkAccessLog logs={activityLogs} />
+                  <LinkAccessLog
+                    logs={activityLogs}
+                    documents={link.documents}
+                    primaryDocumentId={link.documentId}
+                  />
                   {activityHasMore ? (
                     <div
                       ref={activitySentinelRef}
@@ -842,7 +850,7 @@ export function AnalyticsTab({ link, logs }: AnalyticsTabProps) {
           </TabsContent>
         ) : null}
 
-          {canWrite ? (
+          {canManageAsk ? (
         <TabsContent value="engage" className="space-y-4">
           {link.dealRoomId && hasAskActivity(analytics?.ask_summary) ? (
             <Card>
@@ -948,6 +956,7 @@ export function AnalyticsTab({ link, logs }: AnalyticsTabProps) {
           <ManagementTab
             linkId={link.id}
             dealRoomId={link.dealRoomId}
+            canManageAsk={canManageAsk}
             fileRequests={fileRequests}
             onUpdateFileRequest={handleUpdateFileRequest}
             onPendingHostCountChange={setPendingHostCount}

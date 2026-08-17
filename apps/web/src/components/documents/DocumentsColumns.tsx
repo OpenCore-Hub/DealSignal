@@ -27,6 +27,7 @@ import { canAddDocumentToDealRoom } from "@/lib/documentCategory";
 import { cn } from "@/lib/utils";
 import type { ColumnDef } from "@tanstack/react-table";
 import { documentHeatFromLinks } from "@/lib/heat/documentHeat";
+import { libraryShareDocumentIDs } from "@/lib/shareDocumentLabel";
 import type { Document, HeatLevel, Link } from "@/types";
 
 export interface DocumentRow extends Document {
@@ -37,9 +38,11 @@ export interface DocumentRow extends Document {
 
 export function buildDocumentRows(documents: Document[], links: Link[]): DocumentRow[] {
   const linksByDoc = links.reduce<Record<string, Link[]>>((acc, link) => {
-    if (!link.documentId || link.dealRoomId) return acc;
-    if (!acc[link.documentId]) acc[link.documentId] = [];
-    acc[link.documentId].push(link);
+    if (link.dealRoomId) return acc;
+    for (const id of libraryShareDocumentIDs(link)) {
+      if (!acc[id]) acc[id] = [];
+      acc[id].push(link);
+    }
     return acc;
   }, {});
 
@@ -50,7 +53,7 @@ export function buildDocumentRows(documents: Document[], links: Link[]): Documen
       ...doc,
       links: docLinks,
       totalViews,
-      // Same contract as Insights: document heat = max link heat.Compute.
+      // Library-link fallback. DocumentsTable overlays document-native heat.
       heatLevel: documentHeatFromLinks(docLinks),
     };
   });
@@ -66,6 +69,8 @@ interface UseDocumentColumnsOptions {
   /** Opens library Share dialog (create + copy). Agreements omit this. */
   onShare?: (doc: DocumentRow) => void;
   onDelete?: (doc: DocumentRow) => void;
+  /** Opens document-native heat explain. Agreements omit this (score 404s). */
+  onExplainHeat?: (doc: DocumentRow) => void;
   /**
    * Workspace content write (owner/admin/member). Guests keep preview/download.
    * Default true so agreement rows that omit onShare still get Create link.
@@ -83,6 +88,7 @@ export function useDocumentColumns({
   onArchive,
   onShare,
   onDelete,
+  onExplainHeat,
   canWrite = true,
   returnTo,
   returnLabel,
@@ -92,7 +98,13 @@ export function useDocumentColumns({
   return useMemo<ColumnDef<DocumentRow>[]>(
     () => [
       {
+        id: "createdAt",
         accessorKey: "title",
+        sortingFn: (rowA, rowB) => {
+          const ta = Date.parse(rowA.original.createdAt) || 0;
+          const tb = Date.parse(rowB.original.createdAt) || 0;
+          return ta - tb;
+        },
         header: () => (
           <span className="px-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/70">
             {t("documents:columns.file")}
@@ -156,7 +168,23 @@ export function useDocumentColumns({
           return rowA.original.totalViews - rowB.original.totalViews;
         },
         cell: ({ row }) => (
-          <HeatBadge level={row.original.heatLevel} className="font-medium" />
+          <div className="flex items-center gap-1.5">
+            <HeatBadge level={row.original.heatLevel} className="font-medium" />
+            {onExplainHeat ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 text-xs text-muted-foreground"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onExplainHeat(row.original);
+                }}
+              >
+                {t("documents:columns.explain")}
+              </Button>
+            ) : null}
+          </div>
         ),
       },
       {
@@ -419,6 +447,7 @@ export function useDocumentColumns({
       onArchive,
       onShare,
       onDelete,
+      onExplainHeat,
       canWrite,
       returnTo,
       returnLabel,

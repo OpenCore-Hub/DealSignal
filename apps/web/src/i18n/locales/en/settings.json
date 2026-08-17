@@ -60,9 +60,10 @@
     "tooLarge": "Logo must be smaller than 5 MB"
   },
   "members": {
-    "title": "Members",
+    "title": "Workspace members",
+    "description": "These are workspace roles, not data-room roles. Invite people into a specific data room from that room’s Members tab.",
     "emailPlaceholder": "Email address",
-    "roleLabel": "Role",
+    "roleLabel": "Workspace role",
     "invite": "Invite",
     "inviting": "Inviting...",
     "invited": "Invitation sent to {{email}}",
@@ -79,7 +80,7 @@
     "roleUpdateFailed": "Could not update role. Please try again.",
     "remove": "Remove",
     "removeTitle": "Remove member",
-    "removeDescription": "Remove {{email}} from this workspace? They will lose access immediately.",
+    "removeDescription": "Remove {{email}} from this workspace? They will lose workspace access. If they are the only operator of a data room, removal is blocked.",
     "removePendingDescription": "Revoke the invitation sent to {{email}}? They will no longer be able to join with this link.",
     "removing": "Removing...",
     "removed": "{{email}} was removed",
@@ -89,17 +90,22 @@
     "cannotModifySelf": "You cannot change your own membership here",
     "cannotManageMember": "You do not have permission to manage this member",
     "seatsUsage": "Internal seats",
-    "seatLimitReached": "You've reached the team seat limit. Invite guests for free, or upgrade to add more members.",
+    "seatLimitReached": "You've reached the team seat limit. Invite workspace guests for free, or upgrade to add more members.",
+    "roleHints": {
+      "admin": "Can manage workspace settings and view every data room. Changing a room still requires a room role.",
+      "member": "Can create data rooms and only sees rooms they belong to.",
+      "guest": "Free workspace access. Does not use a seat. Not a share-link visitor."
+    },
     "status": {
       "pending": "Pending",
       "active": "Active",
       "suspended": "Suspended"
     },
     "roles": {
-      "owner": "Owner",
-      "admin": "Admin",
-      "member": "Member",
-      "guest": "Guest"
+      "owner": "Workspace owner",
+      "admin": "Workspace admin",
+      "member": "Workspace member",
+      "guest": "Workspace guest"
     }
   },
   "integrations": {

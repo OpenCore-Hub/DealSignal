@@ -24,13 +24,19 @@ import type { Link } from "@/types";
 
 interface DealRoomQATabProps {
   roomId: string;
+  canManage?: boolean;
   /** Deep-link from dashboard or share surface (?linkId=). */
   initialLinkId?: string;
   /** Deep-link from dashboard formal Q&A todo (?askInbox=formal_queue). */
   initialAskInbox?: OwnerAskInboxView;
 }
 
-export function DealRoomQATab({ roomId, initialLinkId, initialAskInbox }: DealRoomQATabProps) {
+export function DealRoomQATab({
+  roomId,
+  canManage = false,
+  initialLinkId,
+  initialAskInbox,
+}: DealRoomQATabProps) {
   const { t } = useTranslation("dealRooms");
   const [linkFilter, setLinkFilter] = useState<string>(() => initialLinkId ?? "all");
   const onOpenCitation = useOwnerAskCitationNavigation(roomId);
@@ -97,6 +103,7 @@ export function DealRoomQATab({ roomId, initialLinkId, initialAskInbox }: DealRo
             linkLabels={linkNameById}
             initialView={initialAskInbox}
             onOpenCitation={onOpenCitation}
+            canManageAsk={canManage}
           />
         </CardContent>
       </Card>

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, fireEvent, within } from "@testing-library/react";
-import { MemoryRouter, Routes, Route } from "react-router";
+import { render, screen, waitFor, fireEvent, within, act } from "@testing-library/react";
+import { MemoryRouter, Routes, Route, useLocation } from "react-router";
 import { I18nextProvider, initReactI18next } from "react-i18next";
 import i18n from "i18next";
 import { DocumentsTable } from "./DocumentsTable";
@@ -10,6 +10,8 @@ import type { Document } from "@/types";
 const {
   getDocumentsMock,
   getLinksMock,
+  listDocumentHeatScoresMock,
+  getDocumentHeatScoreMock,
   getPageSignedUrlMock,
   getDocumentDeleteImpactMock,
   archiveDocumentMock,
@@ -17,6 +19,8 @@ const {
 } = vi.hoisted(() => ({
   getDocumentsMock: vi.fn(),
   getLinksMock: vi.fn(),
+  listDocumentHeatScoresMock: vi.fn(),
+  getDocumentHeatScoreMock: vi.fn(),
   getPageSignedUrlMock: vi.fn(),
   getDocumentDeleteImpactMock: vi.fn(),
   archiveDocumentMock: vi.fn(),
@@ -27,6 +31,8 @@ vi.mock("@/lib/api", () => ({
   api: {
     getDocuments: getDocumentsMock,
     getLinks: getLinksMock,
+    listDocumentHeatScores: listDocumentHeatScoresMock,
+    getDocumentHeatScore: getDocumentHeatScoreMock,
     getPageSignedUrl: getPageSignedUrlMock,
     getDocumentDeleteImpact: getDocumentDeleteImpactMock,
     archiveDocument: archiveDocumentMock,
@@ -114,6 +120,7 @@ const resources = {
       columns: {
         file: "File",
         heat: "Heat",
+        explain: "Explain",
         views: "Views",
         status: "Status",
         shareLinks: "Links",
@@ -144,6 +151,7 @@ const resources = {
         copied: "Share link copied",
         createFailed: "Failed",
         notReady: "Not ready",
+        noFilesSelected: "Select at least one document to create a share link.",
       },
       archive: {
         title: "Archive document?",
@@ -151,7 +159,7 @@ const resources = {
         visitorRevoke:
           "Visitors will no longer be able to open this document through existing share links.",
         unarchiveDoesNotRestore:
-          "Unarchiving later will not automatically reactivate those share links. Renew them from Links.",
+          "If this is the last remaining document on a share, that share is parked. Unarchiving later will not automatically reactivate parked links — renew them from Links.",
         withLinks_one: "This document is on {{count}} active share link.",
         withLinks_other: "This document is on {{count}} active share links.",
         confirmLoading: "Archiving…",
@@ -195,6 +203,7 @@ const resources = {
       },
     },
     common: {
+      heat: { hot: "Hot", warm: "Warm", cold: "Cold" },
       retry: "Retry",
       preview: "Preview",
       view: "View",
@@ -250,6 +259,11 @@ const mockDocs: Document[] = [
   },
 ];
 
+function LocationProbe() {
+  const loc = useLocation();
+  return <div data-testid="location">{`${loc.pathname}${loc.search}`}</div>;
+}
+
 async function renderTable() {
   const instance = await initI18n();
   return render(
@@ -267,6 +281,17 @@ describe("DocumentsTable", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     getLinksMock.mockResolvedValue({ data: [] });
+    listDocumentHeatScoresMock.mockResolvedValue({ documents: [] });
+    getDocumentHeatScoreMock.mockResolvedValue({
+      documentId: "doc_1",
+      title: "Pitch Deck",
+      score: 29,
+      level: "hot",
+      trend: "stable",
+      breakdown: {},
+      views: 12,
+      contributingLinks: [],
+    });
     getDocumentDeleteImpactMock.mockResolvedValue({
       active_link_count: 2,
       deal_room_count: 0,
@@ -293,6 +318,41 @@ describe("DocumentsTable", () => {
     expect(screen.queryByText("Old Report")).not.toBeInTheDocument();
   });
 
+  it("overlays document-native heat without attaching room shares", async () => {
+    getDocumentsMock.mockResolvedValue({ data: mockDocs });
+    getLinksMock.mockResolvedValue({
+      data: [
+        {
+          id: "link_room",
+          documentId: "doc_1",
+          documentIds: ["doc_1"],
+          dealRoomId: "room_1",
+          accessCount: 99,
+          heatLevel: "cold",
+          createdAt: "2026-08-01T00:00:00Z",
+          isBundle: false,
+          documents: [],
+          folderPaths: [],
+          documentTitle: "Pitch Deck",
+          shortUrl: "https://example.com/l/room",
+        },
+      ],
+    });
+    listDocumentHeatScoresMock.mockResolvedValue({
+      documents: [{ id: "doc_1", title: "Pitch Deck", views: 12, heatLevel: "hot" }],
+    });
+    await renderTable();
+
+    expect(await screen.findByText("Pitch Deck")).toBeInTheDocument();
+    expect(await screen.findByText("Hot")).toBeInTheDocument();
+    expect(screen.getByText("12")).toBeInTheDocument();
+    expect(screen.getByText("0 links")).toBeInTheDocument();
+    expect(getDocumentHeatScoreMock).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Explain" }));
+    await waitFor(() => expect(getDocumentHeatScoreMock).toHaveBeenCalledTimes(1));
+    expect(getDocumentHeatScoreMock).toHaveBeenCalledWith("doc_1");
+  });
+
   it("opens library share dialog from row Share CTA", async () => {
     getDocumentsMock.mockResolvedValue({ data: mockDocs });
     createLinkMock.mockResolvedValue({
@@ -314,7 +374,7 @@ describe("DocumentsTable", () => {
     });
   });
 
-  it("does not open Share dialog from processing upload handoff", async () => {
+  it("redirects a processing upload handoff into the create-link pipeline", async () => {
     getDocumentsMock.mockResolvedValue({
       data: [{ ...mockDocs[0], status: "processing" }],
     });
@@ -328,16 +388,19 @@ describe("DocumentsTable", () => {
         >
           <Routes>
             <Route path="/:workspaceSlug/documents" element={<DocumentsTable />} />
+            <Route path="/:workspaceSlug/links/new" element={<LocationProbe />} />
           </Routes>
         </MemoryRouter>
       </I18nextProvider>,
     );
 
-    expect(await screen.findByText("Pitch Deck")).toBeInTheDocument();
+    expect(await screen.findByTestId("location")).toHaveTextContent(
+      "/acme/links/new?documentId=doc_1",
+    );
     expect(screen.queryByTestId("document-share-dialog")).not.toBeInTheDocument();
   });
 
-  it("opens Share dialog from ready upload handoff only", async () => {
+  it("redirects a ready upload handoff into the create-link pipeline", async () => {
     getDocumentsMock.mockResolvedValue({ data: mockDocs });
     const instance = await initI18n();
     render(
@@ -349,44 +412,103 @@ describe("DocumentsTable", () => {
         >
           <Routes>
             <Route path="/:workspaceSlug/documents" element={<DocumentsTable />} />
+            <Route path="/:workspaceSlug/links/new" element={<LocationProbe />} />
           </Routes>
         </MemoryRouter>
       </I18nextProvider>,
     );
 
-    expect(await screen.findByTestId("document-share-dialog")).toBeInTheDocument();
+    expect(await screen.findByTestId("location")).toHaveTextContent(
+      "/acme/links/new?documentId=doc_1",
+    );
+    expect(screen.queryByTestId("document-share-dialog")).not.toBeInTheDocument();
   });
 
-  it("opens deferred Share dialog when processing handoff becomes ready", async () => {
-    getDocumentsMock
-      .mockResolvedValueOnce({
-        data: [{ ...mockDocs[0], status: "processing" }],
-      })
-      .mockResolvedValue({ data: mockDocs });
+  it("redirects a multi-file upload handoff with every uploaded documentId", async () => {
+    getDocumentsMock.mockResolvedValue({ data: mockDocs });
     const instance = await initI18n();
     render(
       <I18nextProvider i18n={instance}>
         <MemoryRouter
           initialEntries={[
-            "/acme/documents?shareDocumentId=doc_1&shareDocumentTitle=Pitch%20Deck&shareDocumentStatus=processing",
+            "/acme/documents?shareDocumentId=doc_1&shareDocumentId=doc_3&shareDocumentTitle=Pitch%20Deck&shareDocumentTitle=CFI-Case-Study.xlsx&shareDocumentStatus=ready",
           ]}
         >
           <Routes>
             <Route path="/:workspaceSlug/documents" element={<DocumentsTable />} />
+            <Route path="/:workspaceSlug/links/new" element={<LocationProbe />} />
+          </Routes>
+        </MemoryRouter>
+      </I18nextProvider>,
+    );
+
+    expect(await screen.findByTestId("location")).toHaveTextContent(
+      "/acme/links/new?documentId=doc_1&documentId=doc_3",
+    );
+    expect(screen.queryByTestId("document-share-dialog")).not.toBeInTheDocument();
+  });
+
+  it("lists library documents by newest upload time", async () => {
+    getDocumentsMock.mockResolvedValue({
+      data: [
+        { ...mockDocs[0], title: "Older Deck", createdAt: "2026-06-20T10:00:00Z" },
+        {
+          id: "doc_new",
+          title: "Newest Model",
+          sourceType: "xlsx",
+          fileName: "Newest Model.xlsx",
+          fileType: "xlsx",
+          fileSize: 2_000,
+          pageCount: 1,
+          status: "ready",
+          createdAt: "2026-08-16T10:00:00Z",
+          updatedAt: "2026-08-16T10:00:00Z",
+        },
+      ],
+    });
+    await renderTable();
+    const list = await screen.findByTestId("documents-library-list");
+    const text = list.textContent ?? "";
+    expect(text.indexOf("Newest Model")).toBeGreaterThan(-1);
+    expect(text.indexOf("Older Deck")).toBeGreaterThan(-1);
+    expect(text.indexOf("Newest Model")).toBeLessThan(text.indexOf("Older Deck"));
+  });
+
+  it("does not leave the documents page when a global upload event fires", async () => {
+    getDocumentsMock.mockResolvedValue({ data: mockDocs });
+    const instance = await initI18n();
+    render(
+      <I18nextProvider i18n={instance}>
+        <MemoryRouter initialEntries={["/acme/documents"]}>
+          <Routes>
+            <Route path="/:workspaceSlug/documents" element={<DocumentsTable />} />
+            <Route path="/:workspaceSlug/links/new" element={<LocationProbe />} />
           </Routes>
         </MemoryRouter>
       </I18nextProvider>,
     );
 
     expect(await screen.findByText("Pitch Deck")).toBeInTheDocument();
-    expect(screen.queryByTestId("document-share-dialog")).not.toBeInTheDocument();
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent("documents:uploaded", {
+          detail: [
+            {
+              documentId: "doc_1",
+              documentTitle: "Pitch Deck",
+              status: "processing",
+              category: "general",
+            },
+          ],
+        }),
+      );
+    });
 
-    await waitFor(
-      () => {
-        expect(screen.getByTestId("document-share-dialog")).toBeInTheDocument();
-      },
-      { timeout: 5000 },
-    );
+    expect(screen.queryByTestId("location")).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText("Pitch Deck")).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("document-share-dialog")).not.toBeInTheDocument();
   });
 
   it("confirms archive with visitor revoke copy and link count", async () => {
@@ -421,7 +543,7 @@ describe("DocumentsTable", () => {
     ).toBeInTheDocument();
     expect(
       within(dialog).getByText(
-        "Unarchiving later will not automatically reactivate those share links. Renew them from Links.",
+        "If this is the last remaining document on a share, that share is parked. Unarchiving later will not automatically reactivate parked links — renew them from Links.",
       ),
     ).toBeInTheDocument();
     await waitFor(() => {
@@ -458,7 +580,9 @@ describe("DocumentsTable", () => {
     await waitFor(() =>
       expect(getDocumentsMock).toHaveBeenLastCalledWith("archived", "general"),
     );
-    expect(await screen.findByText("Old Report")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText("Old Report")).toBeInTheDocument();
+    });
     expect(screen.queryByText("Pitch Deck")).not.toBeInTheDocument();
   });
 
@@ -546,6 +670,7 @@ describe("DocumentsTable", () => {
     await waitFor(() =>
       expect(getDocumentsMock).toHaveBeenCalledWith("all", "agreement"),
     );
+    expect(listDocumentHeatScoresMock).not.toHaveBeenCalled();
     expect(await screen.findByText("Add your first NDA")).toBeInTheDocument();
 
     const input = screen.getByTestId("agreement-file-input") as HTMLInputElement;

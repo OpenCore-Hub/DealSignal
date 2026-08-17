@@ -55,6 +55,12 @@ export function resolveNdaDocumentFallback(
   return agreementDocs;
 }
 
+/** Trigger/option label for Base UI Select — empty titles otherwise render the UUID value. */
+export function ndaPickerDisplayTitle(title: string | undefined | null, untitled: string): string {
+  const trimmed = (title ?? "").trim();
+  return trimmed.length > 0 ? trimmed : untitled;
+}
+
 /** Accept `{ data: T[] }` or a bare array from `request` / mocks. */
 function unwrapList<T>(res: unknown): T[] {
   if (Array.isArray(res)) return res as T[];

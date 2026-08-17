@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   displayCorpusStatus,
   resolveCorpusAttentionStage,
+  type KnowledgeRoomMetrics,
 } from "./CorpusIntegrityRail";
 import type { DealRoomKnowledgeCorpus } from "@/types";
 
@@ -92,14 +93,13 @@ describe("resolveCorpusAttentionStage", () => {
 });
 
 describe("KnowledgeRoomMetrics semantics", () => {
-  it("documents / unique ask visitors / visited links are distinct counters", () => {
-    const metrics = {
+  it("views and active links follow deal-room analytics, not Ask or accessCount", () => {
+    const metrics: KnowledgeRoomMetrics = {
       documentCount: 2,
-      askUniqueVisitors: 3,
-      visitedLinkCount: 1,
+      viewCount: 12,
+      activeLinkCount: 3,
     };
-    expect(metrics.documentCount).toBe(2);
-    expect(metrics.askUniqueVisitors).toBe(3);
-    expect(metrics.visitedLinkCount).toBe(1);
+    expect(metrics.viewCount).toBe(12);
+    expect(metrics.activeLinkCount).toBe(3);
   });
 });

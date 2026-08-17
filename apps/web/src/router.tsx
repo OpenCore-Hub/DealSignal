@@ -62,6 +62,9 @@ const NotFoundPage = lazy(() => import("@/routes/not-found").then((m) => ({ defa
 const LoginPage = lazy(() => import("@/routes/login").then((m) => ({ default: m.LoginPage })));
 const RegisterPage = lazy(() => import("@/routes/register").then((m) => ({ default: m.RegisterPage })));
 const VerifyEmailPage = lazy(() => import("@/routes/verify-email").then((m) => ({ default: m.VerifyEmailPage })));
+const CheckEmailPage = lazy(() => import("@/routes/check-email").then((m) => ({ default: m.CheckEmailPage })));
+const ForgotPasswordPage = lazy(() => import("@/routes/forgot-password").then((m) => ({ default: m.ForgotPasswordPage })));
+const ResetPasswordPage = lazy(() => import("@/routes/reset-password").then((m) => ({ default: m.ResetPasswordPage })));
 const AcceptInvitationPage = lazy(() =>
   import("@/routes/accept-invitation").then((m) => ({ default: m.AcceptInvitationPage })),
 );
@@ -155,6 +158,33 @@ export const router = createBrowserRouter([
     element: (
       <Suspense fallback={<PageLoader />}>
         <RegisterPage />
+      </Suspense>
+    ),
+    errorElement: <RouteError />,
+  },
+  {
+    path: "/check-email",
+    element: (
+      <Suspense fallback={<PageLoader />}>
+        <CheckEmailPage />
+      </Suspense>
+    ),
+    errorElement: <RouteError />,
+  },
+  {
+    path: "/forgot-password",
+    element: (
+      <Suspense fallback={<PageLoader />}>
+        <ForgotPasswordPage />
+      </Suspense>
+    ),
+    errorElement: <RouteError />,
+  },
+  {
+    path: "/reset-password/:token",
+    element: (
+      <Suspense fallback={<PageLoader />}>
+        <ResetPasswordPage />
       </Suspense>
     ),
     errorElement: <RouteError />,

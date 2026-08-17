@@ -1,4 +1,4 @@
-import { useDeferredValue, useEffect, useRef, useState, type ReactNode } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { apiErrorMessage } from "@/lib/apiErrors";
 import { filterUploadSelection, notifyUploadSelectionFiltered } from "@/lib/uploadFileFilters";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router";
@@ -46,6 +46,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { EmptyState } from "@/components/common/EmptyState";
+import { HeatBreakdownDialog } from "@/components/insights/HeatBreakdownDialog";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
 import { SkeletonList } from "@/components/common/SkeletonLayout";
@@ -59,10 +60,7 @@ import { api } from "@/lib/api";
 import { LIBRARY_DOCUMENT_CATEGORY } from "@/lib/documentCategory";
 import { ApiError } from "@/lib/apiClient";
 import { LinksTable } from "@/components/links/LinksTable";
-import {
-  clearLibraryShareHandoff,
-  readLibraryShareHandoff,
-} from "@/lib/documentsLibraryShareHandoff";
+import { readLibraryShareHandoff } from "@/lib/documentsLibraryShareHandoff";
 import {
   documentsCreateLinkPath,
   sanitizeDocumentsLibrarySearchParams,
@@ -76,17 +74,14 @@ import {
   type LinkCreatedWithin,
 } from "@/lib/shareLinksFilter";
 import { AgreementDocumentCard } from "./AgreementDocumentCard";
+import { overlayDocumentNativeHeat } from "@/lib/heat/documentHeat";
 import { buildDocumentRows, useDocumentColumns, type DocumentRow } from "./DocumentsColumns";
 import { AddToDealRoomDialog } from "./AddToDealRoomDialog";
 import { DocumentShareDialog } from "./DocumentShareDialog";
 import {
   DOCUMENTS_UPLOADED_EVENT,
   dispatchDocumentsUploaded,
-  isDocumentReadyForLibraryShare,
-  isLibraryShareableUpload,
-  type DocumentsUploadedDetail,
 } from "@/lib/documentsUploadedEvent";
-import type { HeatLevel } from "@/types";
 
 interface DocumentsTableProps {
   category?: string;
@@ -122,7 +117,7 @@ export function DocumentsTable({ category }: DocumentsTableProps) {
       },
     });
   };
-  const [sorting, setSorting] = useState<SortingState>([{ id: "totalViews", desc: true }]);
+  const [sorting, setSorting] = useState<SortingState>([{ id: "createdAt", desc: true }]);
   const [globalFilter, setGlobalFilter] = useState("");
   const filter = category ? ("all" as DocumentFilter) : filterFromTabParam(searchParams.get("tab"));
   const shareDocumentId = searchParams.get("documentId") ?? undefined;
@@ -261,13 +256,9 @@ export function DocumentsTable({ category }: DocumentsTableProps) {
     setSearchParams(sanitized, { replace: true });
   }, [category, searchParams, setSearchParams]);
 
+  const [heatExplain, setHeatExplain] = useState<{ id: string; label: string } | null>(null);
   const [docToAddToRoom, setDocToAddToRoom] = useState<DocumentRow | null>(null);
-  const [docToShare, setDocToShare] = useState<DocumentRow | null>(null);
-  /** Upload handoff: open Share only after this document becomes ready. */
-  const [pendingShareHandoff, setPendingShareHandoff] = useState<{
-    documentId: string;
-    documentTitle: string;
-  } | null>(null);
+  const [docsToShare, setDocsToShare] = useState<DocumentRow[]>([]);
   const [docToArchive, setDocToArchive] = useState<DocumentRow | null>(null);
   const archiveImpact = useDocumentDeleteImpact(docToArchive);
   const [isArchiving, setIsArchiving] = useState(false);
@@ -301,6 +292,21 @@ export function DocumentsTable({ category }: DocumentsTableProps) {
     return rows;
   }, [filter, category, showShareTab]);
 
+  const { data: heatScores } = useAsyncData(async () => {
+    if (isAgreement || showShareTab) return [];
+    try {
+      const res = await api.listDocumentHeatScores();
+      return res.documents ?? [];
+    } catch {
+      return [];
+    }
+  }, [isAgreement, showShareTab]);
+
+  const tableRows = useMemo(
+    () => overlayDocumentNativeHeat(data ?? [], heatScores ?? []),
+    [data, heatScores],
+  );
+
   // Poll for status updates while any document is still being processed.
   useEffect(() => {
     const hasProcessing = data?.some((row) => row.status === "processing" || row.status === "uploading");
@@ -312,100 +318,27 @@ export function DocumentsTable({ category }: DocumentsTableProps) {
     return () => clearInterval(interval);
   }, [data, refetch]);
 
-  const buildShareRow = (detail: DocumentsUploadedDetail): DocumentRow => {
-    const category =
-      detail.category === "general" ||
-      detail.category === "agreement" ||
-      detail.category === "deal_room"
-        ? detail.category
-        : "general";
-    return {
-      id: detail.documentId,
-      title: detail.documentTitle,
-      sourceType: "pdf",
-      fileName: detail.documentTitle,
-      fileType: "pdf",
-      fileSize: 0,
-      pageCount: 0,
-      status: (detail.status as DocumentRow["status"]) || "processing",
-      category,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      links: [],
-      totalViews: 0,
-      heatLevel: "cold" as HeatLevel,
-    };
-  };
-
-  // Upload page handoff: never open Share while status is still processing/uploading.
-  // Root cause: POST /documents returns before ingestion is ready; old code opened the
-  // dialog immediately with notReady, right after "Upload now".
+  // Legacy /documents?shareDocumentId= bookmarks: send them into the create-link
+  // pipeline. Document-page upload now navigates there directly from UploadPage.
   useEffect(() => {
-    if (isAgreement || category) return;
+    if (isAgreement || category || !workspaceSlug) return;
     const handoff = readLibraryShareHandoff(searchParams);
     if (!handoff) return;
-    setSearchParams(
-      (prev) => clearLibraryShareHandoff(prev) ?? prev,
+    navigate(
+      documentsCreateLinkPath(workspaceSlug, { documentIds: handoff.documentIds }),
       { replace: true },
     );
-    if (isDocumentReadyForLibraryShare(handoff.documentStatus)) {
-      setDocToShare(
-        buildShareRow({
-          documentId: handoff.documentId,
-          documentTitle: handoff.documentTitle,
-          status: "ready",
-          category: "general",
-        }),
-      );
-      return;
-    }
-    setPendingShareHandoff({
-      documentId: handoff.documentId,
-      documentTitle: handoff.documentTitle,
-    });
-  }, [category, isAgreement, searchParams, setSearchParams]);
+  }, [category, isAgreement, navigate, searchParams, workspaceSlug]);
 
-  // Open deferred Share once list polling marks the uploaded doc ready.
+  // Refresh the list after another surface uploads (top-nav dialog, agreements).
+  // Do not navigate — UploadDialog shares this event and must not hijack the page.
   useEffect(() => {
-    if (!pendingShareHandoff || !data?.length) return;
-    const row = data.find((doc) => doc.id === pendingShareHandoff.documentId);
-    if (!row) return;
-    if (isDocumentReadyForLibraryShare(row.status)) {
-      setDocToShare(row);
-      setPendingShareHandoff(null);
-      return;
-    }
-    if (row.status === "failed" || row.status === "archived") {
-      setPendingShareHandoff(null);
-    }
-  }, [data, pendingShareHandoff]);
-
-  // Refresh after in-page upload; toast Share action for general library uploads.
-  useEffect(() => {
-    const handleUploaded = (event: Event) => {
+    const handleUploaded = () => {
       void refetch();
-      if (isAgreement) return;
-      const detail = (event as CustomEvent<DocumentsUploadedDetail | undefined>).detail;
-      if (!isLibraryShareableUpload(detail)) return;
-      toast.success(t("documents:share.uploadSuccess"), {
-        action: {
-          label: t("documents:share.uploadShareAction"),
-          onClick: () => {
-            if (isDocumentReadyForLibraryShare(detail!.status)) {
-              setDocToShare(buildShareRow(detail!));
-              return;
-            }
-            setPendingShareHandoff({
-              documentId: detail!.documentId,
-              documentTitle: detail!.documentTitle,
-            });
-          },
-        },
-      });
     };
     window.addEventListener(DOCUMENTS_UPLOADED_EVENT, handleUploaded);
     return () => window.removeEventListener(DOCUMENTS_UPLOADED_EVENT, handleUploaded);
-  }, [refetch, isAgreement, t]);
+  }, [refetch]);
 
   const columns = useDocumentColumns({
     workspaceSlug,
@@ -414,14 +347,17 @@ export function DocumentsTable({ category }: DocumentsTableProps) {
     canWrite,
     onAddToDealRoom: canWrite ? setDocToAddToRoom : undefined,
     onArchive: canWrite ? setDocToArchive : undefined,
-    onShare: canWrite && !isAgreement ? setDocToShare : undefined,
+    onShare: canWrite && !isAgreement ? (doc) => setDocsToShare([doc]) : undefined,
+    onExplainHeat: !isAgreement
+      ? (doc) => setHeatExplain({ id: doc.id, label: doc.title })
+      : undefined,
     onDelete: canWrite ? setDocToDelete : undefined,
     returnTo: location.pathname + location.search,
     returnLabel: t("documents:detail.back"),
   });
 
   const table = useReactTable({
-    data: data ?? [],
+    data: tableRows,
     columns,
     state: { sorting, globalFilter },
     onSortingChange: setSorting,
@@ -877,16 +813,14 @@ export function DocumentsTable({ category }: DocumentsTableProps) {
         />
       )}
 
-      {docToShare && workspaceSlug ? (
+      {docsToShare.length > 0 && workspaceSlug ? (
         <DocumentShareDialog
-          open={!!docToShare}
-          onOpenChange={(open) => !open && setDocToShare(null)}
-          documentId={docToShare.id}
-          documentTitle={docToShare.title}
+          open={docsToShare.length > 0}
+          onOpenChange={(open) => !open && setDocsToShare([])}
+          documents={docsToShare}
           workspaceSlug={workspaceSlug}
-          documentStatus={docToShare.status}
           onCreated={() => {
-            setDocToShare(null);
+            setDocsToShare([]);
             void refetch();
           }}
         />
@@ -955,10 +889,10 @@ export function DocumentsTable({ category }: DocumentsTableProps) {
               <span className="block">
                 {t("documents:delete.description", { name: docToDelete?.title ?? "" })}
               </span>
-              {(deleteImpact?.activeLinkCount ?? 0) > 0 ? (
+              {(deleteImpact?.revokedLinkCount ?? 0) > 0 ? (
                 <span className="block text-destructive">
                   {t("documents:delete.withLinks", {
-                    count: deleteImpact?.activeLinkCount ?? 0,
+                    count: deleteImpact?.revokedLinkCount ?? 0,
                   })}
                 </span>
               ) : null}
@@ -1002,6 +936,15 @@ export function DocumentsTable({ category }: DocumentsTableProps) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <HeatBreakdownDialog
+        open={heatExplain != null}
+        onOpenChange={(open) => {
+          if (!open) setHeatExplain(null);
+        }}
+        kind="document"
+        entityId={heatExplain?.id ?? null}
+        label={heatExplain?.label ?? ""}
+      />
     </div>
   );
 }

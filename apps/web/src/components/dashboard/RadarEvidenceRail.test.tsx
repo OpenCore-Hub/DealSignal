@@ -55,6 +55,7 @@ async function renderRail(item: RadarWorkItem | null) {
       "radar.evidenceRail.keyPages": "Key pages",
       "radar.evidenceRail.topPages": "Top pages",
       "radar.evidenceRail.page": "Page {{page}}",
+      "radar.evidenceRail.pageOnDocument": "{{title}} · p.{{page}}",
       "radar.evidenceRail.securityEvents": "Security events",
       "radar.evidenceRail.eventTypes.forward_signal": "Forward signal",
       "radar.evidenceRail.reasons.abnormal_access": "Abnormal access",
@@ -397,6 +398,102 @@ describe("RadarEvidenceRail", () => {
     // Actor email already on the radar row — do not repeat on each security tile.
     expect(events).not.toHaveTextContent("analyst@stress.example.com");
     expect(events).not.toHaveTextContent("last ");
+    expect(screen.getByTestId("radar-evidence-top-pages")).toHaveTextContent("Page 3");
+    expect(screen.getByTestId("radar-evidence-top-pages").querySelector("a")).toBeNull();
+  });
+
+  it("disambiguates bundle top pages with the same page number", async () => {
+    mockFns.getRadarEvidence.mockResolvedValue({
+      itemId: "act-bundle-pages",
+      product: "leak_watch",
+      headline: "Forward risk",
+      whyNowCode: "leak_watch",
+      metrics: {
+        opens24h: 2,
+        uniqueVisitors24h: 1,
+        forwardSignals24h: 1,
+        downloads24h: 0,
+      },
+      topPages: [
+        {
+          documentId: "doc-xlsx",
+          documentTitle: "Financials.xlsx",
+          pageNumber: 8,
+          views: 4,
+          avgDurationSeconds: 20,
+        },
+        {
+          documentId: "doc-pdf",
+          documentTitle: "Deck.pdf",
+          pageNumber: 8,
+          views: 9,
+          avgDurationSeconds: 30,
+        },
+      ],
+    } satisfies RadarEvidencePack);
+
+    await renderRail(makeItem({ id: "act-bundle-pages" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("radar-evidence-top-pages")).toBeInTheDocument();
+    });
+    const rail = screen.getByTestId("radar-evidence-top-pages");
+    expect(rail).toHaveTextContent("Financials.xlsx · p.8");
+    expect(rail).toHaveTextContent("Deck.pdf · p.8");
+    expect(rail).not.toHaveTextContent("Page 8");
+    expect(screen.getByRole("link", { name: "Financials.xlsx · p.8" })).toHaveAttribute(
+      "href",
+      "/acme/documents/doc-xlsx?tab=content&page=8",
+    );
+    expect(screen.getByRole("link", { name: "Deck.pdf · p.8" })).toHaveAttribute(
+      "href",
+      "/acme/documents/doc-pdf?tab=content&page=8",
+    );
+  });
+
+  it("keeps solo-share top page labels as Page N when a document id is present", async () => {
+    mockFns.getRadarEvidence.mockResolvedValue({
+      itemId: "act-solo-page",
+      product: "leak_watch",
+      headline: "Forward risk",
+      whyNowCode: "leak_watch",
+      metrics: {
+        opens24h: 2,
+        uniqueVisitors24h: 1,
+        forwardSignals24h: 1,
+        downloads24h: 0,
+      },
+      topPages: [
+        {
+          documentId: "doc-deck",
+          documentTitle: "Pitch Deck",
+          pageNumber: 3,
+          views: 12,
+          avgDurationSeconds: 40,
+        },
+        {
+          documentId: "doc-deck",
+          documentTitle: "Pitch Deck",
+          pageNumber: 1,
+          views: 8,
+          avgDurationSeconds: 22,
+        },
+      ],
+    } satisfies RadarEvidencePack);
+
+    await renderRail(makeItem({ id: "act-solo-page" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("radar-evidence-top-pages")).toBeInTheDocument();
+    });
+    const rail = screen.getByTestId("radar-evidence-top-pages");
+    expect(rail).toHaveTextContent("Page 3");
+    expect(rail).toHaveTextContent("Page 1");
+    expect(rail).not.toHaveTextContent("Pitch Deck");
+    expect(screen.getByRole("link", { name: "Page 3" })).toHaveAttribute(
+      "href",
+      "/acme/documents/doc-deck?tab=content&page=3",
+    );
   });
 
   it("does not echo deal / headline / actor for leak_watch", async () => {

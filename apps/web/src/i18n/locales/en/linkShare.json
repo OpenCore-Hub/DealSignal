@@ -107,6 +107,7 @@
       "ndaFloorLocked": "Required by access policy — select the NDA document below",
       "ndaDocument": "NDA agreement document",
       "ndaDocumentPlaceholder": "Select a document",
+      "ndaUntitled": "Untitled agreement",
       "allowDownloading": "Allow downloading",
       "allowDownloadingDescription": "Allow viewers to download documents",
       "screenshotProtection": "Screenshot protection",
@@ -186,6 +187,7 @@
     "done": "Done",
     "loading": "Loading management data...",
     "loadFailed": "Failed to load management data",
+    "askManageRequired": "Replying, Formal publish, and pinning FAQs require permission to manage this link.",
     "questionsTitle": "Ask inbox",
     "questionsDescription": "Reply to visitor Ask questions from this link. This is not the Signal inbox.",
     "noQuestions": "No Ask questions yet.",
@@ -351,6 +353,7 @@
   "analytics": {
     "views": "Views",
     "uniqueVisitors": "Unique visitors",
+    "actorHint": "Views, unique visitors, duration, and last visit exclude workspace members (same as Deal Radar and heat). The activity log stays complete.",
     "avgDuration": "Avg. time",
     "lastVisit": "Last visit",
     "recentActivity": "Recent activity",

@@ -31,6 +31,8 @@ export interface OwnerAskInboxPanelProps {
   initialView?: OwnerAskInboxView;
   onPendingCountChange?: (count: number) => void;
   onOpenCitation?: (hit: DealRoomKnowledgeQueryHit) => void;
+  /** Host reply / Formal publish / pin. Default false (fail-closed). */
+  canManageAsk?: boolean;
 }
 
 function emptyTitleKey(view: OwnerAskInboxView, i18nNs: OwnerAskInboxPanelProps["i18nNs"]): string {
@@ -79,6 +81,7 @@ export function OwnerAskInboxPanel({
   initialView,
   onPendingCountChange,
   onOpenCitation,
+  canManageAsk = false,
 }: OwnerAskInboxPanelProps) {
   const { t } = useTranslation(i18nNs);
   const prefix = i18nNs === "linkShare" ? "management" : "qa";
@@ -97,9 +100,10 @@ export function OwnerAskInboxPanel({
       : linkFilter && linkFilter !== "all"
         ? linkFilter
         : undefined;
-  const faqReorderEnabled = ownerAskFaqReorderEnabled(view, scope);
+  const faqReorderEnabled = canManageAsk && ownerAskFaqReorderEnabled(view, scope);
 
   const fetchTurns = useCallback(async () => {
+    if (!canManageAsk) return [];
     if (ownerAskInboxUsesPinnedFAQApi(view)) {
       if (scope.type === "room" && roomId) {
         const filteredLinkId = linkFilter && linkFilter !== "all" ? linkFilter : undefined;
@@ -123,9 +127,10 @@ export function OwnerAskInboxPanel({
       return res.data ?? [];
     }
     return [];
-  }, [scope.type, roomId, linkId, linkFilter, view]);
+  }, [canManageAsk, scope.type, roomId, linkId, linkFilter, view]);
 
   const { data, loading, error, refetch } = useAsyncData(fetchTurns, [
+    canManageAsk,
     scope.type,
     roomId,
     linkId,
@@ -144,6 +149,10 @@ export function OwnerAskInboxPanel({
 
   useEffect(() => {
     if (!onPendingCountChange) return;
+    if (!canManageAsk) {
+      onPendingCountChange(0);
+      return;
+    }
     let cancelled = false;
     const loadPendingAttention = async () => {
       try {
@@ -178,7 +187,7 @@ export function OwnerAskInboxPanel({
     return () => {
       cancelled = true;
     };
-  }, [scope.type, roomId, linkId, linkFilter, data, onPendingCountChange]);
+  }, [canManageAsk, scope.type, roomId, linkId, linkFilter, data, onPendingCountChange]);
 
   const handleAnswered = (turn: OwnerAskTurn) => {
     setLocalOverrides((prev) => ({ ...prev, [turn.id]: turn }));
@@ -294,10 +303,19 @@ export function OwnerAskInboxPanel({
               : undefined
           }
           onOpenCitation={onOpenCitation}
+          canManageAsk={canManageAsk}
         />
       ))}
     </ul>
   );
+
+  if (!canManageAsk) {
+    return (
+      <p className="text-sm text-muted-foreground" data-testid="ask-inbox-manage-required">
+        {t(`${prefix}.askManageRequired`)}
+      </p>
+    );
+  }
 
   return (
     <Tabs value={view} onValueChange={handleViewChange}>

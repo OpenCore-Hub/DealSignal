@@ -1,4 +1,5 @@
 import type { Link } from "@/types";
+import { shareDocumentSearchText } from "./shareDocumentLabel";
 
 /** Share-tab create-time windows (rolling duration from now). */
 export const LINK_CREATED_WITHIN_VALUES = ["all", "24h", "7d", "30d", "90d"] as const;
@@ -57,10 +58,7 @@ export function filterLinksForShareView(
       if (Number.isNaN(created) || created < cutoffMs) return false;
     }
     if (!q) return true;
-    const haystack = [link.shortUrl, link.documentTitle, link.name]
-      .filter(Boolean)
-      .join(" ")
-      .toLowerCase();
+    const haystack = shareDocumentSearchText(link).toLowerCase();
     return haystack.includes(q);
   });
 }

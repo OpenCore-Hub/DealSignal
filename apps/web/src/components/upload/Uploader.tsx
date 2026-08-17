@@ -15,7 +15,12 @@ import { apiErrorMessage } from "@/lib/apiErrors";
 import { formatFileSize } from "@/lib/formatters";
 import { usageAtCap } from "@/lib/planQuota";
 import { filterUploadSelection, notifyUploadSelectionFiltered } from "@/lib/uploadFileFilters";
-import { dispatchDocumentsUploaded } from "@/lib/documentsUploadedEvent";
+import {
+  dispatchDocumentsUploaded,
+  isDocumentReadyForLibraryShare,
+} from "@/lib/documentsUploadedEvent";
+import { ingestionBarPercent, transferBarPercent } from "@/lib/uploadProgress";
+import { waitForDocumentIngestion } from "@/lib/waitForDocumentIngestion";
 import { useAsyncData } from "@/hooks/useAsyncData";
 import type { Document } from "@/types";
 
@@ -28,7 +33,8 @@ interface UploadFile {
 }
 
 interface UploaderProps {
-  onUploadComplete?: (document?: Document) => void;
+  /** Fires once after the current upload batch finishes (successful files only). */
+  onUploadComplete?: (documents: Document[]) => void;
   category?: string;
   /** Notify host surfaces (e.g. UploadDialog) while the replace prompt is open. */
   onAwaitingConflictChange?: (awaiting: boolean) => void;
@@ -52,16 +58,19 @@ export function Uploader({
   const [isDragging, setIsDragging] = useState(false);
   const [files, setFiles] = useState<UploadFile[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
-  const activeIntervalsRef = useRef<Set<ReturnType<typeof setInterval>>>(new Set());
   const existingKeysRef = useRef<Set<string>>(new Set());
+  const completedDocsRef = useRef<Document[]>([]);
+  const batchNotifiedRef = useRef(false);
+  const ingestionAbortRef = useRef<Map<string, AbortController>>(new Map());
   const [uploadingIds, setUploadingIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    const intervals = activeIntervalsRef.current;
+    const ingestionAborts = ingestionAbortRef.current;
     return () => {
-      for (const id of intervals) {
-        clearInterval(id);
+      for (const controller of ingestionAborts.values()) {
+        controller.abort();
       }
+      ingestionAborts.clear();
     };
   }, []);
 
@@ -97,6 +106,8 @@ export function Uploader({
   }, [t]);
 
   const removeFile = useCallback((id: string) => {
+    ingestionAbortRef.current.get(id)?.abort();
+    ingestionAbortRef.current.delete(id);
     setFiles((prev) => {
       const removed = prev.find((f) => f.id === id);
       if (removed) {
@@ -117,19 +128,10 @@ export function Uploader({
         prev.map((f) => (f.id === uploadId ? { ...f, progress: 100, status: "done" } : f)),
       );
       if (document) {
-        dispatchDocumentsUploaded({
-          documentId: document.id,
-          documentTitle: document.title || document.fileName || document.id,
-          status: document.status,
-          category: document.category ?? category,
-        });
-      } else {
-        dispatchDocumentsUploaded();
+        completedDocsRef.current = [...completedDocsRef.current, document];
       }
-      // Dispatch before host navigation so DocumentsTable can observe the event.
-      onUploadComplete?.(document);
     },
-    [onUploadComplete, category],
+    [],
   );
 
   const markError = useCallback((uploadId: string, message: string) => {
@@ -145,6 +147,15 @@ export function Uploader({
     );
   }, []);
 
+  const applyProgress = useCallback((uploadId: string, next: number | null) => {
+    if (next == null) return;
+    setFiles((prev) =>
+      prev.map((f) =>
+        f.id === uploadId ? { ...f, progress: Math.max(f.progress, next) } : f,
+      ),
+    );
+  }, []);
+
   const uploadFileToServer = useCallback(
     async (uploadFile: UploadFile): Promise<void> => {
       if (uploadingIds.has(uploadFile.id)) return;
@@ -156,35 +167,63 @@ export function Uploader({
         ),
       );
 
-      const interval = setInterval(() => {
-        setFiles((prev) =>
-          prev.map((f) => {
-            if (f.id !== uploadFile.id) return f;
-            if (f.status !== "uploading") {
-              clearInterval(interval);
-              activeIntervalsRef.current.delete(interval);
-              return f;
-            }
-            return {
-              ...f,
-              progress: Math.min(f.progress + Math.random() * 15, 95),
-            };
-          }),
-        );
-      }, 300);
-      activeIntervalsRef.current.add(interval);
-
-      const stopProgress = () => {
-        clearInterval(interval);
-        activeIntervalsRef.current.delete(interval);
-      };
-
       try {
-        const document = await uploadDocument(uploadFile.file, category);
-        stopProgress();
-        markDone(uploadFile.id, document);
+        const uploaded = await uploadDocument(uploadFile.file, category, {
+          onUploadProgress: ({ loaded, total }) => {
+            applyProgress(uploadFile.id, transferBarPercent(loaded, total));
+          },
+        });
+        if (isDocumentReadyForLibraryShare(uploaded.status)) {
+          markDone(uploadFile.id, uploaded);
+          return;
+        }
+        setUploadingIds((prev) => {
+          const next = new Set(prev);
+          next.delete(uploadFile.id);
+          return next;
+        });
+        setFiles((prev) =>
+          prev.map((f) =>
+            f.id === uploadFile.id
+              ? {
+                  ...f,
+                  status: "processing",
+                  progress: ingestionBarPercent(uploaded.progress, f.progress, uploaded.status),
+                }
+              : f,
+          ),
+        );
+        const controller = new AbortController();
+        ingestionAbortRef.current.set(uploadFile.id, controller);
+        // Do not await ingestion here — the next file must POST while this one parses.
+        void waitForDocumentIngestion({
+          initial: uploaded,
+          fetchStatus: () =>
+            api.getDocumentStatus(uploaded.id, { signal: controller.signal }),
+          signal: controller.signal,
+          onStatus: (doc) => {
+            applyProgress(
+              uploadFile.id,
+              ingestionBarPercent(doc.progress, 0, doc.status),
+            );
+          },
+        }).then((result) => {
+          ingestionAbortRef.current.delete(uploadFile.id);
+          if (controller.signal.aborted || result.outcome === "aborted") return;
+          if (result.outcome === "ready") {
+            markDone(uploadFile.id, result.document);
+            return;
+          }
+          markError(
+            uploadFile.id,
+            result.outcome === "timeout"
+              ? t("documents:upload.processingTimeout")
+              : t("documents:upload.ingestionFailed"),
+          );
+        }).catch(() => {
+          ingestionAbortRef.current.delete(uploadFile.id);
+        });
       } catch (err) {
-        stopProgress();
         if (err instanceof UploadCancelledError) {
           markError(uploadFile.id, t("documents:upload.replaceCancelled"));
           return;
@@ -192,20 +231,50 @@ export function Uploader({
         markError(uploadFile.id, apiErrorMessage(err, { fallback: "uploadFailed" }));
       }
     },
-    [uploadingIds, category, uploadDocument, markDone, markError, t],
+    [uploadingIds, category, uploadDocument, applyProgress, markDone, markError, t],
   );
 
   const uploadAll = useCallback(async () => {
     const pending = files.filter((f) => f.status === "pending");
     if (pending.length === 0) return;
+    batchNotifiedRef.current = false;
     for (const uploadFile of pending) {
       await uploadFileToServer(uploadFile);
     }
   }, [files, uploadFileToServer]);
 
+  useEffect(() => {
+    const inFlight = files.some(
+      (file) =>
+        file.status === "pending" ||
+        file.status === "uploading" ||
+        file.status === "processing",
+    );
+    if (inFlight || batchNotifiedRef.current) return;
+    const documents = completedDocsRef.current;
+    if (documents.length === 0) return;
+    batchNotifiedRef.current = true;
+    completedDocsRef.current = [];
+    dispatchDocumentsUploaded(
+      documents.map((document) => ({
+        documentId: document.id,
+        documentTitle: document.title || document.fileName || document.id,
+        status: document.status,
+        category: document.category ?? category,
+        createdAt: document.createdAt,
+      })),
+    );
+    onUploadComplete?.(documents);
+  }, [files, onUploadComplete, category]);
+
   const clearCompleted = useCallback(() => {
     setFiles((prev) => {
-      const toKeep = prev.filter((f) => f.status === "pending" || f.status === "uploading");
+      const toKeep = prev.filter(
+        (f) =>
+          f.status === "pending" ||
+          f.status === "uploading" ||
+          f.status === "processing",
+      );
       existingKeysRef.current = new Set(
         toKeep.map((f) => `${f.file.name}|${f.file.size}`),
       );
@@ -345,7 +414,14 @@ export function Uploader({
                   {uploadFile.status !== "done" &&
                     uploadFile.status !== "error" &&
                     uploadFile.status !== "pending" && (
-                      <Progress value={uploadFile.progress} className="mt-2 h-1.5" />
+                      <Progress
+                        value={uploadFile.progress}
+                        className="mt-2 h-1.5"
+                        aria-label={t("upload.uploading")}
+                        data-testid={
+                          uploadFile.status === "processing" ? "upload-processing" : undefined
+                        }
+                      />
                     )}
                   {uploadFile.status === "error" && uploadFile.error && (
                     <p className="mt-1 text-caption text-error-500 truncate">{uploadFile.error}</p>
@@ -362,11 +438,6 @@ export function Uploader({
                   )}
                   {uploadFile.status === "error" && (
                     <Warning size={18} weight="bold" className="text-error-500" />
-                  )}
-                  {uploadFile.status === "uploading" && (
-                    <span className="text-caption text-muted-foreground animate-pulse">
-                      {Math.round(uploadFile.progress)}%
-                    </span>
                   )}
                   <button
                     onClick={() => removeFile(uploadFile.id)}

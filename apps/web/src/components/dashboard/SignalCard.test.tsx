@@ -149,4 +149,14 @@ describe("SignalCard", () => {
       "/acme/documents/doc-1?tab=content&page=9",
     );
   });
+
+  it("prefers metadata document_id for bundle page deep links", async () => {
+    await renderCard(
+      makeSignal({ metadata: { page_number: "8", document_id: "doc-pdf" } }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: /View details/i }));
+    expect(screen.getByTestId("location")).toHaveTextContent(
+      "/acme/documents/doc-pdf?tab=content&page=8",
+    );
+  });
 });

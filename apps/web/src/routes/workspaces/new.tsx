@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { Buildings } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
@@ -28,6 +28,22 @@ export function CreateWorkspacePage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [slugError, setSlugError] = useState<string | null>(null);
+  const [needsEmailVerify, setNeedsEmailVerify] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getMe()
+      .then((user) => {
+        if (!cancelled) setNeedsEmailVerify(user.email_verified === false);
+      })
+      .catch(() => {
+        /* create still works; trial copy is best-effort */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleNameChange = (value: string) => {
     setName(value);
@@ -78,6 +94,9 @@ export function CreateWorkspacePage() {
               <Buildings size={24} />
               {t("createWorkspace")}
             </CardTitle>
+            {needsEmailVerify ? (
+              <p className="text-sm text-muted-foreground">{t("verifyEmailForTrial")}</p>
+            ) : null}
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-4">

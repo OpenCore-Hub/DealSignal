@@ -27,6 +27,7 @@ i18nInstance.use(initReactI18next).init({
           views: "Views",
           activeLinks: "Active links",
           uniqueVisitors: "Unique visitors",
+          actorHint: "Views, unique visitors, and recent visitors exclude workspace members (same as Deal Radar and heat).",
           recentVisitors: "Recent visitors",
           visitorViews_one: "{{count}} view",
           visitorViews_other: "{{count}} views",
@@ -121,6 +122,11 @@ describe("DealRoomAnalyticsTab", () => {
     expect(screen.getByText("5")).toBeInTheDocument();
     expect(screen.getByText("3")).toBeInTheDocument();
     expect(screen.getByText("alice@example.com")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Views, unique visitors, and recent visitors exclude workspace members (same as Deal Radar and heat).",
+      ),
+    ).toBeInTheDocument();
     expect(api.getDealRoomAnalytics).toHaveBeenCalledWith("room-1");
   });
 

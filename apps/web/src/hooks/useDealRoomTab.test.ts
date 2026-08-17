@@ -14,6 +14,7 @@ describe("orderDealRoomPageTabs", () => {
     expect(orderDealRoomPageTabs("knowledge")).toEqual([
       "knowledge",
       "documents",
+      "members",
       "access",
       "links",
       "analytics",
@@ -21,6 +22,7 @@ describe("orderDealRoomPageTabs", () => {
     expect(orderDealRoomPageTabs("links")).toEqual([
       "links",
       "documents",
+      "members",
       "access",
       "analytics",
       "knowledge",
@@ -31,16 +33,46 @@ describe("orderDealRoomPageTabs", () => {
     expect(orderDealRoomPageTabs("settings")).toEqual(DEAL_ROOM_PAGE_TABS);
   });
 
-  it("hides access and knowledge tabs for read-only guests", () => {
-    expect(visibleDealRoomPageTabs(false)).toEqual(["documents", "links", "analytics"]);
-    expect(orderDealRoomPageTabs("knowledge", visibleDealRoomPageTabs(false))).toEqual([
+  it("hides access for non-managers and keeps knowledge for room viewers", () => {
+    const viewOnly = visibleDealRoomPageTabs({ canManage: false, canViewKnowledge: true });
+    expect(viewOnly).toEqual(["documents", "members", "links", "analytics", "knowledge"]);
+    expect(orderDealRoomPageTabs("knowledge", viewOnly)).toEqual([
+      "knowledge",
       "documents",
+      "members",
       "links",
       "analytics",
     ]);
-    expect(orderDealRoomPageTabs("links", visibleDealRoomPageTabs(false))).toEqual([
+    expect(orderDealRoomPageTabs("links", viewOnly)).toEqual([
       "links",
       "documents",
+      "members",
+      "analytics",
+      "knowledge",
+    ]);
+  });
+
+  it("shows access read-only for oversight", () => {
+    expect(
+      visibleDealRoomPageTabs({
+        canManage: false,
+        canViewKnowledge: true,
+        canViewAccess: true,
+      }),
+    ).toEqual(["documents", "members", "access", "links", "analytics", "knowledge"]);
+  });
+
+  it("always includes members for anyone who can open the room", () => {
+    expect(
+      visibleDealRoomPageTabs({ canManage: false, canViewKnowledge: false }),
+    ).toContain("members");
+  });
+
+  it("hides knowledge when the caller cannot view the desk", () => {
+    expect(visibleDealRoomPageTabs({ canManage: false, canViewKnowledge: false })).toEqual([
+      "documents",
+      "members",
+      "links",
       "analytics",
     ]);
   });

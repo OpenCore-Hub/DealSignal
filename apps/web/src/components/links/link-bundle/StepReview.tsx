@@ -29,6 +29,7 @@ import { toCreateLinkPayload } from "@/lib/apiAdapters";
 import { documentsSharePath } from "@/lib/documentsSharePath";
 import {
   bundleSecurityGuardI18nKey,
+  resolveShareDocumentReadiness,
   validateBundleSecurityConfig,
 } from "./pipelineUtils";
 import {
@@ -69,6 +70,7 @@ export function StepReview() {
 
   const { config, selectedDocuments } = state;
   const features = useFeatureConfig(config);
+  const documentReadiness = resolveShareDocumentReadiness(selectedDocuments);
 
   const securityScore = calculateSecurityScore(config);
   const frictionScore = calculateFrictionScore(config);
@@ -79,6 +81,17 @@ export function StepReview() {
   const [showSaveConfirm, setShowSaveConfirm] = useState(false);
 
   const doSave = useCallback(async () => {
+    const readiness = resolveShareDocumentReadiness(selectedDocuments);
+    if (!readiness.ready) {
+      toast.error(
+        t(
+          readiness.reason === "failed"
+            ? "bundle.review.ingestionFailed"
+            : "bundle.review.notReady",
+        ),
+      );
+      return;
+    }
     dispatch({ type: "SET_SUBMITTING", isSubmitting: true });
     try {
       const documentIds = selectedDocuments.map((d) => d.id);
@@ -103,6 +116,16 @@ export function StepReview() {
   }, [selectedDocuments, config, isEdit, state.editingLinkId, dispatch, t, navigate, workspaceSlug]);
 
   const handleSubmit = useCallback(() => {
+    if (!documentReadiness.ready) {
+      toast.error(
+        t(
+          documentReadiness.reason === "failed"
+            ? "bundle.review.ingestionFailed"
+            : "bundle.review.notReady",
+        ),
+      );
+      return;
+    }
     const guard = validateBundleSecurityConfig(config);
     if (!guard.ok) {
       toast.error(t(bundleSecurityGuardI18nKey(guard.reason)));
@@ -116,7 +139,7 @@ export function StepReview() {
     }
 
     void doSave();
-  }, [config, isEdit, doSave, t]);
+  }, [config, documentReadiness, isEdit, doSave, t]);
 
   const handleCopy = async () => {
     if (!state.generatedLink) return;
@@ -180,6 +203,11 @@ export function StepReview() {
                   <div className="min-w-0">
                     <p className="truncate text-[13px] font-medium">{doc.title}</p>
                     <p className="truncate text-[12px] text-muted-foreground">{doc.fileName}</p>
+                    {doc.status && doc.status !== "ready" ? (
+                      <p className="mt-0.5 text-[12px] text-amber-700 dark:text-amber-400">
+                        {t(`bundle.documents.status.${doc.status}`)}
+                      </p>
+                    ) : null}
                   </div>
                   <span className="rounded-md px-1.5 py-0.5 font-mono text-[10px] tracking-[0.14em] text-muted-foreground ring-1 ring-foreground/[0.08]">
                     {doc.sourceType.toUpperCase()}
@@ -253,7 +281,18 @@ export function StepReview() {
       </PipelinePaper>
 
       {!isSuccess ? (
-        <div className="flex items-center justify-center gap-8">
+        <div className="flex flex-col items-center justify-center gap-3">
+          {documentReadiness.reason === "processing" ? (
+            <p className="text-[13px] text-amber-700 dark:text-amber-400">
+              {t("bundle.review.notReady")}
+            </p>
+          ) : null}
+          {documentReadiness.reason === "failed" ? (
+            <p className="text-[13px] text-amber-700 dark:text-amber-400">
+              {t("bundle.review.ingestionFailed")}
+            </p>
+          ) : null}
+          <div className="flex items-center justify-center gap-8">
           <Button
             variant="ghost"
             onClick={handleCancel}
@@ -271,7 +310,7 @@ export function StepReview() {
           <Button
             data-testid="review-submit-button"
             onClick={handleSubmit}
-            disabled={state.isSubmitting}
+            disabled={state.isSubmitting || !documentReadiness.ready}
             className={cn(
               "h-11 min-w-[8.5rem] rounded-xl px-6 text-[13px] font-medium tracking-tight",
               "shadow-[inset_0_1px_0_rgba(255,255,255,0.12)]",
@@ -284,6 +323,7 @@ export function StepReview() {
                 ? t("common:save")
                 : t("common:create")}
           </Button>
+          </div>
         </div>
       ) : null}
 

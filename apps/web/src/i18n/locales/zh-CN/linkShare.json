@@ -107,6 +107,7 @@
       "ndaFloorLocked": "访问策略已要求开启，请在下方选择 NDA 文档",
       "ndaDocument": "NDA 保密协议文档",
       "ndaDocumentPlaceholder": "选择文档",
+      "ndaUntitled": "未命名协议",
       "allowDownloading": "允许下载",
       "allowDownloadingDescription": "允许访客下载文档",
       "screenshotProtection": "防截图保护",
@@ -186,6 +187,7 @@
     "done": "完成",
     "loading": "正在加载管理数据...",
     "loadFailed": "加载管理数据失败",
+    "askManageRequired": "回复、正式发布和固定 FAQ 需要管理该链接的权限。",
     "questionsTitle": "Ask 收件箱",
     "questionsDescription": "回复访客通过 Ask 提交的问题。此处不是信号收件箱。",
     "noQuestions": "暂无 Ask 问题。",
@@ -351,6 +353,7 @@
   "analytics": {
     "views": "访问次数",
     "uniqueVisitors": "独立访客",
+    "actorHint": "访问次数、独立访客、停留和最近访问不含工作区成员（与交易雷达、热力一致）。活动日志仍是完整时间线。",
     "avgDuration": "平均停留",
     "lastVisit": "最近访问",
     "recentActivity": "最近访问",

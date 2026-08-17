@@ -9,13 +9,15 @@ import { ApiError } from "@/lib/apiClient";
 
 const navigateMock = vi.fn();
 const setCurrentWorkspaceMock = vi.fn();
-const { createWorkspaceMock } = vi.hoisted(() => ({
+const { createWorkspaceMock, getMeMock } = vi.hoisted(() => ({
   createWorkspaceMock: vi.fn(),
+  getMeMock: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({
   api: {
     createWorkspace: createWorkspaceMock,
+    getMe: getMeMock,
   },
 }));
 
@@ -43,6 +45,7 @@ const commonResources = {
   workspaceSlug: "Workspace slug",
   workspaceSlugPlaceholder: "myworkspace",
   workspaceSlugConflict: "This workspace slug is already taken. Please choose another one.",
+  verifyEmailForTrial: "Verify your email to start the 14-day trial.",
   brandColor: "Brand Color",
   error: {
     saveFailed: "Failed to save",
@@ -73,6 +76,8 @@ describe("CreateWorkspacePage", () => {
     navigateMock.mockClear();
     setCurrentWorkspaceMock.mockClear();
     createWorkspaceMock.mockReset();
+    getMeMock.mockReset();
+    getMeMock.mockResolvedValue({ id: "u1", email: "a@example.com", email_verified: true });
   });
 
   it("derives slug from English letters and digits only", async () => {
@@ -185,5 +190,11 @@ describe("CreateWorkspacePage", () => {
       });
       expect(navigateMock).toHaveBeenCalledWith("/acme/dashboard", { replace: true });
     });
+  });
+
+  it("explains that trial starts after email verification", async () => {
+    getMeMock.mockResolvedValue({ id: "u1", email: "a@example.com", email_verified: false });
+    await renderPage();
+    expect(await screen.findByText("Verify your email to start the 14-day trial.")).toBeInTheDocument();
   });
 });

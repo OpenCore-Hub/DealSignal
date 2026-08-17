@@ -19,6 +19,8 @@ export type ApiErrorContext =
   | "login"
   | "register"
   | "verifyEmail"
+  | "forgotPassword"
+  | "resetPassword"
   | "viewerGate"
   | "acceptInvitation"
   | "knowledge"
@@ -59,12 +61,29 @@ const AUTH_LOGIN_CODES: Record<string, string> = {
   unauthorized: "auth:login.errorInvalidCredentials",
   invalid_email: "auth:login.errorInvalidEmail",
   invalid_user: "auth:login.errorInvalidCredentials",
+  email_not_verified: "auth:login.emailNotVerified",
+};
+
+const AUTH_FORGOT_CODES: Record<string, string> = {
+  captcha_required: "auth:register.errorCaptchaRequired",
+  captcha_failed: "auth:register.errorCaptchaFailed",
+  captcha_unavailable: "auth:register.errorCaptchaUnavailable",
+};
+
+const AUTH_RESET_CODES: Record<string, string> = {
+  invalid_or_expired_token: "auth:resetPassword.errorInvalidToken",
+  weak_password: "auth:register.passwordRules",
 };
 
 const AUTH_REGISTER_CODES: Record<string, string> = {
   unauthorized: "auth:register.errorRegistrationFailed",
   invalid_email: "auth:register.errorInvalidEmail",
+  disposable_email: "auth:register.errorDisposableEmail",
+  captcha_required: "auth:register.errorCaptchaRequired",
+  captcha_failed: "auth:register.errorCaptchaFailed",
+  captcha_unavailable: "auth:register.errorCaptchaUnavailable",
   duplicate_email: "auth:register.errorEmailTaken",
+  email_conflict: "auth:register.errorEmailTaken",
   already_member: "auth:register.errorEmailTaken",
 };
 
@@ -115,6 +134,20 @@ export function apiErrorMessage(
 
   if (options.context === "verifyEmail") {
     return translate("auth:verifyEmail.error");
+  }
+
+  if (options.context === "forgotPassword") {
+    const authKey = AUTH_FORGOT_CODES[code];
+    if (authKey && hasKey(authKey)) {
+      return translate(authKey);
+    }
+  }
+
+  if (options.context === "resetPassword") {
+    const authKey = AUTH_RESET_CODES[code];
+    if (authKey && hasKey(authKey)) {
+      return translate(authKey);
+    }
   }
 
   if (options.context === "acceptInvitation") {

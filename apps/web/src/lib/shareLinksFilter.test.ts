@@ -63,6 +63,22 @@ describe("shareLinksFilter", () => {
     expect(hasActiveShareListFilters({ searchQuery: "  ", createdWithin: "24h" })).toBe(true);
   });
 
+  it("matches secondary titles on a bundle share", () => {
+    const bundle = link({
+      id: "bundle",
+      createdAt: "2026-08-11T06:00:00Z",
+      documentTitle: "Model.xlsx",
+      isBundle: true,
+      documents: [
+        { id: "doc_xlsx", title: "Model.xlsx", sourceType: "xlsx", pageCount: 3, status: "ready" },
+        { id: "doc_pdf", title: "Memo.pdf", sourceType: "pdf", pageCount: 16, status: "ready" },
+      ],
+    });
+    expect(filterLinksForShareView([bundle], { searchQuery: "memo" }).map((l) => l.id)).toEqual([
+      "bundle",
+    ]);
+  });
+
   it("filters by search query across title, url, and name", () => {
     expect(filterLinksForShareView(rows, { searchQuery: "beta", nowMs: now }).map((l) => l.id)).toEqual([
       "mid",

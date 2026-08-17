@@ -25,7 +25,21 @@ describe("loadDocumentDeleteImpact", () => {
     });
     await expect(loadDocumentDeleteImpact("doc-1", 9)).resolves.toEqual({
       activeLinkCount: 3,
+      revokedLinkCount: 3,
       dealRoomCount: 1,
+    });
+  });
+
+  it("uses revoked_link_count when the API distinguishes membership from revoke", async () => {
+    getDocumentDeleteImpactMock.mockResolvedValue({
+      active_link_count: 2,
+      revoked_link_count: 0,
+      deal_room_count: 0,
+    });
+    await expect(loadDocumentDeleteImpact("doc-1", 9)).resolves.toEqual({
+      activeLinkCount: 2,
+      revokedLinkCount: 0,
+      dealRoomCount: 0,
     });
   });
 
@@ -33,6 +47,7 @@ describe("loadDocumentDeleteImpact", () => {
     getDocumentDeleteImpactMock.mockRejectedValue(new Error("down"));
     await expect(loadDocumentDeleteImpact("doc-1", 4)).resolves.toEqual({
       activeLinkCount: 4,
+      revokedLinkCount: 4,
       dealRoomCount: 0,
     });
   });
@@ -51,7 +66,11 @@ describe("useDocumentDeleteImpact", () => {
     const doc = { id: "doc-1", links: [{ id: "l1" }, { id: "l2" }] };
     const { result } = renderHook(() => useDocumentDeleteImpact(doc));
     await waitFor(() => {
-      expect(result.current).toEqual({ activeLinkCount: 2, dealRoomCount: 0 });
+      expect(result.current).toEqual({
+        activeLinkCount: 2,
+        revokedLinkCount: 2,
+        dealRoomCount: 0,
+      });
     });
     expect(getDocumentDeleteImpactMock).toHaveBeenCalledWith("doc-1");
   });

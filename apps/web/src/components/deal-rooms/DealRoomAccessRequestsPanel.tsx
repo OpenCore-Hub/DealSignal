@@ -15,7 +15,6 @@ import { api } from "@/lib/api";
 import { accessRequestReviewErrorMessage } from "@/lib/accessRequestErrors";
 import { useAccessRequestReview } from "@/hooks/useAccessRequestReview";
 import { useAsyncData } from "@/hooks/useAsyncData";
-import { useWorkspaceAccess } from "@/hooks/useWorkspaceAccess";
 
 type PendingAccessRequest = {
   id: string;
@@ -38,15 +37,16 @@ interface DealRoomAccessRequestsPanelProps {
     action: "approve" | "reject";
     source: "room" | "link";
   }) => void;
+  canManage?: boolean;
 }
 
 export function DealRoomAccessRequestsPanel({
   roomId,
   focusLinkId,
   onChanged,
+  canManage = false,
 }: DealRoomAccessRequestsPanelProps) {
   const { t } = useTranslation(["dealRooms", "linkShare", "common"]);
-  const { canWrite } = useWorkspaceAccess();
   const [busyId, setBusyId] = useState<string | null>(null);
   const {
     data: requests,
@@ -54,8 +54,8 @@ export function DealRoomAccessRequestsPanel({
     error,
     refetch,
   } = useAsyncData(async () => {
-    if (!canWrite) return [];
-    // Room membership requests + deal-room-scoped link inbox (creator-only emails).
+    if (!canManage) return [];
+    // Room membership requests + deal-room-scoped link inbox (NeedManage).
     const [roomRes, pendingLinkRes] = await Promise.all([
       api.getDealRoomAccessRequests(roomId),
       api.getPendingLinkAccessRequests({ scope: "deal_room", dealRoomId: roomId }),
@@ -82,7 +82,7 @@ export function DealRoomAccessRequestsPanel({
     }));
 
     return [...roomPending, ...linkPending];
-  }, [roomId, canWrite]);
+  }, [roomId, canManage]);
 
   const pending = requests ?? [];
   const memberCount = useMemo(
@@ -174,7 +174,7 @@ export function DealRoomAccessRequestsPanel({
 
   const activeBusyId = busyId ?? linkBusyId;
 
-  if (!canWrite) {
+  if (!canManage) {
     return null;
   }
 
@@ -278,7 +278,7 @@ export function DealRoomAccessRequestsPanel({
                 <p className="text-sm text-muted-foreground">{request.reason}</p>
               ) : null}
             </div>
-            {canWrite ? (
+            {canManage ? (
               <div className="flex shrink-0 gap-2">
                 <Button
                   size="sm"

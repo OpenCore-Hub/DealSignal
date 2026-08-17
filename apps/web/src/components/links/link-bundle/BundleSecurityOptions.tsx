@@ -30,6 +30,7 @@ import {
 import { cn } from "@/lib/utils";
 import type { PermissionConfig } from "@/types";
 import { useNdaPickerSources } from "@/components/links/share/hooks";
+import { ndaPickerDisplayTitle } from "@/components/links/share/ndaPicker";
 import { toDateTimeLocal, toRFC3339 } from "@/components/links/share/utils";
 import { useSecurityOptions } from "../smart-link/useSecurityOptions";
 import {
@@ -299,17 +300,29 @@ export function BundleSecurityOptions({
                 </SelectTrigger>
                 <SelectContent>
                   {ndaOptions.length === 0 ? (
-                    <SelectItem value="__empty__" disabled>
+                    <SelectItem
+                      value="__empty__"
+                      disabled
+                      label={tShare(
+                        "accessRules.additionalProtections.ndaDocumentPlaceholder",
+                      )}
+                    >
                       {tShare(
                         "accessRules.additionalProtections.ndaDocumentPlaceholder",
                       )}
                     </SelectItem>
                   ) : (
-                    ndaOptions.map((opt) => (
-                      <SelectItem key={opt.id} value={opt.id}>
-                        {opt.title}
-                      </SelectItem>
-                    ))
+                    ndaOptions.map((opt) => {
+                      const title = ndaPickerDisplayTitle(
+                        opt.title,
+                        tShare("accessRules.additionalProtections.ndaUntitled"),
+                      );
+                      return (
+                        <SelectItem key={opt.id} value={opt.id} label={title}>
+                          {title}
+                        </SelectItem>
+                      );
+                    })
                   )}
                 </SelectContent>
               </Select>

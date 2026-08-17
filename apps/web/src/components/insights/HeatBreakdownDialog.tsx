@@ -10,7 +10,8 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { HeatBadge } from "@/components/common/HeatBadge";
 import { useAsyncData } from "@/hooks/useAsyncData";
-import { api, type LinkHeatScore } from "@/lib/api";
+import { api, type DocumentHeatScore, type LinkHeatScore } from "@/lib/api";
+import { shareKindFromLink } from "@/lib/shareKind";
 
 const FACTOR_ORDER = [
   "opens",
@@ -22,47 +23,129 @@ const FACTOR_ORDER = [
   "bouncePenalty",
 ] as const;
 
+const OVERLAY_ORDER = ["readingDepth", "qaCitations", "crossDomain"] as const;
+
 type FactorKey = (typeof FACTOR_ORDER)[number];
+type OverlayKey = (typeof OVERLAY_ORDER)[number];
+type HeatKind = "link" | "document";
+type HeatScorePayload = LinkHeatScore | DocumentHeatScore;
 
 interface HeatBreakdownDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  linkId: string | null;
-  linkLabel: string;
+  kind?: HeatKind;
+  entityId?: string | null;
+  label?: string;
+  /** Existing callers / tests — treated as kind=link. */
+  linkId?: string | null;
+  linkLabel?: string;
 }
 
-function factorRows(score: LinkHeatScore): { key: FactorKey; value: number }[] {
+function factorRows(score: HeatScorePayload): { key: FactorKey; value: number }[] {
   return FACTOR_ORDER.map((key) => ({
     key,
     value: Number(score.breakdown[key] ?? 0),
   }));
 }
 
+function overlayRows(score: DocumentHeatScore): { key: OverlayKey; value: number }[] {
+  const rows = OVERLAY_ORDER.map((key) => ({
+    key,
+    value: Number(score.overlay?.[key] ?? score.breakdown[key] ?? 0),
+  }));
+  if (rows.every((row) => row.value === 0)) {
+    return [];
+  }
+  return rows;
+}
+
+function resolveTarget(props: HeatBreakdownDialogProps): {
+  kind: HeatKind;
+  id: string | null;
+  label: string;
+} {
+  if (props.kind === "document") {
+    return {
+      kind: "document",
+      id: props.entityId ?? null,
+      label: props.label ?? "",
+    };
+  }
+  return {
+    kind: "link",
+    id: props.entityId ?? props.linkId ?? null,
+    label: props.label ?? props.linkLabel ?? "",
+  };
+}
+
+function isDocumentScore(data: HeatScorePayload): data is DocumentHeatScore {
+  return "documentId" in data && "contributingLinks" in data;
+}
+
+function heatCircleLabel(
+  data: HeatScorePayload | null,
+  t: (key: string) => string,
+): string {
+  const circle = data && "circle" in data ? data.circle : undefined;
+  if (circle === "founder" || circle === "investor_ir" || circle === "sales") {
+    return t(`keyPages.circles.${circle}`);
+  }
+  return t("heatBreakdown.circleFallback");
+}
+
 export function HeatBreakdownDialog({
   open,
   onOpenChange,
+  kind,
+  entityId,
+  label,
   linkId,
   linkLabel,
 }: HeatBreakdownDialogProps) {
   const { t } = useTranslation("insights");
   const { t: tc } = useTranslation("common");
+  const target = resolveTarget({ open, onOpenChange, kind, entityId, label, linkId, linkLabel });
 
   const { data, loading, error, refetch } = useAsyncData(async () => {
-    if (!open || !linkId) return null;
-    return api.getLinkHeatScore(linkId);
-  }, [open, linkId]);
+    if (!open || !target.id) return null;
+    if (target.kind === "document") {
+      return api.getDocumentHeatScore(target.id);
+    }
+    return api.getLinkHeatScore(target.id);
+  }, [open, target.kind, target.id]);
 
+  const overlay = data && isDocumentScore(data) ? overlayRows(data) : [];
   const maxAbs = data
-    ? Math.max(1, ...factorRows(data).map((r) => Math.abs(r.value)))
+    ? Math.max(
+        1,
+        ...factorRows(data).map((r) => Math.abs(r.value)),
+        ...overlay.map((r) => Math.abs(r.value)),
+      )
     : 1;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md" showCloseButton>
-        <DialogHeader>
+      <DialogContent
+        className="min-w-0 overflow-x-hidden sm:max-w-md"
+        showCloseButton
+        data-testid="heat-breakdown-dialog"
+      >
+        <DialogHeader className="min-w-0">
           <DialogTitle>{t("heatBreakdown.title")}</DialogTitle>
-          <DialogDescription>
-            {linkLabel} · {t("heatBreakdown.subtitle")}
+          <DialogDescription className="flex min-w-0 items-baseline gap-1">
+            <span
+              data-testid="heat-breakdown-label"
+              className="min-w-0 truncate"
+              title={target.label || undefined}
+            >
+              {target.label}
+            </span>
+            <span className="shrink-0">
+              ·{" "}
+              {target.kind === "document"
+                ? t("heatBreakdown.subtitleDocument", { circle: heatCircleLabel(data, t) })
+                : t("heatBreakdown.subtitle", { circle: heatCircleLabel(data, t) })}
+            </span>
           </DialogDescription>
         </DialogHeader>
 
@@ -79,7 +162,7 @@ export function HeatBreakdownDialog({
             </Button>
           </div>
         ) : data ? (
-          <div className="space-y-4">
+          <div className="min-w-0 space-y-4">
             <div className="flex flex-wrap items-center gap-3">
               <HeatBadge level={data.level} />
               <span className="text-h3 tabular-nums">
@@ -93,20 +176,28 @@ export function HeatBreakdownDialog({
               {factorRows(data).map(({ key, value }) => {
                 const widthPct = Math.round((Math.abs(value) / maxAbs) * 100);
                 const negative = value < 0;
+                const hintKey =
+                  key === "forwardSignals"
+                    ? target.kind === "document"
+                      ? "heatBreakdown.factorHints.forwardSignalsDocument"
+                      : "heatBreakdown.factorHints.forwardSignals"
+                    : key === "bouncePenalty"
+                      ? target.kind === "document"
+                        ? "heatBreakdown.factorHints.bouncePenaltyDocument"
+                        : "heatBreakdown.factorHints.bouncePenalty"
+                      : key === "keyPageViews"
+                        ? target.kind === "document"
+                          ? "heatBreakdown.factorHints.keyPageViewsDocument"
+                          : "heatBreakdown.factorHints.keyPageViewsLink"
+                        : undefined;
                 return (
                   <li key={key} className="space-y-1">
                     <div className="flex items-center justify-between gap-2 text-caption">
-                      <span
-                        title={
-                          key === "forwardSignals" || key === "bouncePenalty"
-                            ? t(`heatBreakdown.factorHints.${key}`)
-                            : undefined
-                        }
-                      >
+                      <span title={hintKey ? t(hintKey) : undefined}>
                         {t(`heatBreakdown.factors.${key}`)}
                       </span>
                       <span className="tabular-nums text-muted-foreground">
-                        {negative ? value.toFixed(1) : value.toFixed(1)}
+                        {value.toFixed(1)}
                       </span>
                     </div>
                     <div className="h-1.5 overflow-hidden rounded-full bg-muted">
@@ -123,6 +214,102 @@ export function HeatBreakdownDialog({
                 );
               })}
             </ul>
+            {overlay.length > 0 ? (
+              <div className="space-y-2 border-t border-border pt-3">
+                <p className="text-caption text-muted-foreground">
+                  {t("heatBreakdown.overlayTitle")}
+                </p>
+                <ul className="space-y-2">
+                  {overlay.map(({ key, value }) => {
+                    const widthPct = Math.round((Math.abs(value) / maxAbs) * 100);
+                    return (
+                      <li key={key} className="space-y-1">
+                        <div className="flex items-center justify-between gap-2 text-caption">
+                          <span title={t(`heatBreakdown.factorHints.${key}`)}>
+                            {t(`heatBreakdown.factors.${key}`)}
+                          </span>
+                          <span className="tabular-nums text-muted-foreground">
+                            {value.toFixed(1)}
+                          </span>
+                        </div>
+                        <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+                          <div
+                            className="h-full rounded-full bg-primary/70"
+                            style={{ width: `${widthPct}%` }}
+                          />
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            ) : null}
+            {(data.keyPages?.total ?? 0) > 0 ? (
+              <div className="space-y-2 border-t border-border pt-3">
+                <p className="text-caption text-muted-foreground">
+                  {t("heatBreakdown.keyPagesTitle")}
+                </p>
+                <p className="text-caption text-muted-foreground">
+                  {data.keyPages && data.keyPages.engaged > 0
+                    ? t("heatBreakdown.keyPagesEngaged", {
+                        engaged: data.keyPages.engaged,
+                        total: data.keyPages.total,
+                        seconds: data.keyPages.minSeconds,
+                      })
+                    : t("heatBreakdown.keyPagesSkim", {
+                        seconds: data.keyPages?.minSeconds ?? 3,
+                      })}
+                </p>
+                {data.keyPages && data.keyPages.pages.length > 0 ? (
+                  <ul className="space-y-1">
+                    {data.keyPages.pages.map((page) => (
+                      <li
+                        key={`${page.pageNumber}-${page.title}`}
+                        className="flex items-center justify-between gap-2 text-caption"
+                      >
+                        <span className="min-w-0 truncate">
+                          {t("heatBreakdown.keyPageRow", {
+                            page: page.pageNumber,
+                            title: page.title,
+                          })}
+                        </span>
+                        <span className="shrink-0 tabular-nums text-muted-foreground">
+                          {t("heatBreakdown.keyPageRowViews", {
+                            engaged: page.engagedViews,
+                            total: page.totalViews,
+                          })}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
+            ) : null}
+            {isDocumentScore(data) && data.contributingLinks.length > 0 ? (
+              <div className="space-y-2 border-t border-border pt-3">
+                <p className="text-caption text-muted-foreground">
+                  {t("heatBreakdown.contributingLinks")}
+                </p>
+                <ul className="space-y-1">
+                  {data.contributingLinks.map((link) => (
+                    <li
+                      key={link.id}
+                      className="flex items-center justify-between gap-2 text-caption"
+                    >
+                      <span className="min-w-0 truncate">
+                        {link.name.trim() || t("overview.untitledLink")}
+                        <span className="ml-2 text-muted-foreground">
+                          {t(`overview.shareKind.${shareKindFromLink(link)}`)}
+                        </span>
+                      </span>
+                      <span className="shrink-0 tabular-nums text-muted-foreground">
+                        {t("heatBreakdown.contributingLinkViews", { count: link.pageViews })}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
           </div>
         ) : null}
       </DialogContent>

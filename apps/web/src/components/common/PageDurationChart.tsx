@@ -5,11 +5,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState } from "./EmptyState";
 import { ChartLineUp } from "@phosphor-icons/react";
 import { useTranslation } from "react-i18next";
+import type { PageDurationPoint } from "@/lib/linkPageDuration";
 
-export interface PageDurationPoint {
-  page: number;
-  duration: number;
-}
+export type { PageDurationPoint };
 
 interface PageDurationChartProps {
   title: string;
@@ -40,10 +38,11 @@ export function PageDurationChart({
   const chartData = useMemo(() => {
     return (data ?? []).map((d) => ({
       page: d.page,
-      pageLabel: String(d.page),
+      pageLabel: d.label?.trim() || String(d.page),
+      tooltipLabel: d.label?.trim() || (pageLabel ? pageLabel(d.page) : String(d.page)),
       duration: d.duration,
     }));
-  }, [data]);
+  }, [data, pageLabel]);
 
   useEffect(() => {
     if (!containerRef.current || chartData.length === 0) return;
@@ -94,8 +93,12 @@ export function PageDurationChart({
         },
       },
       tooltip: {
-        title: (_title: string, datum: Record<string, unknown>) =>
-          pageLabel ? pageLabel(datum.page as number) : `Page ${datum.page}`,
+        title: (_title: string, datum: Record<string, unknown>) => {
+          if (typeof datum.tooltipLabel === "string" && datum.tooltipLabel) {
+            return datum.tooltipLabel;
+          }
+          return pageLabel ? pageLabel(datum.page as number) : String(datum.page);
+        },
         formatter: (datum: Record<string, unknown>) => ({
           name: tooltipName ?? "Avg. duration",
           value: formatValue ? formatValue(datum.duration as number) : `${datum.duration}s`,

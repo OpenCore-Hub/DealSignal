@@ -23,6 +23,7 @@ import { formatRelativeTime } from "@/lib/formatters";
 interface ManagementTabProps {
   linkId: string;
   dealRoomId?: string;
+  canManageAsk?: boolean;
   fileRequests: FileRequest[];
   onUpdateFileRequest: (requestId: string, status: FileRequest["status"]) => Promise<void>;
   onPendingHostCountChange?: (count: number) => void;
@@ -31,6 +32,7 @@ interface ManagementTabProps {
 export function ManagementTab({
   linkId,
   dealRoomId,
+  canManageAsk = false,
   fileRequests,
   onUpdateFileRequest,
   onPendingHostCountChange,
@@ -54,6 +56,7 @@ export function ManagementTab({
             i18nNs="linkShare"
             onPendingCountChange={onPendingHostCountChange}
             onOpenCitation={onOpenCitation}
+            canManageAsk={canManageAsk}
           />
         </CardContent>
       </Card>

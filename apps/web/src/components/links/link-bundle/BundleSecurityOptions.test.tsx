@@ -65,6 +65,7 @@ async function setupI18n() {
             "Viewer must agree to NDA before access",
           "accessRules.additionalProtections.ndaDocument": "NDA agreement document",
           "accessRules.additionalProtections.ndaDocumentPlaceholder": "Select a document",
+          "accessRules.additionalProtections.ndaUntitled": "Untitled agreement",
           "accessRules.errors.ndaDocumentRequired":
             "Please select an NDA agreement document",
         },

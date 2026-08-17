@@ -34,6 +34,7 @@ import { useKnowledgeQueryStore } from "@/stores/knowledgeQueryStore";
 
 interface DealRoomKnowledgeTabProps {
   roomId: string;
+  canContribute?: boolean;
 }
 
 export { knowledgeErrorMessage };
@@ -55,7 +56,7 @@ export {
   viewerPath,
 };
 
-export function DealRoomKnowledgeTab({ roomId }: DealRoomKnowledgeTabProps) {
+export function DealRoomKnowledgeTab({ roomId, canContribute = false }: DealRoomKnowledgeTabProps) {
   const { t } = useTranslation("dealRooms");
   const { t: tc } = useTranslation("common");
   const navigate = useNavigate();
@@ -65,25 +66,11 @@ export function DealRoomKnowledgeTab({ roomId }: DealRoomKnowledgeTabProps) {
     [roomId],
   );
   const { data: roomMetrics } = useAsyncData(async () => {
-    const [analytics, askRes, linksRes] = await Promise.all([
-      api.getDealRoomAnalytics(roomId),
-      api.listRoomAsk(roomId),
-      api.getDealRoomLinks(roomId, { page_size: 100 }),
-    ]);
-    const askTurns = askRes.data ?? [];
-    const links = linksRes.data ?? [];
-    const askKeys = new Set<string>();
-    for (const turn of askTurns) {
-      const key = (turn.visitor_id || turn.visitor_email || "").trim();
-      if (key) askKeys.add(key);
-    }
-    const visitedLinkIds = new Set(
-      links.filter((l) => (l.accessCount ?? 0) > 0).map((l) => l.id),
-    );
+    const analytics = await api.getDealRoomAnalytics(roomId);
     return {
       documentCount: analytics.documentCount,
-      askUniqueVisitors: askKeys.size,
-      visitedLinkCount: visitedLinkIds.size,
+      viewCount: analytics.totalViews,
+      activeLinkCount: analytics.activeLinkCount,
     } satisfies KnowledgeRoomMetrics;
   }, [roomId]);
 
@@ -268,8 +255,8 @@ export function DealRoomKnowledgeTab({ roomId }: DealRoomKnowledgeTabProps) {
 
   const metrics: KnowledgeRoomMetrics = {
     documentCount: roomMetrics?.documentCount ?? corpus.documents.length,
-    askUniqueVisitors: roomMetrics?.askUniqueVisitors ?? 0,
-    visitedLinkCount: roomMetrics?.visitedLinkCount ?? 0,
+    viewCount: roomMetrics?.viewCount ?? 0,
+    activeLinkCount: roomMetrics?.activeLinkCount ?? 0,
   };
   const corpusReady = resolveCorpusAttentionStage(corpus) === "ready";
 
@@ -281,14 +268,20 @@ export function DealRoomKnowledgeTab({ roomId }: DealRoomKnowledgeTabProps) {
             corpus={corpus}
             metrics={metrics}
             syncing={syncing}
-            onSync={() => {
-              void onSync();
-            }}
+            onSync={
+              canContribute
+                ? () => {
+                    void onSync();
+                  }
+                : undefined
+            }
           />
+          {canContribute ? (
           <KnowledgeAskEntryCard
             ready={corpusReady && sessionHydrated}
             onStartAsk={() => setChatOpen(true)}
           />
+          ) : null}
         </div>
         <KnowledgeOpsStrip
           roomId={roomId}

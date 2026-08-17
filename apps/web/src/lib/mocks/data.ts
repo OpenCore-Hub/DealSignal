@@ -27,6 +27,7 @@ import {
   actionNavigatePath,
   isFormalAskReviewAction,
 } from "@/lib/actionNavigation";
+import { documentEvidencePath, parseDocumentIdFromMetadata } from "@/lib/documentDetailNav";
 import type {
   RadarEvidencePack,
   RadarFeed,
@@ -479,6 +480,7 @@ export const mockAccessLogs: AccessLog[] = [
   {
     id: "log_1",
     linkId: "link_1",
+    documentId: "doc_1",
     visitorEmail: "sarah.chen@horizon.vc",
     visitorName: "Sarah Chen",
     pageNumber: 12,
@@ -490,6 +492,7 @@ export const mockAccessLogs: AccessLog[] = [
   {
     id: "log_2",
     linkId: "link_1",
+    documentId: "doc_1",
     visitorEmail: "sarah.chen@horizon.vc",
     visitorName: "Sarah Chen",
     pageNumber: 1,
@@ -501,6 +504,7 @@ export const mockAccessLogs: AccessLog[] = [
   {
     id: "log_3",
     linkId: "link_1",
+    documentId: "doc_1",
     visitorEmail: "marcus@boldstart.vc",
     visitorName: "Marcus Johnson",
     pageNumber: 7,
@@ -512,6 +516,7 @@ export const mockAccessLogs: AccessLog[] = [
   {
     id: "log_4",
     linkId: "link_2",
+    documentId: "doc_2",
     visitorEmail: "wei.lp@futurefund.com",
     visitorName: "Wei Li",
     pageNumber: 5,
@@ -692,7 +697,7 @@ const mockDealRoomMembers: DealRoomMember[] = [
   {
     id: "rm_2",
     email: "sarah.chen@horizon.vc",
-    role: "viewer",
+    role: "guest",
     nda_status: "signed",
     status: "active",
     name: "Sarah Chen",
@@ -812,7 +817,7 @@ export const mockDealRooms: DealRoom[] = [
     tags: ["biotech", "series-b"],
     folders: [{ path: "/general", name: "General", sort_order: 0 }],
     documents: [],
-    members: [{ id: "rm_3", email: "investor@redrock.vc", role: "viewer", nda_status: "signed", status: "active" }],
+    members: [{ id: "rm_3", email: "investor@redrock.vc", role: "guest", nda_status: "signed", status: "active" }],
     accessRequests: [],
   },
   {
@@ -1200,11 +1205,11 @@ export function getMockRadarFeed(workspaceSlug = "acme-capital"): RadarFeed {
     const { product, verb } = mockClassify(action, signal);
     const navigatePath =
       actionNavigatePath(workspaceSlug, action) ||
-      (signal?.documentId
-        ? `/${workspaceSlug}/documents/${signal.documentId}?tab=analytics`
-        : signal?.linkId
-          ? `/${workspaceSlug}/links/${signal.linkId}`
-          : undefined);
+      documentEvidencePath(workspaceSlug, {
+        documentId: signal?.documentId,
+        linkId: signal?.linkId,
+        metadata: signal?.metadata,
+      });
     const confidence =
       product === "leak_watch"
         ? signal?.subtype === "forward" || signal?.subtype === "download"
@@ -1245,7 +1250,7 @@ export function getMockRadarFeed(workspaceSlug = "acme-capital"): RadarFeed {
               ? action.sourceId
               : undefined,
       linkId: signal?.linkId || action.sourceId,
-      documentId: signal?.documentId,
+      documentId: parseDocumentIdFromMetadata(signal?.metadata) || signal?.documentId,
       contactId: signal?.contactId,
       actionId: action.id,
       signalId: signal?.id,

@@ -8,10 +8,35 @@ export const LIBRARY_SHARE_HANDOFF = {
 } as const;
 
 export type LibraryShareHandoff = {
-  documentId: string;
-  documentTitle: string;
+  documentIds: string[];
+  documentTitles: string[];
   documentStatus: string;
 };
+
+export type LibraryShareHandoffInput = {
+  documentId?: string;
+  documentIds?: string[];
+  documentTitle?: string;
+  documentTitles?: string[];
+  documentStatus?: string;
+};
+
+function normalizeIds(input: LibraryShareHandoffInput): string[] {
+  const fromList = (input.documentIds ?? []).map((id) => id.trim()).filter(Boolean);
+  if (fromList.length > 0) return [...new Set(fromList)];
+  const single = input.documentId?.trim();
+  return single ? [single] : [];
+}
+
+function normalizeTitles(input: LibraryShareHandoffInput, ids: string[]): string[] {
+  const fromList = (input.documentTitles ?? []).map((title) => title.trim());
+  if (fromList.length > 0) {
+    return ids.map((id, index) => fromList[index]?.trim() || id);
+  }
+  const single = input.documentTitle?.trim();
+  if (single && ids.length === 1) return [single];
+  return ids.map((id) => id);
+}
 
 /** Normalize status so callers never claim ready until ingestion finishes. */
 export function normalizeLibraryShareHandoffStatus(
@@ -21,28 +46,28 @@ export function normalizeLibraryShareHandoffStatus(
   return isDocumentReadyForLibraryShare(raw) ? "ready" : raw;
 }
 
-export function buildLibraryShareHandoffParams(input: {
-  documentId: string;
-  documentTitle?: string;
-  documentStatus?: string;
-}): URLSearchParams {
-  return new URLSearchParams({
-    [LIBRARY_SHARE_HANDOFF.documentId]: input.documentId,
-    [LIBRARY_SHARE_HANDOFF.documentTitle]:
-      input.documentTitle?.trim() || input.documentId,
-    [LIBRARY_SHARE_HANDOFF.documentStatus]: normalizeLibraryShareHandoffStatus(
-      input.documentStatus,
-    ),
-  });
+export function buildLibraryShareHandoffParams(
+  input: LibraryShareHandoffInput,
+): URLSearchParams {
+  const documentIds = normalizeIds(input);
+  const documentTitles = normalizeTitles(input, documentIds);
+  const params = new URLSearchParams();
+  for (const id of documentIds) {
+    params.append(LIBRARY_SHARE_HANDOFF.documentId, id);
+  }
+  for (const title of documentTitles) {
+    params.append(LIBRARY_SHARE_HANDOFF.documentTitle, title);
+  }
+  params.set(
+    LIBRARY_SHARE_HANDOFF.documentStatus,
+    normalizeLibraryShareHandoffStatus(input.documentStatus),
+  );
+  return params;
 }
 
 export function documentsLibraryShareHandoffPath(
   workspaceSlug: string,
-  input: {
-    documentId: string;
-    documentTitle?: string;
-    documentStatus?: string;
-  },
+  input: LibraryShareHandoffInput,
 ): string {
   return `/${workspaceSlug}/documents?${buildLibraryShareHandoffParams(input).toString()}`;
 }
@@ -50,12 +75,20 @@ export function documentsLibraryShareHandoffPath(
 export function readLibraryShareHandoff(
   searchParams: URLSearchParams,
 ): LibraryShareHandoff | null {
-  const documentId = searchParams.get(LIBRARY_SHARE_HANDOFF.documentId)?.trim();
-  if (!documentId) return null;
+  const documentIds = [
+    ...new Set(
+      searchParams
+        .getAll(LIBRARY_SHARE_HANDOFF.documentId)
+        .flatMap((value) => value.split(","))
+        .map((id) => id.trim())
+        .filter(Boolean),
+    ),
+  ];
+  if (documentIds.length === 0) return null;
+  const rawTitles = searchParams.getAll(LIBRARY_SHARE_HANDOFF.documentTitle);
   return {
-    documentId,
-    documentTitle:
-      searchParams.get(LIBRARY_SHARE_HANDOFF.documentTitle)?.trim() || documentId,
+    documentIds,
+    documentTitles: documentIds.map((id, index) => rawTitles[index]?.trim() || id),
     documentStatus: normalizeLibraryShareHandoffStatus(
       searchParams.get(LIBRARY_SHARE_HANDOFF.documentStatus),
     ),

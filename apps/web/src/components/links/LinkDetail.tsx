@@ -19,37 +19,12 @@ import { api } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/apiErrors";
 import { documentsSharePath } from "@/lib/documentsSharePath";
 import { formatDate, formatDuration, formatRelativeTime } from "@/lib/formatters";
-import { calculateUniqueVisitors } from "@/lib/calculations";
+import { buildPageDurationDataFromMetrics } from "@/lib/linkPageDuration";
+import { accessLogDocumentTitle, formatShareDocumentLabel } from "@/lib/shareDocumentLabel";
 import { parseOwnerAskInboxView } from "@/lib/ownerAskInbox";
 import { useWorkspaceAccess } from "@/hooks/useWorkspaceAccess";
-import type { AccessLog, Document, Link } from "@/types";
-
-function buildPageDurationData(
-  logs: AccessLog[],
-  pageCount: number
-): { page: number; duration: number }[] {
-  const groups = new Map<number, { total: number; count: number }>();
-  for (const log of logs) {
-    if (typeof log.pageNumber !== "number") continue;
-    const existing = groups.get(log.pageNumber);
-    if (existing) {
-      existing.total += log.durationSeconds || 0;
-      existing.count += 1;
-    } else {
-      groups.set(log.pageNumber, { total: log.durationSeconds || 0, count: 1 });
-    }
-  }
-
-  const data: { page: number; duration: number }[] = [];
-  for (let page = 1; page <= pageCount; page++) {
-    const existing = groups.get(page);
-    data.push({
-      page,
-      duration: existing ? Math.round(existing.total / existing.count) : 0,
-    });
-  }
-  return data;
-}
+import { canManageAskHost, canMutateShareLink } from "@/lib/dealRoomCapabilities";
+import type { AccessLog, Document, Link, LinkAnalytics } from "@/types";
 
 export function LinkDetail() {
   const navigate = useNavigate();
@@ -58,11 +33,12 @@ export function LinkDetail() {
   const { t } = useTranslation("links");
   const { t: tShare } = useTranslation("linkShare");
   const { t: tc } = useTranslation("common");
-  const { canWrite } = useWorkspaceAccess(workspaceSlug);
+  const { canWrite, canManage } = useWorkspaceAccess(workspaceSlug);
   const askInboxView = parseOwnerAskInboxView(searchParams.get("askInbox"));
   const [link, setLink] = useState<Link | null>(null);
   const [document, setDocument] = useState<Document | null>(null);
   const [logs, setLogs] = useState<AccessLog[]>([]);
+  const [analytics, setAnalytics] = useState<LinkAnalytics | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [retryTick, setRetryTick] = useState(0);
@@ -82,14 +58,18 @@ export function LinkDetail() {
           l.documentIds?.find((docId) => Boolean(docId?.trim())) ||
           l.documents?.find((d) => Boolean(d.id))?.id ||
           undefined;
-        const [logData, docData] = await Promise.all([
+        const [logData, docData, analyticsRes] = await Promise.all([
           api.getAccessLogs(id!),
-          primaryDocId ? api.getDocumentById(primaryDocId) : Promise.resolve(null),
+          primaryDocId
+            ? api.getDocumentById(primaryDocId).catch(() => null)
+            : Promise.resolve(null),
+          api.getLinkAnalytics(id!).catch(() => null),
         ]);
         if (!cancelled) {
           setLink(l);
           setDocument(docData);
           setLogs(logData.data);
+          setAnalytics(analyticsRes?.data ?? null);
         }
       } catch (e) {
         if (!cancelled) setError(apiErrorMessage(e));
@@ -104,28 +84,50 @@ export function LinkDetail() {
   }, [linkId, retryTick, tc]);
 
   const pageDurationData = useMemo(() => {
-    const pageCount =
-      document?.pageCount ??
-      Math.max(0, ...logs.filter((l) => typeof l.pageNumber === "number").map((l) => l.pageNumber ?? 0));
-    if (pageCount <= 0) return [];
-    return buildPageDurationData(logs, pageCount);
-  }, [logs, document]);
+    const documents =
+      link?.documents && link.documents.length > 0
+        ? link.documents
+        : document
+          ? [{ id: document.id, title: document.title, pageCount: document.pageCount }]
+          : [];
+    return buildPageDurationDataFromMetrics(
+      (analytics?.page_durations ?? []).map((page) => ({
+        documentId: page.document_id,
+        pageNumber: page.page_number,
+        avgDurationSeconds: page.average_duration_seconds,
+      })),
+      {
+        documents,
+        primaryDocumentId: link?.documentId ?? document?.id,
+        formatBundleLabel: (title, page) => t("detail.pageOnDocument", { title, page }),
+      },
+    );
+  }, [analytics, link, document, t]);
 
   const timelineActivities = useMemo(() => {
+    const docs = link?.documents ?? [];
+    const isBundle = docs.length > 1;
     return [...logs]
       .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
       .slice(0, 20)
-      .map((log) => ({
-        id: log.id,
-        time: formatRelativeTime(log.timestamp),
-        title: log.pageNumber
-          ? t("timeline.viewedPage", { visitor: log.visitorName || log.visitorEmail || tc("visitor.unknown"), page: log.pageNumber })
-          : t("timeline.viewedLink", { visitor: log.visitorName || log.visitorEmail || tc("visitor.unknown") }),
-        description: log.durationSeconds
-          ? t("timeline.description", { duration: formatDuration(log.durationSeconds), device: log.device || "", location: log.location || "" })
-          : undefined,
-      }));
-  }, [logs, t, tc]);
+      .map((log) => {
+        const visitor = log.visitorName || log.visitorEmail || tc("visitor.unknown");
+        const title = accessLogDocumentTitle(log, docs, link?.documentId ?? document?.id);
+        return {
+          id: log.id,
+          time: formatRelativeTime(log.timestamp),
+          title:
+            log.pageNumber && isBundle && title
+              ? t("timeline.viewedPageOnDocument", { visitor, title, page: log.pageNumber })
+              : log.pageNumber
+                ? t("timeline.viewedPage", { visitor, page: log.pageNumber })
+                : t("timeline.viewedLink", { visitor }),
+          description: log.durationSeconds
+            ? t("timeline.description", { duration: formatDuration(log.durationSeconds), device: log.device || "", location: log.location || "" })
+            : undefined,
+        };
+      });
+  }, [logs, link, document, t, tc]);
 
   if (error) {
     return (
@@ -143,6 +145,12 @@ export function LinkDetail() {
 
   if (loading || !link) return <SkeletonDetail />;
 
+  const canMutateLink = canMutateShareLink({
+    dealRoomId: link.dealRoomId,
+    workspaceCanWrite: canWrite,
+    linkCanManageAsk: link.canManageAsk,
+  });
+
   return (
     <div className="space-y-6">
       <SmartBackButton fallbackTo={documentsSharePath(workspaceSlug!)} fallbackLabel={t("backToLinks")} />
@@ -150,11 +158,14 @@ export function LinkDetail() {
       <PageHeader
         title={(link.shortUrl || link.id).split("/").pop() || link.id}
         description={t("detail.headerDescription", {
-          doc: link.documentTitle,
+          doc:
+            formatShareDocumentLabel(link, (title, count) =>
+              t("table.bundleDocument", { title, count }),
+            ) || link.documentTitle,
           date: formatDate(link.createdAt),
         })}
       >
-        {canWrite ? (
+        {canMutateLink ? (
           <Button
             variant="outline"
             className="gap-1.5"
@@ -174,7 +185,7 @@ export function LinkDetail() {
           <Copy size={16} />
           {tc("copy")}
         </Button>
-        {canWrite ? (
+        {canMutateLink ? (
           <Button
             className="gap-1.5"
             onClick={async () => {
@@ -218,8 +229,19 @@ export function LinkDetail() {
         sidebar={
           <div className="space-y-4">
             <StatCard size="sm" label={t("detail.totalVisits")} value={link.accessCount} />
-            <StatCard size="sm" label={t("detail.uniqueVisitors")} value={calculateUniqueVisitors(logs)} />
-            <StatCard size="sm" label={t("detail.avgDuration")} value={formatDuration(link.avgDurationSeconds || 0)} />
+            <StatCard
+              size="sm"
+              label={t("detail.uniqueVisitors")}
+              value={analytics ? analytics.unique_visitors : "—"}
+            />
+            <p className="text-caption text-muted-foreground">{t("detail.uniqueVisitorsHint")}</p>
+            <StatCard
+              size="sm"
+              label={t("detail.avgDuration")}
+              value={
+                analytics ? formatDuration(analytics.average_duration_seconds || 0) : "—"
+              }
+            />
             <StatCard
               size="sm"
               label={t("detail.lastVisit")}
@@ -244,6 +266,7 @@ export function LinkDetail() {
         }
       >
         <div className="space-y-6">
+          <p className="text-caption text-muted-foreground">{t("detail.pageDurationHint")}</p>
           <PageDurationChart
             title={t("detail.pageDurationTitle")}
             data={pageDurationData}
@@ -279,6 +302,11 @@ export function LinkDetail() {
               scope={{ type: "link", linkId: link.id }}
               i18nNs="linkShare"
               initialView={askInboxView}
+              canManageAsk={canManageAskHost({
+                dealRoomId: link.dealRoomId,
+                workspaceCanManage: canManage,
+                linkCanManageAsk: link.canManageAsk,
+              })}
             />
           </CardContent>
         </Card>
@@ -289,7 +317,11 @@ export function LinkDetail() {
           <CardTitle className="text-h2">{t("detail.accessLogTitle")}</CardTitle>
         </CardHeader>
         <CardContent>
-          <LinkAccessLog logs={logs} />
+          <LinkAccessLog
+            logs={logs}
+            documents={link.documents}
+            primaryDocumentId={link.documentId}
+          />
         </CardContent>
       </Card>
     </div>

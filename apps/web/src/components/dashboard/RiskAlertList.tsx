@@ -4,6 +4,7 @@ import { ArrowRight, Warning } from "@phosphor-icons/react";
 import { Badge } from "@/components/ui/badge";
 import {
   documentDetailPath,
+  parseDocumentIdFromMetadata,
   parsePageFromMetadata,
 } from "@/lib/documentDetailNav";
 import type { RiskAlert } from "@/types";
@@ -81,11 +82,12 @@ export function RiskAlertList({ alerts, workspaceSlug }: RiskAlertListProps) {
         {sorted.map((alert) => {
         const severity = severityConfig[alert.priority] ?? severityConfig.medium;
         const focusPage = parsePageFromMetadata(alert.metadata);
+        const documentId = parseDocumentIdFromMetadata(alert.metadata) || alert.documentId;
         const to =
-          alert.documentId && workspaceSlug
+          documentId && workspaceSlug
             ? documentDetailPath(
                 workspaceSlug,
-                alert.documentId,
+                documentId,
                 focusPage
                   ? { tab: "content", page: focusPage }
                   : { tab: "analytics" },

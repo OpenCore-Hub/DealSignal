@@ -16,7 +16,8 @@ vi.mock("@/lib/api", () => ({
 }));
 
 vi.mock("./DealRoomAccessRequestsPanel", () => ({
-  DealRoomAccessRequestsPanel: () => <div data-testid="room-access-requests" />,
+  DealRoomAccessRequestsPanel: ({ canManage }: { canManage?: boolean }) =>
+    canManage ? <div data-testid="room-access-requests" /> : null,
 }));
 
 vi.mock("@/components/links/share", async (importOriginal) => {
@@ -99,7 +100,7 @@ describe("DealRoomAccessControlTab", () => {
 
     render(
       <I18nextProvider i18n={i18n}>
-        <DealRoomAccessControlTab roomId="room-1" />
+        <DealRoomAccessControlTab roomId="room-1" canManage />
       </I18nextProvider>,
     );
 
@@ -133,7 +134,7 @@ describe("DealRoomAccessControlTab", () => {
 
     render(
       <I18nextProvider i18n={i18n}>
-        <DealRoomAccessControlTab roomId="room-1" />
+        <DealRoomAccessControlTab roomId="room-1" canManage />
       </I18nextProvider>,
     );
 
@@ -174,7 +175,7 @@ describe("DealRoomAccessControlTab", () => {
 
     render(
       <I18nextProvider i18n={i18n}>
-        <DealRoomAccessControlTab roomId="room-1" onDirtyChange={onDirtyChange} />
+        <DealRoomAccessControlTab roomId="room-1" canManage onDirtyChange={onDirtyChange} />
       </I18nextProvider>,
     );
 
@@ -214,7 +215,7 @@ describe("DealRoomAccessControlTab", () => {
 
     render(
       <I18nextProvider i18n={i18n}>
-        <DealRoomAccessControlTab roomId="room-1" />
+        <DealRoomAccessControlTab roomId="room-1" canManage />
       </I18nextProvider>,
     );
 
@@ -227,5 +228,38 @@ describe("DealRoomAccessControlTab", () => {
         .length,
     ).toBeGreaterThanOrEqual(1);
     expect(screen.getByText(/NDA floor requires Business or higher/i)).toBeInTheDocument();
+  });
+
+  it("shows a read-only policy for oversight", async () => {
+    const i18n = await createTestI18n({
+      dealRooms: {
+        "accessControl.blocklistTitle": "Access blacklist",
+        "accessControl.floorsTitle": "Security domain",
+        "accessControl.floorMustVerify": "Must verify email",
+        "accessControl.floorMustNda": "Must require NDA",
+        "accessControl.saveButton": "Save access policy",
+        "accessControl.oversightHint": "View only",
+      },
+      linkShare: {
+        "accessRules.blockedViewers.placeholder": "bad@example.com",
+        "accessRules.blockedViewers.roomHint": "Blocked for every link",
+      },
+      common: { loading: "Loading..." },
+    });
+
+    render(
+      <I18nextProvider i18n={i18n}>
+        <DealRoomAccessControlTab roomId="room-1" canManage={false} />
+      </I18nextProvider>,
+    );
+
+    expect(await screen.findByTestId("room-security-form")).toBeInTheDocument();
+    expect(screen.getByTestId("access-policy-oversight-hint")).toBeInTheDocument();
+    expect(screen.queryByTestId("room-access-requests")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save access policy" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Must verify email")).toBeDisabled();
+    expect(screen.getByLabelText("Must require NDA")).toBeDisabled();
+    expect(screen.getByTestId("blocked-emails-input")).toBeDisabled();
+    expect(api.getBillingInfo).not.toHaveBeenCalled();
   });
 });

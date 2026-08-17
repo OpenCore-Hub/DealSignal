@@ -26,6 +26,7 @@ import type {
   WorkspaceViewerDomain,
 } from "@/types";
 import { useAsyncData } from "@/hooks/useAsyncData";
+import { useWorkspaceAccess } from "@/hooks/useWorkspaceAccess";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import {
   ShareTab,
@@ -43,6 +44,7 @@ import {
   roomSecurityFloors,
 } from "@/components/deal-rooms/roomAccessPolicy";
 import { useNdaPickerSources } from "./hooks";
+import { canMutateShareLink } from "@/lib/dealRoomCapabilities";
 import { resolveNdaDocumentFallback } from "./ndaPicker";
 import { resolveShareViewerDomains } from "./viewerDomains";
 import type { DraftLink } from "./types";
@@ -117,6 +119,7 @@ function LinkShareDialogContent({
   registerCloseGuard: (guard: () => boolean) => void;
 }) {
   const { t } = useTranslation("linkShare");
+  const { canWrite } = useWorkspaceAccess();
   const { workspaceSlug } = useParams<{ workspaceSlug?: string }>();
   const shareDomains = useMemo(
     () => resolveShareViewerDomains(data?.viewerDomain),
@@ -146,6 +149,11 @@ function LinkShareDialogContent({
   const [highlightedFields, setHighlightedFields] = useState<string[]>([]);
 
   const link = data?.link ?? null;
+  const canReviewRequests = canMutateShareLink({
+    dealRoomId: link?.dealRoomId,
+    linkCanManageAsk: link?.canManageAsk,
+    workspaceCanWrite: canWrite,
+  });
   const policy = data?.policy ?? null;
   const floors = roomSecurityFloors(policy);
   const lockedRoomBlocks = roomBlockedEmails(policy);
@@ -353,6 +361,7 @@ function LinkShareDialogContent({
                   {link ? (
                     <LinkAccessRequestsPanel
                       linkId={link.id}
+                      canReview={canReviewRequests}
                       onChanged={(detail) => {
                         if (detail?.action === "approve" && detail.email) {
                           const email = detail.email.trim().toLowerCase();

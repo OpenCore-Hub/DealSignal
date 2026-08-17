@@ -3,7 +3,22 @@ import {
   keyPageRulesForCircle,
   type HeatScoreInput,
 } from "@/lib/heat/heatScore";
+import { libraryShareDocumentIDs } from "@/lib/shareDocumentLabel";
 import type { Circle, HeatLevel, HeatScoreResult, Link, PageAnalytics } from "@/types";
+
+/** Union page analytics for every document the share contains. */
+export function pagesForLinkHeat(
+  link: Pick<Link, "documentId" | "documentIds" | "documents">,
+  pagesByDocument?: Record<string, PageAnalytics[]>,
+): PageAnalytics[] | undefined {
+  if (!pagesByDocument) return undefined;
+  const pages: PageAnalytics[] = [];
+  for (const id of libraryShareDocumentIDs(link)) {
+    const chunk = pagesByDocument[id];
+    if (chunk?.length) pages.push(...chunk);
+  }
+  return pages.length > 0 ? pages : undefined;
+}
 
 function keyKeywordsForCircle(circle: Circle): string[] {
   return keyPageRulesForCircle(circle).flatMap((r) => r.keywords);
@@ -59,6 +74,60 @@ export function computeMockLinkHeat(
   return computeHeatScore(circle, mockHeatInputFromLink(link, pages, circle), pages);
 }
 
+/** Document-native heat from this file's page analytics — no link access_count. */
+export function mockHeatInputFromDocumentPages(
+  pages: PageAnalytics[] | undefined,
+  circle: Circle = "founder",
+): HeatScoreInput {
+  if (!pages?.length) {
+    return {
+      opens: 0,
+      revisits: 0,
+      avgDurationMinutes: 0,
+      keyPageViews: 0,
+      forwardSignals: 0,
+      downloads: 0,
+      bouncePenalty: 0,
+    };
+  }
+  const uniqueVisitors = pages.reduce((max, p) => Math.max(max, p.viewCount ?? 0), 0);
+  const totalViews = pages.reduce((sum, p) => sum + (p.viewCount ?? 0), 0);
+  const weightedDur = pages.reduce(
+    (sum, p) => sum + (p.avgDurationSeconds ?? 0) * (p.viewCount ?? 0),
+    0,
+  );
+  const avgDurationMinutes = totalViews > 0 ? weightedDur / totalViews / 60 : 0;
+  const keywords = keyKeywordsForCircle(circle);
+  let keyPageViews = 0;
+  for (const p of pages) {
+    const title = (p.title ?? "").toLowerCase();
+    const engaged = (p.viewCount ?? 0) > 0 && (p.avgDurationSeconds ?? 0) >= 3;
+    if (!engaged) continue;
+    if (keywords.some((kw) => title.includes(kw.toLowerCase()))) {
+      keyPageViews += Math.max(1, Math.round(p.viewCount * 0.25));
+    }
+  }
+  const first = pages[0];
+  const bouncePenalty =
+    pages.length === 1 && uniqueVisitors > 0 && (first?.avgDurationSeconds ?? 0) < 3 ? 1 : 0;
+  return {
+    opens: uniqueVisitors,
+    revisits: 0,
+    avgDurationMinutes,
+    keyPageViews,
+    forwardSignals: 0,
+    downloads: 0,
+    bouncePenalty,
+  };
+}
+
+export function computeMockDocumentHeat(
+  pages: PageAnalytics[] | undefined,
+  circle: Circle = "founder",
+): HeatScoreResult {
+  return computeHeatScore(circle, mockHeatInputFromDocumentPages(pages, circle), pages);
+}
+
 /** Align Link.heatLevel with founder-circle heat.Compute (same thresholds as API). */
 export function syncMockLinkHeatLevels(
   links: Link[],
@@ -66,8 +135,7 @@ export function syncMockLinkHeatLevels(
   circle: Circle = "founder",
 ): void {
   for (const link of links) {
-    const docId = link.documentId;
-    const pages = docId && pagesByDocument ? pagesByDocument[docId] : undefined;
+    const pages = pagesForLinkHeat(link, pagesByDocument);
     link.heatLevel = computeMockLinkHeat(link, circle, pages).level;
   }
 }

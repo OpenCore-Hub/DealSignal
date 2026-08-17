@@ -52,8 +52,9 @@ import {
   getMockSignalFeed,
 } from "./data";
 import { buildRadarStressFeed } from "./radarStressFeed";
-import { computeMockLinkHeat } from "./mockHeat";
+import { computeMockDocumentHeat, computeMockLinkHeat, pagesForLinkHeat } from "./mockHeat";
 import { applyRadarCircleLens, type RadarFeed } from "@/lib/radarQueue";
+import { linkIncludesDocument, linkIncludesLibraryDocument } from "@/lib/shareDocumentLabel";
 
 /** Playwright E2E override for GET /radar — Cache-backed so full page.goto keeps it. */
 let mockRadarFeedOverride: RadarFeed | null = null;
@@ -1641,12 +1642,19 @@ function updateRoomDerivedFields(room: DealRoom) {
 
 export const handlers = [
   // Auth
+  http.get("*/api/auth/captcha", () => {
+    return HttpResponse.json({ turnstile_site_key: "" });
+  }),
+
   http.post("*/api/auth/register", async ({ request }) => {
     const body = (await request.json()) as { email?: string; password?: string };
     const email = body.email?.trim().toLowerCase();
     const password = body.password ?? "";
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return HttpResponse.json({ code: "invalid_email", message: "invalid email address" }, { status: 400 });
+    }
+    if (email.endsWith("@mailinator.com") || email.endsWith("@yopmail.com")) {
+      return HttpResponse.json({ code: "disposable_email", message: "use a permanent work email" }, { status: 400 });
     }
     if (!validatePassword(password)) {
       return HttpResponse.json(
@@ -1680,7 +1688,7 @@ export const handlers = [
       return HttpResponse.json({ code: "unauthorized", message: "missing authorization" }, { status: 401 });
     }
     return HttpResponse.json({
-      user: { id: user.id, email: user.email, name: user.name },
+      user: { id: user.id, email: user.email, name: user.name, email_verified: true },
     });
   }),
 
@@ -1695,8 +1703,43 @@ export const handlers = [
     });
   }),
 
-  http.get("*/api/auth/verify-email/:token", () => {
-    return HttpResponse.json({ code: "verified", message: "email verified successfully" });
+  http.post("*/api/auth/verify-email", async ({ request }) => {
+    const body = (await request.json()) as { token?: string };
+    if (!body.token) {
+      return HttpResponse.json({ code: "invalid_or_expired_token", message: "verification link is invalid or has expired" }, { status: 400 });
+    }
+    return HttpResponse.json(
+      { code: "verified", message: "email verified successfully" },
+      { headers: authSessionCookieHeader() },
+    );
+  }),
+
+  http.post("*/api/auth/resend-verification", async () => {
+    return HttpResponse.json({ code: "ok" });
+  }),
+
+  http.post("*/api/auth/forgot-password", async () => {
+    return HttpResponse.json({ code: "ok" });
+  }),
+
+  http.post("*/api/auth/reset-password", async ({ request }) => {
+    const body = (await request.json()) as { token?: string; password?: string };
+    if (!body.token) {
+      return HttpResponse.json(
+        { code: "invalid_or_expired_token", message: "reset link is invalid or has expired" },
+        { status: 400 },
+      );
+    }
+    if (!validatePassword(body.password ?? "")) {
+      return HttpResponse.json(
+        {
+          code: "weak_password",
+          message: "password must be at least 8 characters and include uppercase, lowercase, digit and special character",
+        },
+        { status: 400 },
+      );
+    }
+    return HttpResponse.json({ code: "ok" });
   }),
 
   // Test-only reset (+ optional corpus override for A5). Same path always — MSW
@@ -1861,7 +1904,7 @@ export const handlers = [
       case "recent": {
         const lastAccessedAt = (docId: string) => {
           const linkDates = mockLinks
-            .filter((l) => l.documentId === docId && l.lastViewedAt)
+            .filter((l) => linkIncludesDocument(l, docId) && l.lastViewedAt)
             .map((l) => new Date(l.lastViewedAt!).getTime());
           return Math.max(...linkDates, 0);
         };
@@ -1872,7 +1915,7 @@ export const handlers = [
       }
       case "popular": {
         const totalViews = (docId: string) =>
-          mockLinks.filter((l) => l.documentId === docId).reduce((sum, l) => sum + l.accessCount, 0);
+          mockLinks.filter((l) => linkIncludesDocument(l, docId)).reduce((sum, l) => sum + l.accessCount, 0);
         docs = [...mockDocuments]
           .filter((d) => d.status !== "archived" && totalViews(d.id) >= 30)
           .sort(
@@ -1882,11 +1925,11 @@ export const handlers = [
         break;
       }
       case "unshared":
-        docs = mockDocuments.filter((d) => !mockLinks.some((l) => l.documentId === d.id && l.isActive));
+        docs = mockDocuments.filter((d) => !mockLinks.some((l) => linkIncludesDocument(l, d.id) && l.isActive));
         break;
       case "shared":
         docs = mockDocuments.filter(
-          (d) => d.status !== "archived" && mockLinks.some((l) => l.documentId === d.id && l.isActive),
+          (d) => d.status !== "archived" && mockLinks.some((l) => linkIncludesDocument(l, d.id) && l.isActive),
         );
         break;
       case "archived":
@@ -1930,6 +1973,12 @@ export const handlers = [
       exists: true,
       document: { id: existing.id, title: existing.title },
     });
+  }),
+
+  http.get("*/api/workspaces/:workspaceSlug/documents/:id/status", ({ params }) => {
+    const doc = mockDocuments.find((d) => d.id === params.id);
+    if (!doc) return new HttpResponse(null, { status: 404 });
+    return HttpResponse.json(doc);
   }),
 
   http.get("*/api/workspaces/:workspaceSlug/documents/:id", ({ params }) => {
@@ -1980,9 +2029,10 @@ export const handlers = [
     if (!mockDocuments.some((d) => d.id === docId)) {
       return new HttpResponse(null, { status: 404 });
     }
-    const activeLinkCount = mockLinks.filter((l) => l.documentId === docId && l.isActive).length;
+    const activeLinkCount = mockLinks.filter((l) => linkIncludesDocument(l, docId) && l.isActive).length;
     return HttpResponse.json({
       active_link_count: activeLinkCount,
+      revoked_link_count: activeLinkCount,
       deal_room_count: 0,
     });
   }),
@@ -1994,9 +2044,15 @@ export const handlers = [
     mockDocuments.splice(index, 1);
     // Mirror API: revoking document share links on library delete.
     for (let i = mockLinks.length - 1; i >= 0; i--) {
-      if (mockLinks[i]?.documentId === docId) {
+      const link = mockLinks[i];
+      if (!link || !linkIncludesDocument(link, docId)) continue;
+      if (link.documentId === docId) {
         mockLinks.splice(i, 1);
+        continue;
       }
+      link.documentIds = (link.documentIds ?? []).filter((id) => id !== docId);
+      link.documents = (link.documents ?? []).filter((d) => d.id !== docId);
+      link.isBundle = (link.documents?.length ?? 0) > 1;
     }
     return new HttpResponse(null, { status: 204 });
   }),
@@ -2185,7 +2241,7 @@ export const handlers = [
     // Document Library share list: never include deal-room shares.
     const documentLinks = mockLinks.filter((l) => !l.dealRoomId && l.documentId);
     const data = documentId
-      ? documentLinks.filter((l) => l.documentId === documentId)
+      ? documentLinks.filter((l) => linkIncludesLibraryDocument(l, documentId))
       : documentLinks;
     return HttpResponse.json({ data });
   }),
@@ -4397,6 +4453,32 @@ export const handlers = [
     return HttpResponse.json(room);
   }),
 
+  http.post("*/api/workspaces/:workspaceSlug/deal-rooms/:id/sign-nda", ({ params }) => {
+    const room = findRoom(params.id as string);
+    if (!room) return new HttpResponse(null, { status: 404 });
+    room.ndaRequired = false;
+    room.memberStatus = "active";
+    return HttpResponse.json(room);
+  }),
+
+  http.patch("*/api/workspaces/:workspaceSlug/deal-rooms/:id/members/:memberId", async ({ request, params }) => {
+    const room = findRoom(params.id as string);
+    if (!room) return new HttpResponse(null, { status: 404 });
+    const body = (await request.json()) as { role: DealRoomMember["role"] };
+    const members = room.members ?? [];
+    const member = members.find((m) => m.id === params.memberId);
+    if (!member) return new HttpResponse(null, { status: 404 });
+    if (member.role === "owner" || body.role === "owner") {
+      return HttpResponse.json(
+        { code: "cannot_manage_member", message: "cannot manage this member" },
+        { status: 403 },
+      );
+    }
+    member.role = body.role;
+    updateRoomDerivedFields(room);
+    return HttpResponse.json(member);
+  }),
+
   http.delete("*/api/workspaces/:workspaceSlug/deal-rooms/:id/members/:memberId", ({ params }) => {
     const room = findRoom(params.id as string);
     if (!room) return new HttpResponse(null, { status: 404 });
@@ -4430,7 +4512,7 @@ export const handlers = [
       members.push({
         id: generateId("rm"),
         email: request.email,
-        role: "viewer",
+        role: "guest",
         nda_status: room.ndaEnabled ? "pending" : "none",
         status: "active",
       });
@@ -4471,7 +4553,7 @@ export const handlers = [
       effectiveMember = {
         id: pendingRequest.id,
         email: pendingRequest.email,
-        role: "viewer",
+        role: "guest",
         nda_status: "none",
         status: "pending",
       };
@@ -4575,29 +4657,21 @@ export const handlers = [
     }
     const heatRank = { hot: 3, warm: 2, cold: 1 } as const;
     const topDocuments = mockDocuments
+      .filter((d) => d.status !== "archived")
       .map((d) => {
-        const linked = mockLinks.filter((l) => l.documentId === d.id);
-        const views = linked.reduce((sum, l) => sum + l.accessCount, 0);
         const pages = mockPageAnalytics[d.id];
-        let heatLevel: "hot" | "warm" | "cold" = "cold";
-        let score = 0;
-        let primaryLinkId: string | undefined;
-        for (const l of linked) {
-          const heat = computeMockLinkHeat(l, "founder", pages);
-          if (heat.score > score || (heat.score === score && heatRank[heat.level] > heatRank[heatLevel])) {
-            heatLevel = heat.level;
-            score = heat.score;
-            primaryLinkId = l.id;
-          }
-        }
-        return { id: d.id, title: d.title, views, score, heatLevel, primaryLinkId };
+        if (!pages?.length) return null;
+        const heat = computeMockDocumentHeat(pages, "founder");
+        const views = pages.reduce((max, p) => Math.max(max, p.viewCount ?? 0), 0);
+        const primaryLinkId = mockLinks.find((l) => linkIncludesDocument(l, d.id))?.id;
+        return { id: d.id, title: d.title, views, score: heat.score, heatLevel: heat.level, primaryLinkId };
       })
-      .filter((d) => mockLinks.some((l) => l.documentId === d.id))
+      .filter((d): d is NonNullable<typeof d> => d != null)
       .sort((a, b) => b.score - a.score || b.views - a.views)
       .slice(0, 5);
     const topLinks = [...mockLinks]
       .map((l) => {
-        const pages = l.documentId ? mockPageAnalytics[l.documentId] : undefined;
+        const pages = pagesForLinkHeat(l, mockPageAnalytics);
         const heat = computeMockLinkHeat(l, "founder", pages);
         return { link: l, heat };
       })
@@ -4608,8 +4682,11 @@ export const handlers = [
       .slice(0, 5)
       .map(({ link: l, heat }) => ({
         id: l.id,
-        title: l.documentTitle ?? "",
+        name: l.name?.trim() || "",
+        title: l.name?.trim() || "",
+        documentTitle: l.documentTitle ?? "",
         documentId: l.documentId,
+        dealRoomId: l.dealRoomId,
         shortUrl: l.shortUrl,
         views: l.accessCount,
         score: heat.score,
@@ -4821,6 +4898,7 @@ export const handlers = [
           pageTitle: "Financial Projections",
           category: "financials",
           views: 1,
+          engagedViews: 1,
           uniqueVisitors: 1,
           avgDurationSeconds: 42,
           lastViewedAt: new Date().toISOString(),
@@ -4974,6 +5052,58 @@ export const handlers = [
     });
   }),
 
+  http.get("*/api/workspaces/:workspaceSlug/analytics/documents/scores", () => {
+    const documents = mockDocuments
+      .filter((d) => d.status !== "archived" && d.category !== "agreement")
+      .map((d) => {
+        const pages = mockPageAnalytics[d.id] ?? [];
+        if (pages.length === 0) return null;
+        const heat = computeMockDocumentHeat(pages, "founder");
+        const views = pages.reduce((sum, p) => sum + (p.viewCount ?? 0), 0);
+        const primaryLinkId = mockLinks.find((l) => linkIncludesDocument(l, d.id))?.id;
+        return { id: d.id, title: d.title, views, score: heat.score, heatLevel: heat.level, primaryLinkId };
+      })
+      .filter((d): d is NonNullable<typeof d> => d != null);
+    return HttpResponse.json({ documents });
+  }),
+
+  http.get("*/api/workspaces/:workspaceSlug/analytics/documents/:documentId/score", ({ request, params }) => {
+    const url = new URL(request.url);
+    const circleRaw = url.searchParams.get("circle") ?? "founder";
+    const circle = (
+      circleRaw === "investor_ir" || circleRaw === "sales" ? circleRaw : "founder"
+    ) as Circle;
+    const doc = mockDocuments.find((d) => d.id === params.documentId);
+    if (!doc || doc.status === "archived") {
+      return HttpResponse.json(
+        { code: "document_not_found", message: "document not found" },
+        { status: 404 },
+      );
+    }
+    const pages = mockPageAnalytics[doc.id];
+    const heat = computeMockDocumentHeat(pages, circle);
+    const views = (pages ?? []).reduce((max, p) => Math.max(max, p.viewCount ?? 0), 0);
+    const contributingLinks = mockLinks
+      .filter((l) => linkIncludesDocument(l, doc.id) && (l.accessCount ?? 0) > 0)
+      .map((l) => ({
+        id: l.id,
+        name: l.name?.trim() || "",
+        pageViews: (pages ?? []).reduce((sum, p) => sum + (p.viewCount ?? 0), 0),
+      }));
+    return HttpResponse.json({
+      documentId: doc.id,
+      title: doc.title,
+      score: heat.score,
+      level: heat.level,
+      trend: heat.trend,
+      circle,
+      breakdown: heat.breakdown,
+      views,
+      contributingLinks,
+      updatedAt: new Date().toISOString(),
+    });
+  }),
+
   http.get("*/api/workspaces/:workspaceSlug/analytics/links/:linkId/score", ({ request, params }) => {
     const url = new URL(request.url);
     const circleRaw = url.searchParams.get("circle") ?? "founder";
@@ -4987,13 +5117,14 @@ export const handlers = [
         { status: 404 },
       );
     }
-    const pages = link.documentId ? mockPageAnalytics[link.documentId] : undefined;
+    const pages = pagesForLinkHeat(link, mockPageAnalytics);
     const heat = computeMockLinkHeat(link, circle, pages);
     return HttpResponse.json({
       linkId: params.linkId,
       score: heat.score,
       level: heat.level,
       trend: heat.trend,
+      circle,
       breakdown: heat.breakdown,
       updatedAt: new Date().toISOString(),
     });
@@ -5050,7 +5181,7 @@ export const handlers = [
       }));
       return {
         id: `sess-${documentId}-${idx}`,
-        linkId: mockLinks.find((l) => l.documentId === documentId)?.id ?? `link-${idx}`,
+        linkId: mockLinks.find((l) => linkIncludesDocument(l, documentId))?.id ?? `link-${idx}`,
         visitorId: v.visitorId,
         visitorEmail: v.visitorEmail,
         startedAt: v.lastSeenAt,

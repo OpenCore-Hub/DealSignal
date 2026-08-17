@@ -459,6 +459,8 @@ export interface RadarEvidencePack {
   accessRequest?: RadarEvidenceAccessRequest;
   keyPageTitles?: string[];
   topPages?: Array<{
+    documentId?: string;
+    documentTitle?: string;
     pageNumber: number;
     views: number;
     avgDurationSeconds: number;

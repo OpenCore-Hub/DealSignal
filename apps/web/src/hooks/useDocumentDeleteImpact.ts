@@ -3,6 +3,7 @@ import { api } from "@/lib/api";
 
 export type DocumentDeleteImpact = {
   activeLinkCount: number;
+  revokedLinkCount: number;
   dealRoomCount: number;
 };
 
@@ -12,13 +13,19 @@ export async function loadDocumentDeleteImpact(
 ): Promise<DocumentDeleteImpact> {
   try {
     const impact = await api.getDocumentDeleteImpact(documentId);
+    const revoked =
+      typeof impact.revoked_link_count === "number"
+        ? impact.revoked_link_count
+        : impact.active_link_count;
     return {
       activeLinkCount: impact.active_link_count,
+      revokedLinkCount: revoked,
       dealRoomCount: impact.deal_room_count,
     };
   } catch {
     return {
       activeLinkCount: fallbackLinkCount,
+      revokedLinkCount: fallbackLinkCount,
       dealRoomCount: 0,
     };
   }

@@ -5,6 +5,7 @@ import {
   dispatchDocumentsUploaded,
   isDocumentReadyForLibraryShare,
   isLibraryShareableUpload,
+  parseDocumentsUploadedDetail,
 } from "./documentsUploadedEvent";
 
 describe("documentsUploadedEvent", () => {
@@ -54,6 +55,23 @@ describe("documentsUploadedEvent", () => {
     expect(isDocumentReadyForLibraryShare("processing")).toBe(false);
     expect(isDocumentReadyForLibraryShare("uploading")).toBe(false);
     expect(isDocumentReadyForLibraryShare(undefined)).toBe(false);
+  });
+
+  it("parses single, array, and batch event payloads", () => {
+    const one = {
+      documentId: "d1",
+      documentTitle: "A",
+      status: "ready",
+    };
+    const two = {
+      documentId: "d2",
+      documentTitle: "B",
+      status: "processing",
+    };
+    expect(parseDocumentsUploadedDetail(one)).toEqual([one]);
+    expect(parseDocumentsUploadedDetail([one, two])).toEqual([one, two]);
+    expect(parseDocumentsUploadedDetail({ documents: [one, two] })).toEqual([one, two]);
+    expect(parseDocumentsUploadedDetail(undefined)).toEqual([]);
   });
 
   it("dispatches a CustomEvent with detail", () => {

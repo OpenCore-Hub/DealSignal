@@ -15,6 +15,7 @@ import {
 } from "@/components/insights/InsightsRangeControls";
 import { api, type InsightsOverview } from "@/lib/api";
 import { exportInsightsDailyVisitsCsv } from "@/lib/exportInsightsDailyVisits";
+import { shareKindFromLink } from "@/lib/shareKind";
 import { useTranslation } from "react-i18next";
 import type { i18n as I18nInstance, TFunction } from "i18next";
 import { useAsyncData } from "@/hooks/useAsyncData";
@@ -76,31 +77,36 @@ function isLocalViewerUrl(raw: string): boolean {
   }
 }
 
-function linkPrimaryLabel(link: InsightsOverview["topLinks"][number], fallback: string): string {
-  const title = link.title?.trim();
-  if (title) return title;
-  // Never promote localhost / raw host URLs as the primary label.
-  if (isLocalViewerUrl(link.shortUrl)) {
-    try {
-      const u = new URL(link.shortUrl, "http://local.invalid");
-      const path = u.pathname.replace(/\/$/, "");
-      return path || fallback;
-    } catch {
-      return fallback;
-    }
+/** Absolute share URL. Relative /l/token from the API is the short path. */
+function absoluteShareUrl(raw: string): string {
+  const url = raw.trim();
+  if (!url) return "";
+  if (/^https?:\/\//i.test(url)) return url;
+  if (url.startsWith("/") && typeof window !== "undefined" && window.location?.origin) {
+    return `${window.location.origin}${url}`;
   }
-  try {
-    const u = new URL(link.shortUrl);
-    const path = u.pathname.replace(/\/$/, "");
-    return path || fallback;
-  } catch {
-    return fallback;
+  return url;
+}
+
+function linkPrimaryLabel(
+  link: InsightsOverview["topLinks"][number],
+  fallback: string,
+): string {
+  const name = link.name?.trim() || link.title?.trim();
+  if (name) return name;
+  const shortUrl = link.shortUrl?.trim();
+  if (shareKindFromLink(link) === "document" && shortUrl) {
+    return absoluteShareUrl(shortUrl) || fallback;
   }
+  const docTitle = link.documentTitle?.trim();
+  if (docTitle) return docTitle;
+  return fallback;
 }
 
 function linkTooltip(link: InsightsOverview["topLinks"][number], label: string): string {
-  if (!link.shortUrl || isLocalViewerUrl(link.shortUrl)) return label;
-  return link.shortUrl;
+  if (!link.shortUrl) return label;
+  if (isLocalViewerUrl(link.shortUrl)) return label;
+  return absoluteShareUrl(link.shortUrl) || label;
 }
 
 function periodCompareLabel(
@@ -165,7 +171,8 @@ export function InsightsOverviewPage() {
   const rangeCtl = useInsightsRange(7);
   const range = rangeCtl.range;
   const [heatExplain, setHeatExplain] = useState<{
-    linkId: string;
+    kind: "link" | "document";
+    id: string;
     label: string;
   } | null>(null);
 
@@ -334,6 +341,9 @@ export function InsightsOverviewPage() {
               <p className="text-caption mt-1 text-muted-foreground">
                 {t("overview.scenarioPack.depthHint")}
               </p>
+              <p className="text-caption mt-1 text-muted-foreground">
+                {t("overview.scenarioPack.kpiWindowHint")}
+              </p>
             </div>
             {overview.scenarioPack.keyPageCategories &&
             overview.scenarioPack.keyPageCategories.length > 0 ? (
@@ -471,6 +481,7 @@ export function InsightsOverviewPage() {
           }
         />
       </div>
+      <p className="text-caption text-muted-foreground">{t("overview.kpiVisitorsHint")}</p>
 
       <div className="space-y-2">
         <p className="text-caption text-muted-foreground">{heatStripHint}</p>
@@ -531,7 +542,6 @@ export function InsightsOverviewPage() {
         </p>
       )}
 
-      <p className="text-caption text-muted-foreground">{t("overview.topsLifetimeHint")}</p>
       {(() => {
         const accessDays = overview.eventRetentionDays ?? 0;
         const pageViewDays = overview.pageViewRetentionDays ?? 0;
@@ -610,22 +620,21 @@ export function InsightsOverviewPage() {
                           </span>
                         ) : null}
                         <HeatBadge level={doc.heatLevel} />
-                        {doc.primaryLinkId ? (
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setHeatExplain({
-                                linkId: doc.primaryLinkId!,
-                                label: doc.title,
-                              });
-                            }}
-                          >
-                            {t("heatBreakdown.explain")}
-                          </Button>
-                        ) : null}
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setHeatExplain({
+                              kind: "document",
+                              id: doc.id,
+                              label: doc.title,
+                            });
+                          }}
+                        >
+                          {t("heatBreakdown.explain")}
+                        </Button>
                       </div>
                     </li>
                   );
@@ -668,11 +677,14 @@ export function InsightsOverviewPage() {
                     >
                       <button
                         type="button"
-                        className="min-w-0 flex-1 truncate text-left text-sm font-medium"
+                        className="flex min-w-0 flex-1 items-center text-left text-sm font-medium"
                         title={linkTooltip(link, label)}
                         onClick={handleClick}
                       >
-                        {label}
+                        <span className="truncate">{label}</span>
+                        <span className="ml-2 inline-flex rounded-md bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
+                          {t(`overview.shareKind.${shareKindFromLink(link)}`)}
+                        </span>
                       </button>
                       <div className="flex shrink-0 items-center gap-2">
                         <span className="text-caption tabular-nums text-muted-foreground">
@@ -690,7 +702,7 @@ export function InsightsOverviewPage() {
                           size="sm"
                           onClick={(e) => {
                             e.stopPropagation();
-                            setHeatExplain({ linkId: link.id, label });
+                            setHeatExplain({ kind: "link", id: link.id, label });
                           }}
                         >
                           {t("heatBreakdown.explain")}
@@ -710,8 +722,9 @@ export function InsightsOverviewPage() {
         onOpenChange={(open) => {
           if (!open) setHeatExplain(null);
         }}
-        linkId={heatExplain?.linkId ?? null}
-        linkLabel={heatExplain?.label ?? ""}
+        kind={heatExplain?.kind ?? "link"}
+        entityId={heatExplain?.id ?? null}
+        label={heatExplain?.label ?? ""}
       />
 
       <Card data-testid="deal-radar-cta">

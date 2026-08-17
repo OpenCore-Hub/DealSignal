@@ -37,6 +37,7 @@ import {
 import { VisitorAskExperienceField } from "./VisitorAskExperienceField";
 import { LinkAskPolicyQuotaPanel } from "./LinkAskPolicyQuotaPanel";
 import type { VisitorAskExperience } from "./visitorAskExperience";
+import { ndaPickerDisplayTitle } from "./ndaPicker";
 
 export type AccessTabLayout = "compact" | "sections";
 
@@ -802,15 +803,25 @@ export function AccessTab({
               </SelectTrigger>
               <SelectContent>
                 {ndaOptions.length === 0 ? (
-                  <SelectItem value="__empty__" disabled>
+                  <SelectItem
+                    value="__empty__"
+                    disabled
+                    label={t("accessRules.additionalProtections.ndaDocumentPlaceholder")}
+                  >
                     {t("accessRules.additionalProtections.ndaDocumentPlaceholder")}
                   </SelectItem>
                 ) : (
-                  ndaOptions.map((opt) => (
-                    <SelectItem key={opt.id} value={opt.id}>
-                      {opt.title}
-                    </SelectItem>
-                  ))
+                  ndaOptions.map((opt) => {
+                    const title = ndaPickerDisplayTitle(
+                      opt.title,
+                      t("accessRules.additionalProtections.ndaUntitled"),
+                    );
+                    return (
+                      <SelectItem key={opt.id} value={opt.id} label={title}>
+                        {title}
+                      </SelectItem>
+                    );
+                  })
                 )}
               </SelectContent>
             </Select>

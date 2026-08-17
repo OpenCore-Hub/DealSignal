@@ -305,4 +305,61 @@ describe("DealRoomFolderTree toolbar", () => {
     fireEvent.click(screen.getByRole("button", { name: /Board Minutes/i }));
     expect(onDocumentOpen).toHaveBeenCalledWith("doc-1");
   });
+
+  it("lets contributors select and upload without manage chrome", () => {
+    render(
+      <Wrapper>
+        <DealRoomFolderTree
+          roomId="room-1"
+          folders={folders}
+          folderDocs={folderDocs}
+          canContribute
+          canManage={false}
+          onFolderCreate={async () => {}}
+          onFolderRename={async () => {}}
+          onFolderDelete={async () => {}}
+          onDocumentRemove={async () => {}}
+          onFolderUpload={async () => {}}
+        />
+      </Wrapper>,
+    );
+
+    const toolbar = screen.getByTestId("folder-tree-toolbar");
+    expect(screen.getByLabelText(/search folders and files/i)).toBeInTheDocument();
+    expect(screen.queryByTestId("folder-tree-create-directory")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("folder-tree-bulk-lock")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("checkbox").length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Legal" }));
+    expect(screen.getByText(/2 selected/i)).toBeInTheDocument();
+    expect(screen.getByTestId("folder-tree-bulk-upload")).toBeInTheDocument();
+    expect(toolbar).toHaveTextContent("Batch upload");
+    expect(screen.queryByTestId("folder-tree-bulk-create-subfolder")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("folder-tree-bulk-delete-directory")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("folder-tree-bulk-remove-files")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("folder-tree-bulk-lock")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("folder-tree-bulk-unlock")).not.toBeInTheDocument();
+  });
+
+  it("keeps search for oversight without checkboxes or mutate actions", () => {
+    render(
+      <Wrapper>
+        <DealRoomFolderTree
+          roomId="room-1"
+          folders={folders}
+          folderDocs={folderDocs}
+          onFolderCreate={async () => {}}
+          onFolderRename={async () => {}}
+          onFolderDelete={async () => {}}
+          onDocumentRemove={async () => {}}
+          onFolderUpload={async () => {}}
+        />
+      </Wrapper>,
+    );
+
+    expect(screen.getByLabelText(/search folders and files/i)).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("folder-tree-create-directory")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("folder-tree-bulk-upload")).not.toBeInTheDocument();
+  });
 });

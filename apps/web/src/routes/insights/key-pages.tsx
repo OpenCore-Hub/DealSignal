@@ -17,6 +17,7 @@ import {
   type KeyPageSettings,
 } from "@/lib/api";
 import { keyPageRulesForCircle, keywordLangFromI18n } from "@/lib/heat/heatScore";
+import { KEY_PAGE_ENGAGED_MIN_SECONDS, isKeyPageEngaged } from "@/lib/heat/keyPageEngage";
 import {
   draftsFromExtras,
   editorCategoriesForCircle,
@@ -495,7 +496,9 @@ export function InsightsKeyPagesPage() {
                     <th className="px-2 py-2 font-medium">{t("keyPages.colDocument")}</th>
                     <th className="px-2 py-2 font-medium">{t("keyPages.colPage")}</th>
                     <th className="px-2 py-2 font-medium">{t("keyPages.colCategory")}</th>
-                    <th className="px-2 py-2 font-medium">{t("keyPages.colViews")}</th>
+                    <th className="px-2 py-2 font-medium" title={t("keyPages.colViewsHint")}>
+                      {t("keyPages.colViews")}
+                    </th>
                     <th className="px-2 py-2 font-medium">{t("keyPages.colVisitors")}</th>
                     <th className="px-2 py-2 font-medium">{t("keyPages.colAvgDwell")}</th>
                   </tr>
@@ -516,7 +519,12 @@ export function InsightsKeyPagesPage() {
                         </div>
                       </td>
                       <td className="px-2 py-2">{categoryLabel(t, p.category)}</td>
-                      <td className="px-2 py-2 tabular-nums">{p.views}</td>
+                      <td className="px-2 py-2 tabular-nums" title={t("keyPages.colViewsHint")}>
+                        {t("keyPages.colViewsSplit", {
+                          engaged: p.engagedViews ?? 0,
+                          total: p.views,
+                        })}
+                      </td>
                       <td className="px-2 py-2 tabular-nums">{p.uniqueVisitors}</td>
                       <td className="px-2 py-2 tabular-nums text-muted-foreground">
                         {t("keyPages.avgDwellValue", {
@@ -543,7 +551,12 @@ export function InsightsKeyPagesPage() {
                     <th className="px-2 py-2 font-medium">{t("keyPages.colDocument")}</th>
                     <th className="px-2 py-2 font-medium">{t("keyPages.colPage")}</th>
                     <th className="px-2 py-2 font-medium">{t("keyPages.colCategory")}</th>
-                    <th className="px-2 py-2 font-medium">{t("keyPages.colDwell")}</th>
+                    <th
+                      className="px-2 py-2 font-medium"
+                      title={t("keyPages.colDwellHint", { seconds: KEY_PAGE_ENGAGED_MIN_SECONDS })}
+                    >
+                      {t("keyPages.colDwell")}
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -576,7 +589,17 @@ export function InsightsKeyPagesPage() {
                       </td>
                       <td className="px-2 py-2">{categoryLabel(t, e.category)}</td>
                       <td className="px-2 py-2 tabular-nums text-muted-foreground">
-                        {t("keyPages.avgDwellValue", { seconds: e.durationSeconds })}
+                        <div>{t("keyPages.avgDwellValue", { seconds: e.durationSeconds })}</div>
+                        {!isKeyPageEngaged(e.durationSeconds) ? (
+                          <div
+                            className="text-caption"
+                            title={t("keyPages.eventSkimHint", {
+                              seconds: KEY_PAGE_ENGAGED_MIN_SECONDS,
+                            })}
+                          >
+                            {t("keyPages.eventSkim")}
+                          </div>
+                        ) : null}
                       </td>
                     </tr>
                   ))}

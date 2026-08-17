@@ -6,6 +6,7 @@ import type { DealRoomTab } from "@/hooks/useDealRoomTab";
  */
 export const DEAL_ROOM_TAB_ROLE: Record<DealRoomTab, string> = {
   documents: "prepare", // content readiness, upload, folder tree
+  members: "roster", // room collaborators; invite and role changes
   access: "gate", // access requests / allowlist remediates
   links: "outbound", // share links, access codes, delivery remediates
   knowledge: "reference", // knowledge base surface (UI shell)

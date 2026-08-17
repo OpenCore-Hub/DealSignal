@@ -67,6 +67,20 @@ describe("RiskAlertList", () => {
     );
   });
 
+  it("prefers metadata document_id for bundle page deep links", async () => {
+    await renderList([
+      makeAlert({
+        documentId: "doc-1",
+        metadata: { page_number: "16", document_id: "doc-pdf" },
+      }),
+    ]);
+    const link = screen.getByRole("link", { name: /Unidentified download/i });
+    expect(link).toHaveAttribute(
+      "href",
+      "/acme/documents/doc-pdf?tab=content&page=16",
+    );
+  });
+
   it("links to link detail when linkId is present", async () => {
     await renderList([makeAlert({ linkId: "link-1" })]);
     const link = screen.getByRole("link", { name: /Unidentified download/i });

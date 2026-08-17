@@ -26,6 +26,7 @@ const {
   listRoomAskMock,
   getDealRoomKnowledgeMock,
   getDealRoomAnalyticsMock,
+  getDealRoomMembersMock,
 } = vi.hoisted(() => ({
   getDealRoomByIdMock: vi.fn(),
   getDealRoomTemplatesMock: vi.fn(),
@@ -39,6 +40,7 @@ const {
   listRoomAskMock: vi.fn(),
   getDealRoomKnowledgeMock: vi.fn(),
   getDealRoomAnalyticsMock: vi.fn(),
+  getDealRoomMembersMock: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({
@@ -112,6 +114,15 @@ vi.mock("@/lib/api", () => ({
     }),
     listDealRoomKnowledgeArchives: vi.fn().mockResolvedValue({ items: [] }),
     getDealRoomKnowledgeArchive: vi.fn().mockRejectedValue(new Error("not found")),
+    getDealRoomAccessPolicy: vi.fn().mockResolvedValue({ data: null }),
+    getDealRoomAccessRequests: vi.fn().mockResolvedValue({ data: [] }),
+    getPendingLinkAccessRequests: vi.fn().mockResolvedValue({ data: [] }),
+    getBillingInfo: vi.fn().mockResolvedValue(null),
+    getDealRoomMembers: getDealRoomMembersMock,
+    inviteDealRoomMember: vi.fn(),
+    updateDealRoomMemberRole: vi.fn(),
+    removeDealRoomMember: vi.fn(),
+    listNDATemplates: vi.fn().mockResolvedValue({ data: [] }),
   },
 }));
 
@@ -170,6 +181,9 @@ const mockRoom: DealRoom = {
   folders: mockFolders,
   documents: mockFolderDocs,
   members: mockMembers,
+  isAdmin: true,
+  canContribute: true,
+  roomRole: "owner",
 };
 
 const mockTemplates: DealRoomTemplate[] = [
@@ -284,6 +298,7 @@ describe("DealRoomDetailPage", () => {
     listRoomAskMock.mockReset();
     getDealRoomKnowledgeMock.mockReset();
     getDealRoomAnalyticsMock.mockReset();
+    getDealRoomMembersMock.mockReset();
     getDealRoomTemplatesMock.mockResolvedValue({ data: mockTemplates });
     getDocumentsMock.mockResolvedValue({ data: mockWorkspaceDocs });
     getDealRoomLinksMock.mockResolvedValue({ data: [] });
@@ -302,6 +317,7 @@ describe("DealRoomDetailPage", () => {
       viewsOverTime: [],
       recentVisitors: [],
     });
+    getDealRoomMembersMock.mockResolvedValue({ data: mockMembers });
   });
 
   async function uploadViaPageFileInput(file: File) {
@@ -369,7 +385,34 @@ describe("DealRoomDetailPage", () => {
     expect(triggers[0]).toBe("deal-room-page-tab-knowledge");
   });
 
-  it("hides access and knowledge tabs for guests without fetching knowledge", async () => {
+  it("shows access for oversight viewers as a read-only tab and still shows knowledge", async () => {
+    vi.mocked(useWorkspaceAccess).mockReturnValue({
+      role: "admin",
+      loading: false,
+      canRead: true,
+      canWrite: true,
+      canManage: true,
+      isGuest: false,
+    });
+    getDealRoomByIdMock.mockResolvedValue({
+      ...mockRoom,
+      isAdmin: false,
+      canContribute: false,
+      oversight: true,
+    });
+    await renderPage("/acme/deal-rooms/room-1?tab=knowledge");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("deal-room-page-tabs")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("deal-room-page-tab-knowledge")).toBeInTheDocument();
+    expect(screen.getByTestId("deal-room-page-tab-access")).toBeInTheDocument();
+    expect(screen.getByTestId("deal-room-page-tab-documents")).toBeInTheDocument();
+    expect(screen.getByTestId("deal-room-page-tab-members")).toBeInTheDocument();
+    expect(screen.getByTestId("deal-room-oversight-banner")).toBeInTheDocument();
+  });
+
+  it("shows access for a workspace guest who is a room admin", async () => {
     vi.mocked(useWorkspaceAccess).mockReturnValue({
       role: "guest",
       loading: false,
@@ -378,17 +421,98 @@ describe("DealRoomDetailPage", () => {
       canManage: false,
       isGuest: true,
     });
-    getDealRoomByIdMock.mockResolvedValue(mockRoom);
-    await renderPage("/acme/deal-rooms/room-1?tab=knowledge");
+    getDealRoomByIdMock.mockResolvedValue({
+      ...mockRoom,
+      isAdmin: true,
+      canContribute: true,
+      oversight: false,
+    });
+    await renderPage("/acme/deal-rooms/room-1?tab=access");
 
     await waitFor(() => {
-      expect(screen.getByTestId("deal-room-page-tabs")).toBeInTheDocument();
+      expect(screen.getByTestId("deal-room-page-tab-access")).toBeInTheDocument();
     });
-    expect(screen.queryByTestId("deal-room-page-tab-knowledge")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("deal-room-page-tab-access")).not.toBeInTheDocument();
-    expect(screen.getByTestId("deal-room-page-tab-documents")).toBeInTheDocument();
-    expect(getDealRoomKnowledgeMock).not.toHaveBeenCalled();
-    expect(screen.queryByText("Failed to load knowledge base")).not.toBeInTheDocument();
+    expect(screen.getByTestId("deal-room-page-tab-knowledge")).toBeInTheDocument();
+  });
+
+  it("shows members as a page tab and lets room managers invite", async () => {
+    getDealRoomByIdMock.mockResolvedValue(mockRoom);
+    await renderPage("/acme/deal-rooms/room-1?tab=members");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("deal-room-members-tab")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("deal-room-page-tab-members")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /invite members/i })).toBeInTheDocument();
+    expect(await screen.findByText("John Doe")).toBeInTheDocument();
+  });
+
+  it("shows members read-only for oversight without invite", async () => {
+    getDealRoomByIdMock.mockResolvedValue({
+      ...mockRoom,
+      isAdmin: false,
+      canContribute: false,
+      oversight: true,
+      roomRole: "",
+    });
+    await renderPage("/acme/deal-rooms/room-1?tab=members");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("deal-room-members-tab")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("deal-room-page-tab-members")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /invite members/i })).not.toBeInTheDocument();
+    expect(await screen.findByText("John Doe")).toBeInTheDocument();
+  });
+
+  it("shows members for a room member without invite", async () => {
+    getDealRoomByIdMock.mockResolvedValue({
+      ...mockRoom,
+      isAdmin: false,
+      canContribute: true,
+      oversight: false,
+      roomRole: "member",
+    });
+    await renderPage("/acme/deal-rooms/room-1?tab=members");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("deal-room-members-tab")).toBeInTheDocument();
+    });
+    expect(screen.queryByRole("button", { name: /invite members/i })).not.toBeInTheDocument();
+  });
+
+  it("keeps settings as policy only and points to the members tab", async () => {
+    getDealRoomByIdMock.mockResolvedValue(mockRoom);
+    await renderPage("/acme/deal-rooms/room-1?tab=settings");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("deal-room-settings-tab")).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("deal-room-members-panel")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /invite members/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /open members/i })).toBeInTheDocument();
+  });
+
+  it("lets a room member upload from the folder tree without manage chrome", async () => {
+    getDealRoomByIdMock.mockResolvedValue({
+      ...mockRoom,
+      isAdmin: false,
+      canContribute: true,
+      oversight: false,
+      roomRole: "member",
+    });
+    await renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Series A Data Room" })).toBeInTheDocument();
+    });
+
+    expect(screen.queryByTestId("folder-tree-create-directory")).not.toBeInTheDocument();
+    const folderRow = screen.getByText("02 Financials").closest("[role='button']") as HTMLElement;
+    fireEvent.click(within(folderRow).getByRole("checkbox", { name: "02 Financials" }));
+    expect(await screen.findByTestId("folder-tree-bulk-upload")).toBeInTheDocument();
+    expect(screen.queryByTestId("folder-tree-bulk-create-subfolder")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("folder-tree-bulk-remove-files")).not.toBeInTheDocument();
   });
 
   it("migrates legacy participants tab to links", async () => {
@@ -447,7 +571,11 @@ describe("DealRoomDetailPage", () => {
     await uploadViaPageFileInput(file);
 
     await waitFor(() => {
-      expect(uploadDocumentMock).toHaveBeenCalledWith(file, undefined);
+      expect(uploadDocumentMock).toHaveBeenCalledWith(
+        file,
+        undefined,
+        expect.objectContaining({ onUploadProgress: expect.any(Function) }),
+      );
     });
     expect(addDealRoomDocumentMock).toHaveBeenCalledWith("room-1", {
       document_id: "doc_new",
@@ -611,7 +739,7 @@ describe("DealRoomDetailPage", () => {
 
     const popup = await waitFor(() => screen.getByTestId("upload-progress-popup"));
     await waitFor(() => {
-      expect(within(popup).getByText("95%")).toBeInTheDocument();
+      expect(within(popup).getByText("50%")).toBeInTheDocument();
     });
 
     await waitFor(

@@ -17,6 +17,7 @@ const headers: AccessLogCsvHeaders = [
   "时间",
   "访客邮箱",
   "访客姓名",
+  "文档ID",
   "页码",
   "停留秒数",
   "设备",
@@ -69,6 +70,7 @@ describe("exportLinkAccessLogsCsv", () => {
             id: "1",
             linkId: "link-1",
             visitorEmail: "a@example.com",
+            documentId: "doc-pdf",
             durationSeconds: 12,
             timestamp: "2026-08-05T00:00:00Z",
           },
@@ -96,5 +98,6 @@ describe("exportLinkAccessLogsCsv", () => {
     expect(click).toHaveBeenCalled();
     expect(revokeObjectURL).toHaveBeenCalledWith("blob:mock");
     expect(blobText.split("\n")[0]).toBe(headers.join(","));
+    expect(blobText.split("\n")[1]).toContain("doc-pdf");
   });
 });

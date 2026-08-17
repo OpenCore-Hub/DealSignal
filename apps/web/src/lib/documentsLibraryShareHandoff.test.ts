@@ -22,12 +22,12 @@ describe("documentsLibraryShareHandoff", () => {
       documentTitle: "Deck",
       documentStatus: "processing",
     });
-    expect(params.get("shareDocumentId")).toBe("doc-1");
-    expect(params.get("shareDocumentTitle")).toBe("Deck");
+    expect(params.getAll("shareDocumentId")).toEqual(["doc-1"]);
+    expect(params.getAll("shareDocumentTitle")).toEqual(["Deck"]);
     expect(params.get("shareDocumentStatus")).toBe("processing");
   });
 
-  it("builds library path for upload handoff", () => {
+  it("builds library path for a single-file upload handoff", () => {
     expect(
       documentsLibraryShareHandoffPath("acme", {
         documentId: "doc-1",
@@ -39,17 +39,52 @@ describe("documentsLibraryShareHandoff", () => {
     );
   });
 
-  it("reads and clears handoff params", () => {
+  it("builds library path for a multi-file upload handoff", () => {
+    expect(
+      documentsLibraryShareHandoffPath("acme", {
+        documentIds: ["doc-1", "doc-2"],
+        documentTitles: ["Deck", "Model.xlsx"],
+        documentStatus: "processing",
+      }),
+    ).toBe(
+      "/acme/documents?shareDocumentId=doc-1&shareDocumentId=doc-2&shareDocumentTitle=Deck&shareDocumentTitle=Model.xlsx&shareDocumentStatus=processing",
+    );
+  });
+
+  it("reads and clears single-id handoff params", () => {
     const raw = new URLSearchParams(
       "shareDocumentId=doc-1&shareDocumentTitle=Deck&shareDocumentStatus=processing&tab=all",
     );
     expect(readLibraryShareHandoff(raw)).toEqual({
-      documentId: "doc-1",
-      documentTitle: "Deck",
+      documentIds: ["doc-1"],
+      documentTitles: ["Deck"],
       documentStatus: "processing",
     });
     const cleared = clearLibraryShareHandoff(raw);
     expect(cleared?.toString()).toBe("tab=all");
     expect(clearLibraryShareHandoff(new URLSearchParams("tab=all"))).toBeNull();
+  });
+
+  it("reads repeated and comma-separated upload ids", () => {
+    const repeated = new URLSearchParams();
+    repeated.append("shareDocumentId", "doc-1");
+    repeated.append("shareDocumentId", "doc-2");
+    repeated.append("shareDocumentTitle", "A");
+    repeated.append("shareDocumentTitle", "B");
+    expect(readLibraryShareHandoff(repeated)).toEqual({
+      documentIds: ["doc-1", "doc-2"],
+      documentTitles: ["A", "B"],
+      documentStatus: "processing",
+    });
+
+    expect(
+      readLibraryShareHandoff(
+        new URLSearchParams("shareDocumentId=doc-1,doc-2&shareDocumentStatus=ready"),
+      ),
+    ).toEqual({
+      documentIds: ["doc-1", "doc-2"],
+      documentTitles: ["doc-1", "doc-2"],
+      documentStatus: "ready",
+    });
   });
 });

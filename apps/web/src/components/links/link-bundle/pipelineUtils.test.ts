@@ -3,8 +3,10 @@ import {
   buildConfigFromPreset,
   buildEditModeDocumentLists,
   validateBundleSecurityConfig,
+  resolveDraftDocumentRestore,
   resolveExpiryDaysFromExpiresAt,
   resolveMaxViewsFromAccessCount,
+  resolveShareDocumentReadiness,
 } from "./pipelineUtils";
 import { PRESET_TEMPLATES } from "../smart-link/levelConfig";
 import type { Document, DocumentSummary, PermissionPreset } from "@/types";
@@ -270,5 +272,86 @@ describe("buildEditModeDocumentLists", () => {
     expect(pickerDocuments.map((d) => d.id)).toEqual(["doc-lib"]);
     expect(selectedDocuments.map((d) => d.id)).toEqual(["doc-lib", "doc-nda"]);
     expect(selectedDocuments[1]?.title).toBe("Standard NDA");
+  });
+});
+
+describe("resolveDraftDocumentRestore", () => {
+  it("starts fresh without a warning when every draft document is gone", () => {
+    expect(
+      resolveDraftDocumentRestore({
+        draftIds: ["gone-1", "gone-2"],
+        availableIds: ["doc-lib"],
+      }),
+    ).toEqual({
+      restoreIds: [],
+      warnMissing: false,
+      missing: 2,
+      total: 2,
+      clearDraft: true,
+    });
+  });
+
+  it("warns only when a partial draft can still be restored", () => {
+    expect(
+      resolveDraftDocumentRestore({
+        draftIds: ["gone-1", "doc-lib"],
+        availableIds: ["doc-lib"],
+      }),
+    ).toEqual({
+      restoreIds: ["doc-lib"],
+      warnMissing: true,
+      missing: 1,
+      total: 2,
+      clearDraft: false,
+    });
+  });
+
+  it("discards the draft when the URL already picks documents", () => {
+    expect(
+      resolveDraftDocumentRestore({
+        draftIds: ["gone-1", "gone-2"],
+        availableIds: ["doc-lib"],
+        explicitDocumentIds: ["doc-lib"],
+      }),
+    ).toEqual({
+      restoreIds: [],
+      warnMissing: false,
+      missing: 0,
+      total: 2,
+      clearDraft: true,
+    });
+  });
+});
+
+describe("resolveShareDocumentReadiness", () => {
+  it("is ready only when every document is ready", () => {
+    expect(resolveShareDocumentReadiness([{ status: "ready" }])).toEqual({
+      ready: true,
+      processingCount: 0,
+      failedCount: 0,
+      reason: "ok",
+    });
+  });
+
+  it("blocks create while any document is still processing", () => {
+    expect(
+      resolveShareDocumentReadiness([{ status: "ready" }, { status: "processing" }]),
+    ).toEqual({
+      ready: false,
+      processingCount: 1,
+      failedCount: 0,
+      reason: "processing",
+    });
+  });
+
+  it("blocks create when any document failed", () => {
+    expect(
+      resolveShareDocumentReadiness([{ status: "processing" }, { status: "failed" }]),
+    ).toEqual({
+      ready: false,
+      processingCount: 1,
+      failedCount: 1,
+      reason: "failed",
+    });
   });
 });

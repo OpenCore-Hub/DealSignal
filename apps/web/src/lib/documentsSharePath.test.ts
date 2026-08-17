@@ -36,6 +36,12 @@ describe("documentsCreateLinkPath", () => {
       "/acme/links/new?documentId=doc+1",
     );
   });
+
+  it("appends each uploaded documentId for the create-link pipeline", () => {
+    expect(
+      documentsCreateLinkPath("acme", { documentIds: ["doc-1", "doc-2"] }),
+    ).toBe("/acme/links/new?documentId=doc-1&documentId=doc-2");
+  });
 });
 
 describe("sanitizeDocumentsLibrarySearchParams", () => {

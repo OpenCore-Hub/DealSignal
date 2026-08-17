@@ -60,9 +60,10 @@
     "tooLarge": "Logo 大小不能超过 5 MB"
   },
   "members": {
-    "title": "成员管理",
+    "title": "工作区成员",
+    "description": "这里是工作区角色，不是数据室角色。邀请进入某个数据室请到该室的「成员」页签。",
     "emailPlaceholder": "邮箱地址",
-    "roleLabel": "角色",
+    "roleLabel": "工作区角色",
     "invite": "邀请",
     "inviting": "邀请中...",
     "invited": "已向 {{email}} 发送邀请",
@@ -79,7 +80,7 @@
     "roleUpdateFailed": "角色更新失败，请重试。",
     "remove": "移除",
     "removeTitle": "移除成员",
-    "removeDescription": "将 {{email}} 移出此工作区？对方会立即失去访问权限。",
+    "removeDescription": "将 {{email}} 移出此工作区？对方将失去工作区访问权限。若其是某个数据室的唯一操作者，移除会被拒绝。",
     "removePendingDescription": "撤销发给 {{email}} 的邀请？对方将无法再用此链接加入。",
     "removing": "移除中...",
     "removed": "已移除 {{email}}",
@@ -89,17 +90,22 @@
     "cannotModifySelf": "无法在此更改自己的成员身份",
     "cannotManageMember": "你没有权限管理该成员",
     "seatsUsage": "内部席位",
-    "seatLimitReached": "已达到团队席位上限。访客可免费邀请，或升级方案以添加更多成员。",
+    "seatLimitReached": "已达到团队席位上限。工作区访客可免费邀请，或升级方案以添加更多成员。",
+    "roleHints": {
+      "admin": "可管理工作区设置并查看全部数据室。改房间仍需要该室角色。",
+      "member": "可创建数据室，且只能看到自己加入的房间。",
+      "guest": "免费的工作区访问，不计席。不是分享链接访客。"
+    },
     "status": {
       "pending": "待接受",
       "active": "已加入",
       "suspended": "已停用"
     },
     "roles": {
-      "owner": "所有者",
-      "admin": "管理员",
-      "member": "成员",
-      "guest": "访客"
+      "owner": "工作区所有者",
+      "admin": "工作区管理员",
+      "member": "工作区成员",
+      "guest": "工作区访客"
     }
   },
   "integrations": {

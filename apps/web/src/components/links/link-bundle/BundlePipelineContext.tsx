@@ -105,6 +105,7 @@ export type BundlePipelineAction =
   | { type: "SET_COPIED"; copied: boolean }
   | { type: "SET_DIRTY"; isDirty: boolean }
   | { type: "SET_SELECTED_DOCUMENTS"; documents: Document[] }
+  | { type: "PATCH_DOCUMENTS"; documents: Document[] }
   | { type: "CLEAR_PENDING_DRAFT_DOC_IDS" }
   | { type: "RESET" };
 
@@ -221,6 +222,19 @@ export function pipelineReducer(state: BundlePipelineState, action: BundlePipeli
 
     case "SET_SELECTED_DOCUMENTS":
       return { ...state, selectedDocuments: action.documents };
+
+    case "PATCH_DOCUMENTS": {
+      const byId = new Map(action.documents.map((doc) => [doc.id, doc]));
+      const merge = (doc: Document) => {
+        const next = byId.get(doc.id);
+        return next ? { ...doc, ...next } : doc;
+      };
+      return {
+        ...state,
+        documents: state.documents.map(merge),
+        selectedDocuments: state.selectedDocuments.map(merge),
+      };
+    }
 
     case "CLEAR_PENDING_DRAFT_DOC_IDS":
       return { ...state, pendingDraftDocIds: [] };

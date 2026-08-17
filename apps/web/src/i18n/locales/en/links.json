@@ -11,6 +11,7 @@
   "table": {
     "link": "Link",
     "document": "Document",
+    "bundleDocument": "{{title}} +{{count}}",
     "accessCount": "Visits",
     "accessCountValue": "{{count}} visits",
     "avgDuration": "Avg",
@@ -48,6 +49,7 @@
       "timestamp": "timestamp",
       "visitorEmail": "visitor_email",
       "visitorName": "visitor_name",
+      "documentId": "document_id",
       "pageNumber": "page_number",
       "durationSeconds": "duration_seconds",
       "device": "device",
@@ -77,13 +79,16 @@
     "copySuccess": "Link copied",
     "totalVisits": "Total Visits",
     "uniqueVisitors": "Unique Visitors",
+    "uniqueVisitorsHint": "Distinct visitor IDs. Workspace members are excluded, same as Deal Radar and heat. Total visits still follow the share access count.",
     "avgDuration": "Avg. time",
     "lastVisit": "Last Visit",
     "permissionConfig": "Permission Settings",
     "expiresAt": "Expires {{time}}",
     "trendTitle": "Visit trend",
     "pageDurationTitle": "Time on Page",
+    "pageDurationHint": "Average time per page, excluding workspace members (same as avg. time and Deal Radar).",
     "pageLabel": "Page {{page}}",
+    "pageOnDocument": "{{title}} · p.{{page}}",
     "pageAxisTitle": "Page",
     "durationAxisTitle": "Duration (s)",
     "avgDurationTooltip": "Avg. duration",
@@ -94,6 +99,7 @@
   },
   "timeline": {
     "viewedPage": "{{visitor}} viewed page {{page}}",
+    "viewedPageOnDocument": "{{visitor}} viewed {{title}}, page {{page}}",
     "viewedLink": "{{visitor}} visited link",
     "description": "Stayed {{duration}} · {{device}} · {{location}}"
   },
@@ -246,7 +252,13 @@
       "sourceTypeXLSX": "XLSX",
       "moveUp": "Move up",
       "moveDown": "Move down",
-      "remove": "Remove"
+      "remove": "Remove",
+      "status": {
+        "processing": "Processing",
+        "uploading": "Uploading",
+        "failed": "Failed",
+        "archived": "Archived"
+      }
     },
     "review": {
       "titleCreate": "Review & Create",
@@ -255,6 +267,8 @@
       "documentsSection": "Link Bundle Contents",
       "securitySection": "Security Configuration",
       "createButton": "Create Link Bundle",
+      "notReady": "Wait until every selected document finishes processing.",
+      "ingestionFailed": "Remove failed documents before creating the link.",
       "saveButton": "Save",
       "submitting": "Saving...",
       "successCreate": "Link bundle created!",

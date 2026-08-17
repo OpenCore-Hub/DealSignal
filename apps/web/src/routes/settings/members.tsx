@@ -90,8 +90,9 @@ export function SettingsMembersPage() {
     () => (members ?? []).find((member) => member.email.toLowerCase() === selfEmail),
     [members, selfEmail],
   );
-  const actorRole = actor?.role ?? (selfEmail ? undefined : "owner");
+  const actorRole = actor?.role;
   const inviteRoles = assignableInviteRoles(actorRole);
+  const canInviteAnyone = inviteRoles.length > 0;
   const inviteBlockedBySeats = billing
     ? inviteRoleBlockedBySeats(role, billing.seatsUsed, billing.seatsLimit)
     : false;
@@ -204,59 +205,70 @@ export function SettingsMembersPage() {
   return (
     <div className="space-y-6">
       <Card>
-        <CardHeader>
+        <CardHeader className="space-y-1">
           <CardTitle className="text-h2 flex items-center gap-2">
             <Users size={20} />
             {t("members.title")}
           </CardTitle>
+          <p className="text-body text-muted-foreground" data-testid="workspace-members-plane-hint">
+            {t("members.description")}
+          </p>
         </CardHeader>
         <CardContent className="space-y-4">
           {billing && !billingLoading ? (
-            <div className="max-w-md" data-testid="members-seat-usage">
+            <div className="max-w-md space-y-1" data-testid="members-seat-usage">
               <UsageBar
                 label={t("members.seatsUsage")}
                 current={billing.seatsUsed}
                 max={billing.seatsLimit}
               />
+              <p className="text-caption invisible select-none" aria-hidden="true">
+                &nbsp;
+              </p>
             </div>
           ) : null}
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-            <Input
-              type="email"
-              autoComplete="email"
-              placeholder={t("members.emailPlaceholder")}
-              className="max-w-sm"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  void handleInvite();
-                }
-              }}
-              aria-label={t("members.emailPlaceholder")}
-            />
-            <Select value={role} onValueChange={(value) => setRole(value as InviteRole)}>
-              <SelectTrigger className="w-[140px]" aria-label={t("members.roleLabel")}>
-                <SelectValue>{t(`members.roles.${role}`)}</SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                {inviteRoles.map((inviteRole) => (
-                  <SelectItem key={inviteRole} value={inviteRole}>
-                    {t(`members.roles.${inviteRole}`)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Button onClick={() => void handleInvite()} disabled={!canInvite}>
-              <EnvelopeSimple size={16} className="mr-1.5" />
-              {inviting ? t("members.inviting") : t("members.invite")}
-            </Button>
-          </div>
-          {inviteBlockedBySeats ? (
-            <p className="text-xs text-muted-foreground" data-testid="members-seat-limit-hint">
-              {t("members.seatLimitReached")}
-            </p>
+          {canInviteAnyone ? (
+            <div className="space-y-2" data-testid="workspace-members-invite">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                <Input
+                  type="email"
+                  autoComplete="email"
+                  placeholder={t("members.emailPlaceholder")}
+                  className="max-w-sm"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      void handleInvite();
+                    }
+                  }}
+                  aria-label={t("members.emailPlaceholder")}
+                />
+                <Select value={role} onValueChange={(value) => setRole(value as InviteRole)}>
+                  <SelectTrigger className="w-[200px]" aria-label={t("members.roleLabel")}>
+                    <SelectValue>{t(`members.roles.${role}`)}</SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {inviteRoles.map((inviteRole) => (
+                      <SelectItem key={inviteRole} value={inviteRole}>
+                        {t(`members.roles.${inviteRole}`)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button onClick={() => void handleInvite()} disabled={!canInvite}>
+                  <EnvelopeSimple size={16} className="mr-1.5" />
+                  {inviting ? t("members.inviting") : t("members.invite")}
+                </Button>
+              </div>
+              <p className="text-caption text-muted-foreground">{t(`members.roleHints.${role}`)}</p>
+              {inviteBlockedBySeats ? (
+                <p className="text-xs text-muted-foreground" data-testid="members-seat-limit-hint">
+                  {t("members.seatLimitReached")}
+                </p>
+              ) : null}
+            </div>
           ) : null}
 
           {error ? (
@@ -336,7 +348,7 @@ export function SettingsMembersPage() {
             </DialogDescription>
           </DialogHeader>
           <Select value={editRole} onValueChange={(value) => setEditRole(value as InviteRole)}>
-            <SelectTrigger aria-label={t("members.roleLabel")}>
+            <SelectTrigger className="w-full" aria-label={t("members.roleLabel")}>
               <SelectValue>{t(`members.roles.${editRole}`)}</SelectValue>
             </SelectTrigger>
             <SelectContent>

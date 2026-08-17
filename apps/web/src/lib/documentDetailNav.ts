@@ -14,6 +14,41 @@ export function parsePageFromMetadata(
   return null;
 }
 
+/** Attributed document for bundle page deep links; empty when metadata has none. */
+export function parseDocumentIdFromMetadata(
+  metadata?: Record<string, string> | null,
+): string | null {
+  if (!metadata) return null;
+  for (const key of ["document_id", "documentId"]) {
+    const id = metadata[key]?.trim();
+    if (id) return id;
+  }
+  return null;
+}
+
+/** Share/signal evidence path: attributed document + page, else primary, else link. */
+export function documentEvidencePath(
+  workspaceSlug: string,
+  opts: {
+    documentId?: string;
+    linkId?: string;
+    metadata?: Record<string, string> | null;
+  },
+): string | undefined {
+  const documentId = parseDocumentIdFromMetadata(opts.metadata) || opts.documentId?.trim();
+  if (documentId) {
+    const page = parsePageFromMetadata(opts.metadata);
+    return documentDetailPath(
+      workspaceSlug,
+      documentId,
+      page ? { tab: "content", page } : { tab: "analytics" },
+    );
+  }
+  const linkId = opts.linkId?.trim();
+  if (linkId) return `/${workspaceSlug}/links/${linkId}`;
+  return undefined;
+}
+
 /** Legacy `ai` tab renamed to reading insights. */
 const TAB_ALIASES: Record<string, DocumentDetailTab> = {
   ai: "insights",

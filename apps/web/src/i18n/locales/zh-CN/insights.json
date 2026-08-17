@@ -32,6 +32,7 @@
     "trendCaptionCustom": "{{from}} – {{to}} · {{opens}} 次打开 · {{visitors}} 位独立访客（UTC）",
     "kpiOpens": "链接打开",
     "kpiVisitors": "独立访客",
+    "kpiVisitorsHint": "按 visitor ID 去重。已排除工作区成员，与交易雷达和热力一致。",
     "kpiMedianDwell": "中位停留",
     "kpiMedianDwellValue": "{{seconds}} 秒",
     "kpiMedianDwellHint": "页面浏览时长（UTC 窗口）",
@@ -63,13 +64,17 @@
     "exportColDate": "date",
     "exportColOpens": "opens",
     "exportColVisitors": "unique_visitors",
-    "topsLifetimeHint": "下方排行按终身热度，不受上方趋势时间范围限制。",
     "topDocuments": "热门文档",
     "topDocumentsEmptyTitle": "暂无文档参与数据",
-    "topDocumentsEmptyDescription": "分享文档链接后将出现排行。",
+    "topDocumentsEmptyDescription": "访客实际阅读某份文件的页面后才会出现排行，仅打开分享链接不会计入。",
     "topLinks": "热门链接",
     "topLinksEmptyTitle": "暂无分享链接",
     "topLinksEmptyDescription": "创建分享链接后可查看热度排行。",
+    "shareKind": {
+      "room": "数据室",
+      "bundle": "数据包",
+      "document": "文档"
+    },
     "radarCtaTitle": "跟进行动在交易雷达",
     "radarCtaDescription": "洞察是分析中心——趋势、会话与页面深度。该跟谁联系，请到交易雷达处理。",
     "radarSignalsCount_one": "交易雷达有 {{count}} 条待处理信号",
@@ -87,6 +92,7 @@
       "depthLite": "轻量深度",
       "depthBase": "基础深度",
       "depthHint": "仍是同一套六个交易雷达产品——场景只改排序、文案与 SLA，不是独立引擎。",
+      "kpiWindowHint": "关键页浏览与高热链接用终身热力；转发信号跟所选区间；未清跟进是交易雷达待办。",
       "keyPages": "关键页类别",
       "unknownScenario": "场景焦点",
       "unknownCategory": "类别",
@@ -108,10 +114,21 @@
   "pages": {
     "title": "页面参与度",
     "scopeHint": "含文档库与数据室文档（协议文档在协议库单独管理）。",
+    "actorHint": "页面浏览、会话与访客已排除工作区成员（与交易雷达和热力一致）。",
     "selectPlaceholder": "选择文档",
     "searchPlaceholder": "搜索文档…",
+    "searchPlaceholderDealRoom": "搜索文件…",
     "noSearchResults": "无匹配文档",
+    "noRoomDocuments": "该数据室暂无文件",
     "untitledDocument": "未命名文档",
+    "scopeFilter": "来源",
+    "scopeLibrary": "文档",
+    "scopeDealRoom": "数据室",
+    "roomFilter": "数据室",
+    "roomAll": "全部数据室",
+    "roomAllShort": "全部",
+    "roomSearchPlaceholder": "筛选数据室…",
+    "noRoomMatches": "无匹配数据室",
     "categoryDealRoom": "数据室",
     "emptyTitle": "暂无文档",
     "emptyDescription": "上传文档后即可查看页面参与度分析。",
@@ -245,9 +262,14 @@
     "colPage": "页面",
     "colCategory": "类别",
     "colViews": "浏览",
+    "colViewsSplit": "{{engaged}}/{{total}}",
+    "colViewsHint": "有效（≥3 秒）/ 标题命中。扫一眼仍留在审计里，不计分。",
     "colVisitors": "访客",
     "colAvgDwell": "平均停留",
     "colDwell": "停留",
+    "colDwellHint": "掠读（<{{seconds}} 秒）仍留在审计里，不计分。",
+    "eventSkim": "掠读",
+    "eventSkimHint": "标题命中，但停留不足 {{seconds}} 秒 — 计入审计，不计分。",
     "pageNumber": "第 {{page}} 页",
     "avgDwellValue": "{{seconds}} 秒",
     "categories": {
@@ -307,7 +329,12 @@
   },
   "heatBreakdown": {
     "title": "热度分档说明",
-    "subtitle": "创始人圈层 · 参与度因子",
+    "subtitle": "{{circle}} · 参与度因子",
+    "subtitleDocument": "{{circle}} · 本文件阅读",
+    "circleFallback": "热度",
+    "contributingLinks": "贡献了页面浏览的分享",
+    "contributingLinkViews_one": "{{count}} 次页面浏览",
+    "contributingLinkViews_other": "{{count}} 次页面浏览",
     "explain": "解释",
     "score": "{{score}} 分",
     "trend": {
@@ -315,6 +342,12 @@
       "falling": "下降",
       "stable": "平稳"
     },
+    "overlayTitle": "本文件增量",
+    "keyPagesTitle": "关键页证据",
+    "keyPagesEngaged": "{{total}} 次标题命中中，{{engaged}} 次停留 ≥{{seconds}} 秒",
+    "keyPagesSkim": "标题命中但停留不足 {{seconds}} 秒，不计分",
+    "keyPageRow": "第 {{page}} 页 · {{title}}",
+    "keyPageRowViews": "{{engaged}}/{{total}}",
     "factors": {
       "opens": "打开次数",
       "revisits": "回访",
@@ -322,11 +355,21 @@
       "keyPageViews": "关键页",
       "forwardSignals": "检测到的转发",
       "downloads": "下载",
-      "bouncePenalty": "跳出惩罚"
+      "bouncePenalty": "跳出惩罚",
+      "readingDepth": "阅读深度",
+      "qaCitations": "问答引用",
+      "crossDomain": "跨域关注"
     },
     "factorHints": {
       "forwardSignals": "统计已确认的转发标记（非独立访客推算）。",
-      "bouncePenalty": "访客打开链接后未浏览任何页面。"
+      "forwardSignalsDocument": "检测到的转发记在分享链接上，不会复制到本文件。",
+      "bouncePenalty": "访客打开链接后未浏览任何页面。",
+      "bouncePenaltyDocument": "访客在本文件上只看了很短的一页。",
+      "keyPageViewsDocument": "本文件标题命中且停留至少 3 秒的页面。扫一眼的命中列在下方，不计分。",
+      "keyPageViewsLink": "本分享标题命中且停留至少 3 秒的页面。扫一眼的命中列在下方，不计分。",
+      "readingDepth": "一次阅读会话中覆盖了本文件多少页。",
+      "qaCitations": "引用了本文件的访客提问，不会把整条分享的提问摊到每个文件。",
+      "crossDomain": "读过本文件的访客邮箱域名数。不会从域名推断公司名。"
     }
   }
 }

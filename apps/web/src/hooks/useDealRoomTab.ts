@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router";
 
 export type DealRoomTab =
   | "documents"
+  | "members"
   | "access"
   | "links"
   | "knowledge"
@@ -14,6 +15,7 @@ export type DealRoomTab =
 /** Horizontal page tabs under the deal-room header (not left-nav-only sections). */
 export const DEAL_ROOM_PAGE_TABS = [
   "documents",
+  "members",
   "access",
   "links",
   "analytics",
@@ -22,17 +24,22 @@ export const DEAL_ROOM_PAGE_TABS = [
 
 export type DealRoomPageTab = (typeof DEAL_ROOM_PAGE_TABS)[number];
 
-/** Access policy + knowledge desk require workspace write (not guest). */
-const GUEST_HIDDEN_PAGE_TABS: ReadonlySet<DealRoomPageTab> = new Set(["access", "knowledge"]);
-
-export function visibleDealRoomPageTabs(canWrite: boolean): DealRoomPageTab[] {
-  if (canWrite) return [...DEAL_ROOM_PAGE_TABS];
-  return DEAL_ROOM_PAGE_TABS.filter((tab) => !GUEST_HIDDEN_PAGE_TABS.has(tab));
+export function visibleDealRoomPageTabs(caps: {
+  canManage: boolean;
+  canViewKnowledge: boolean;
+  canViewAccess?: boolean;
+}): DealRoomPageTab[] {
+  return DEAL_ROOM_PAGE_TABS.filter((tab) => {
+    if (tab === "access") return caps.canViewAccess ?? caps.canManage;
+    if (tab === "knowledge") return caps.canViewKnowledge;
+    return true;
+  });
 }
 
 /** i18n keys under `dealRooms` for each horizontal page tab. */
 export const DEAL_ROOM_PAGE_TAB_LABEL_KEY: Record<DealRoomPageTab, string> = {
   documents: "pageTabs.resources",
+  members: "pageTabs.members",
   access: "pageTabs.access",
   links: "pageTabs.links",
   analytics: "pageTabs.analytics",
@@ -41,6 +48,7 @@ export const DEAL_ROOM_PAGE_TAB_LABEL_KEY: Record<DealRoomPageTab, string> = {
 
 const VALID_TABS: DealRoomTab[] = [
   "documents",
+  "members",
   "access",
   "links",
   "knowledge",

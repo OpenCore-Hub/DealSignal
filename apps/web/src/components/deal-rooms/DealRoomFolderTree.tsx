@@ -47,7 +47,12 @@ interface DealRoomFolderTreeProps {
   folders: DealRoomFolder[];
   folderDocs: DealRoomFolderDocs[];
   roomDocuments?: DealRoomDocumentItem[];
+  /** @deprecated Prefer canManage. Kept so existing callers keep working. */
   isAdmin?: boolean;
+  /** Folder CRUD, locks, and removing documents from the room. */
+  canManage?: boolean;
+  /** Upload into an existing folder. Falls back to canManage/isAdmin. */
+  canContribute?: boolean;
   /** When provided, the tree works as a pure folder navigator without inline documents. */
   selectedFolderPath?: string | null;
   onSelectFolder?: (path: string | null) => void;
@@ -101,7 +106,9 @@ export function DealRoomFolderTree({
   roomId,
   folders,
   folderDocs,
-  isAdmin = true,
+  isAdmin = false,
+  canManage,
+  canContribute,
   selectedFolderPath,
   onSelectFolder,
   onFolderCreate,
@@ -115,6 +122,9 @@ export function DealRoomFolderTree({
   const { t } = useTranslation("dealRooms");
   const { t: td } = useTranslation("documents");
   void _onFolderRename; // retained for caller compatibility; rename moved off row menus
+  const manage = canManage ?? isAdmin;
+  const contribute = canContribute ?? manage;
+  const canSelect = contribute || manage;
 
   const isNavigator = typeof onSelectFolder === "function";
 
@@ -488,7 +498,7 @@ export function DealRoomFolderTree({
           )}
         >
           <div className="flex min-w-0 items-center gap-3">
-            {isAdmin && (
+            {canSelect && (
               <SelectionCheckbox
                 checked={folderCheckState === "checked"}
                 indeterminate={folderCheckState === "indeterminate"}
@@ -541,7 +551,7 @@ export function DealRoomFolderTree({
                     key={doc.id}
                     className="group flex items-center gap-3 rounded-md px-2.5 py-1.5 text-sm text-foreground hover:bg-muted/40"
                   >
-                    {isAdmin && (
+                    {canSelect && (
                       <SelectionCheckbox
                         checked={selection.has(docSelectionKey(doc.document_id))}
                         onCheckedChange={(checked) =>
@@ -593,7 +603,7 @@ export function DealRoomFolderTree({
 
   const showNoMatches = folders.length > 0 && roots.length === 0 && filtersActive;
   const toolbarHost = useContext(ResourcesToolbarHostContext);
-  const showToolbar = isAdmin || folders.length > 0;
+  const showToolbar = manage || contribute || folders.length > 0;
 
   const toolbar = showToolbar ? (
       <div className="flex flex-wrap items-center gap-2" data-testid="folder-tree-toolbar">
@@ -615,7 +625,7 @@ export function DealRoomFolderTree({
                 />
               </div>
             ) : null}
-            {isAdmin ? (
+            {manage ? (
               <>
                 <Button
                   type="button"
@@ -660,7 +670,7 @@ export function DealRoomFolderTree({
             <span className="text-sm font-medium text-foreground">
               {t("folders.toolbar.selected", { count: selection.size })}
             </span>
-            {isAdmin ? (
+            {manage ? (
               <>
                 <Button
                   size="sm"
@@ -682,32 +692,36 @@ export function DealRoomFolderTree({
                   <Trash size={14} className="mr-1.5" />
                   {t("folders.toolbar.deleteDirectory")}
                 </Button>
-                {onFolderUpload ? (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={handleBulkUpload}
-                    disabled={bulkLoading || !singleFolderTarget || singleFolderLocked}
-                    data-testid="folder-tree-bulk-upload"
-                  >
-                    <UploadSimple size={14} className="mr-1.5" />
-                    {t("folders.toolbar.batchUpload")}
-                  </Button>
-                ) : null}
-                {onDocumentRemove ? (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => void handleBulkRemoveDocuments()}
-                    disabled={
-                      bulkLoading || selectionParsed.documentIds.length === 0
-                    }
-                    data-testid="folder-tree-bulk-remove-files"
-                  >
-                    <FileX size={14} className="mr-1.5" />
-                    {t("folders.toolbar.removeFiles")}
-                  </Button>
-                ) : null}
+              </>
+            ) : null}
+            {contribute && onFolderUpload ? (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleBulkUpload}
+                disabled={bulkLoading || !singleFolderTarget || singleFolderLocked}
+                data-testid="folder-tree-bulk-upload"
+              >
+                <UploadSimple size={14} className="mr-1.5" />
+                {t("folders.toolbar.batchUpload")}
+              </Button>
+            ) : null}
+            {manage && onDocumentRemove ? (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => void handleBulkRemoveDocuments()}
+                disabled={
+                  bulkLoading || selectionParsed.documentIds.length === 0
+                }
+                data-testid="folder-tree-bulk-remove-files"
+              >
+                <FileX size={14} className="mr-1.5" />
+                {t("folders.toolbar.removeFiles")}
+              </Button>
+            ) : null}
+            {manage ? (
+              <>
                 <Button
                   size="sm"
                   variant="outline"
@@ -732,7 +746,7 @@ export function DealRoomFolderTree({
                 </Button>
               </>
             ) : null}
-            {onFolderUpload ? (
+            {contribute && onFolderUpload ? (
               <input
                 ref={bulkUploadInputRef}
                 type="file"

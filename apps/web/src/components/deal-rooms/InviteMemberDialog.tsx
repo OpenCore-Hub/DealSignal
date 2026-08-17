@@ -24,6 +24,7 @@ import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { grantableRoomRoles } from "@/lib/dealRoomCapabilities";
 import type { DealRoomMemberRole } from "@/types";
 import {
   RoomNdaAgreementPicker,
@@ -32,6 +33,7 @@ import {
 
 interface InviteMemberDialogProps {
   roomId: string;
+  actorRoomRole?: DealRoomMemberRole | "";
   ndaEnabled?: boolean;
   ndaTemplateId?: string;
   ndaDocumentId?: string;
@@ -43,6 +45,7 @@ const isValidEmail = (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
 
 export function InviteMemberDialog({
   roomId,
+  actorRoomRole,
   ndaEnabled: ndaEnabledProp,
   ndaTemplateId: ndaTemplateIdProp,
   ndaDocumentId: ndaDocumentIdProp,
@@ -53,7 +56,8 @@ export function InviteMemberDialog({
   const { t: tc } = useTranslation("common");
   const [open, setOpen] = useState(false);
   const [emails, setEmails] = useState<string[]>([""]);
-  const [role, setRole] = useState<DealRoomMemberRole>("viewer");
+  const inviteRoles = grantableRoomRoles(actorRoomRole);
+  const [role, setRole] = useState<DealRoomMemberRole>("guest");
   const [submitting, setSubmitting] = useState(false);
   const [showErrors, setShowErrors] = useState(false);
   const [touched, setTouched] = useState<Set<number>>(new Set());
@@ -62,10 +66,22 @@ export function InviteMemberDialog({
     ndaTemplateId: ndaTemplateIdProp ?? "",
     ndaDocumentId: ndaDocumentIdProp ?? "",
   });
+  const ndaTouchedRef = useRef(false);
   const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!open) return;
+    const roles = grantableRoomRoles(actorRoomRole);
+    if (roles.length === 0) return;
+    setRole((current) =>
+      roles.includes(current) ? current : roles.includes("guest") ? "guest" : roles[0],
+    );
+  }, [actorRoomRole]);
+
+  useEffect(() => {
+    if (!open) {
+      ndaTouchedRef.current = false;
+      return;
+    }
     setNdaEnabled(Boolean(ndaEnabledProp));
     setNdaSelection({
       ndaTemplateId: ndaTemplateIdProp ?? "",
@@ -73,7 +89,7 @@ export function InviteMemberDialog({
     });
     let cancelled = false;
     void api.getDealRoomById(roomId).then((room) => {
-      if (cancelled) return;
+      if (cancelled || ndaTouchedRef.current) return;
       setNdaEnabled(Boolean(room.ndaEnabled));
       setNdaSelection({
         ndaTemplateId: room.ndaTemplateId ?? "",
@@ -138,6 +154,10 @@ export function InviteMemberDialog({
       return;
     }
 
+    if (inviteRoles.length === 0 || !inviteRoles.includes(role)) {
+      return;
+    }
+
     setSubmitting(true);
     try {
       if (ndaEnabled && (ndaSelection.ndaTemplateId || ndaSelection.ndaDocumentId)) {
@@ -161,7 +181,7 @@ export function InviteMemberDialog({
           toast.success(t("members.invitedCount", { count: succeeded }));
         }
         setEmails([""]);
-        setRole("viewer");
+        setRole("guest");
         setOpen(false);
         onInvited();
       } else {
@@ -281,7 +301,12 @@ export function InviteMemberDialog({
           <div className="space-y-2">
             <Label htmlFor="member-role">{t("members.role")}</Label>
             <Select value={role} onValueChange={(v) => setRole(v as DealRoomMemberRole)}>
-              <SelectTrigger id="member-role" className="w-full">
+              <SelectTrigger
+                id="member-role"
+                className="w-full"
+                aria-label={t("members.role")}
+                data-testid="deal-room-invite-role"
+              >
                 <SelectValue />
               </SelectTrigger>
               <SelectContent
@@ -290,19 +315,21 @@ export function InviteMemberDialog({
                 alignItemWithTrigger={false}
                 collisionAvoidance={{ side: "none", align: "none" }}
               >
-                <SelectItem value="viewer" label={t("members.roles.viewer")}>
-                  {t("members.roles.viewer")}
-                </SelectItem>
-                <SelectItem value="member" label={t("members.roles.member")}>
-                  {t("members.roles.member")}
-                </SelectItem>
+                {inviteRoles.map((inviteRole) => (
+                  <SelectItem key={inviteRole} value={inviteRole} label={t(`members.roles.${inviteRole}`)}>
+                    {t(`members.roles.${inviteRole}`)}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
           {ndaEnabled ? (
             <RoomNdaAgreementPicker
               value={ndaSelection}
-              onChange={setNdaSelection}
+              onChange={(next) => {
+                ndaTouchedRef.current = true;
+                setNdaSelection(next);
+              }}
               disabled={submitting}
               showError={showErrors}
             />
@@ -315,7 +342,7 @@ export function InviteMemberDialog({
           <Button
             type="button"
             onClick={handleInvite}
-            disabled={!hasValidEmail || submitting || ndaMissing}
+            disabled={!hasValidEmail || submitting || ndaMissing || inviteRoles.length === 0}
           >
             {submitting ? t("members.inviting") : t("detail.invite")}
           </Button>

@@ -98,6 +98,7 @@ export function DealRoomAnalyticsTab({ roomId, links }: DealRoomAnalyticsTabProp
           icon={<Users size={18} />}
         />
       </div>
+      <p className="text-caption text-muted-foreground">{t("analytics.actorHint")}</p>
 
       <TrendChart
         title={t("analytics.trend")}

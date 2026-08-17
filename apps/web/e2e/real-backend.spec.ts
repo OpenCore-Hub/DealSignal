@@ -203,8 +203,11 @@ test.describe("real backend P0 flow", () => {
     await expect(page.getByText("sample.pdf")).toBeVisible();
     await page.getByRole("button", { name: "Upload now" }).click();
 
-    // The uploader redirects to the documents list on completion.
-    await expect(page).toHaveURL(new RegExp(`/${seed.workspaceSlug}/documents`), { timeout: 30000 });
+    // The uploader enters the create-link pipeline with the uploaded file pre-selected.
+    await expect(page).toHaveURL(
+      new RegExp(`/${seed.workspaceSlug}/links/new\\?documentId=`),
+      { timeout: 45000 },
+    );
     await expect(page.getByText("sample.pdf").first()).toBeVisible({ timeout: 30000 });
   });
 

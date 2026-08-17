@@ -28,7 +28,7 @@ async function renderTab() {
   return render(
     <MemoryRouter initialEntries={["/acme-capital/deal-rooms/room_1?tab=qa"]}>
       <I18nextProvider i18n={i18n}>
-        <DealRoomQATab roomId="room_1" />
+        <DealRoomQATab roomId="room_1" canManage />
       </I18nextProvider>
     </MemoryRouter>,
   );
@@ -165,5 +165,22 @@ describe("DealRoomQATab", () => {
     await renderTab();
 
     expect(await screen.findByText(/No Ask questions yet/i)).toBeInTheDocument();
+  });
+
+  it("hides host actions when the caller cannot manage the room", async () => {
+    vi.mocked(api.listRoomAsk).mockResolvedValue({ data: [] });
+    vi.mocked(api.getDealRoomLinks).mockResolvedValue({ data: [] });
+    const i18n = await createTestI18n({
+      dealRooms: enDealRooms as unknown as Record<string, string>,
+    });
+    render(
+      <MemoryRouter initialEntries={["/acme-capital/deal-rooms/room_1?tab=qa"]}>
+        <I18nextProvider i18n={i18n}>
+          <DealRoomQATab roomId="room_1" />
+        </I18nextProvider>
+      </MemoryRouter>,
+    );
+    expect(await screen.findByTestId("ask-inbox-manage-required")).toBeInTheDocument();
+    expect(api.listRoomAsk).not.toHaveBeenCalled();
   });
 });

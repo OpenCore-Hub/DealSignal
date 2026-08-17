@@ -52,8 +52,9 @@ export function ActiveRoomsSection({
       },
     });
 
+  // Founder thresholds — match apps/api/internal/heat CircleFounder (hot 75 / warm 40).
   const heatBarColor = (score: number) => {
-    if (score >= 70) return "bg-hot-500";
+    if (score >= 75) return "bg-hot-500";
     if (score >= 40) return "bg-warm-500";
     return "bg-cold-500";
   };
@@ -151,7 +152,7 @@ export function ActiveRoomsSection({
                       {room.memberCount}
                     </span>
                     {room.visitorCount ? (
-                      <span className="flex items-center gap-1">
+                      <span className="flex items-center gap-1" title={t("room.visitorsHint")}>
                         <Users size={12} />
                         {room.visitorCount}
                       </span>
@@ -170,7 +171,7 @@ export function ActiveRoomsSection({
                   </div>
 
                   {room.heatScore !== undefined && (
-                    <div className="relative z-10 mt-auto">
+                    <div className="relative z-10 mt-auto" title={t("room.heatHint")}>
                       <div className="h-1 w-full overflow-hidden rounded-full bg-muted">
                         <div
                           className={`h-full rounded-full ${heatBarColor(room.heatScore)}`}

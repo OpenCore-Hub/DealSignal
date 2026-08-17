@@ -11,9 +11,10 @@ interface LinkAccessRequestsPanelProps {
   linkId: string;
   /** Called after approve/reject. Approve passes the granted email so parents can sync allowlists. */
   onChanged?: (detail?: { email?: string; action: "approve" | "reject" }) => void;
+  canReview?: boolean;
 }
 
-export function LinkAccessRequestsPanel({ linkId, onChanged }: LinkAccessRequestsPanelProps) {
+export function LinkAccessRequestsPanel({ linkId, onChanged, canReview }: LinkAccessRequestsPanelProps) {
   const { t } = useTranslation(["linkShare", "common"]);
   const {
     data: requests,
@@ -78,6 +79,7 @@ export function LinkAccessRequestsPanel({ linkId, onChanged }: LinkAccessRequest
       itemTestIdPrefix="link-access-request"
       onApprove={(request: LinkAccessRequest) => { void approve(linkId, request); }}
       onReject={(request: LinkAccessRequest) => { void reject(linkId, request); }}
+      canReview={canReview}
     />
   );
 }

@@ -93,13 +93,22 @@ export function useDocumentUploadConflict(opts?: {
   }, [onAwaitingConflictChange]);
 
   const uploadDocument = useCallback(
-    async (file: File, category?: string): Promise<Document> => {
+    async (
+      file: File,
+      category?: string,
+      opts?: { onUploadProgress?: (event: { loaded: number; total: number }) => void },
+    ): Promise<Document> => {
       const confirmReplace = async () => {
         const decision = await askReplace(file.name);
         if (decision === "cancel") {
           throw new UploadCancelledError(t("upload.replaceCancelled"));
         }
-        return api.uploadDocument(file, category, { replace: true });
+        return api.uploadDocument(file, category, {
+          replace: true,
+          ...(opts?.onUploadProgress
+            ? { onUploadProgress: opts.onUploadProgress }
+            : {}),
+        });
       };
 
       let knownConflict = false;
@@ -113,7 +122,11 @@ export function useDocumentUploadConflict(opts?: {
         return confirmReplace();
       }
       try {
-        return await api.uploadDocument(file, category);
+        return await (opts?.onUploadProgress
+          ? api.uploadDocument(file, category, {
+              onUploadProgress: opts.onUploadProgress,
+            })
+          : api.uploadDocument(file, category));
       } catch (err) {
         if (!isDocumentExistsError(err)) {
           throw err;

@@ -22,7 +22,11 @@ import { Badge } from "@/components/ui/badge";
 import type { Signal, ActionItem, SignalContext } from "@/types";
 import { useReducedMotion } from "@/hooks/useReducedMotion";
 import { useTranslation } from "react-i18next";
-import { documentDetailPath, parsePageFromMetadata } from "@/lib/documentDetailNav";
+import {
+  documentDetailPath,
+  parseDocumentIdFromMetadata,
+  parsePageFromMetadata,
+} from "@/lib/documentDetailNav";
 import { formatDuration } from "@/lib/formatters";
 
 const typeConfig = {
@@ -57,12 +61,13 @@ export function SignalCard({ signal, action, onActionStatusChange }: SignalCardP
   const handleNavigate = () => {
     if (!workspaceSlug) return;
     const state = { returnTo: location.pathname + location.search, returnLabel: tCommon("back") };
-    if (signal.documentId) {
+    const documentId = parseDocumentIdFromMetadata(signal.metadata) || signal.documentId;
+    if (documentId) {
       const focusPage = parsePageFromMetadata(signal.metadata);
       navigate(
         documentDetailPath(
           workspaceSlug,
-          signal.documentId,
+          documentId,
           focusPage ? { tab: "content", page: focusPage } : { tab: "analytics" },
         ),
         { state },

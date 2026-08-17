@@ -62,7 +62,7 @@ import type {
   FileRequest,
   AskSecurityEvent,
 } from "@/types";
-import { openStream, request } from "@/lib/apiClient";
+import { openStream, request, requestWithUploadProgress } from "@/lib/apiClient";
 import {
   toBackendIntegrationStatus,
   toCreateDealRoomPayload,
@@ -188,13 +188,19 @@ export interface InsightsOverview {
     views: number;
     score?: number;
     heatLevel: HeatLevel;
-    /** Hottest share link on this document — opens heat breakdown. */
+    /** Hottest contributing share (informational; explain uses document score). */
     primaryLinkId?: string;
   }[];
   topLinks: {
     id: string;
+    name?: string;
     title?: string;
+    documentTitle?: string;
     documentId?: string;
+    dealRoomId?: string;
+    hasDocumentScope?: boolean;
+    linkType?: string;
+    shareKind?: "room" | "bundle" | "document";
     shortUrl: string;
     views: number;
     score?: number;
@@ -217,12 +223,55 @@ export interface InsightsOverview {
 }
 
 /** GET /analytics/links/:linkId/score — heat.Compute breakdown. */
+export interface HeatKeyPages {
+  engaged: number;
+  total: number;
+  minSeconds: number;
+  pages: {
+    pageNumber: number;
+    title: string;
+    engagedViews: number;
+    totalViews: number;
+  }[];
+}
+
 export interface LinkHeatScore {
   linkId: string;
   score: number;
   level: HeatLevel;
   trend: "rising" | "falling" | "stable";
+  circle?: "founder" | "investor_ir" | "sales";
   breakdown: Record<string, number>;
+  keyPages?: HeatKeyPages;
+  updatedAt: string;
+}
+
+/** GET /analytics/documents/:documentId/score — document-attributed heat. */
+export interface DocumentHeatOverlay {
+  readingDepth: number;
+  qaCitations: number;
+  crossDomain: number;
+}
+
+export interface DocumentHeatScore {
+  documentId: string;
+  title: string;
+  score: number;
+  level: HeatLevel;
+  trend: "rising" | "falling" | "stable";
+  circle?: "founder" | "investor_ir" | "sales";
+  breakdown: Record<string, number>;
+  overlay?: DocumentHeatOverlay;
+  views: number;
+  contributingLinks: {
+    id: string;
+    name: string;
+    pageViews: number;
+    shareKind?: "room" | "bundle" | "document";
+    dealRoomId?: string;
+    hasDocumentScope?: boolean;
+  }[];
+  keyPages?: HeatKeyPages;
   updatedAt: string;
 }
 
@@ -318,6 +367,7 @@ export interface KeyPageCompliancePage {
   pageTitle: string;
   category: string;
   views: number;
+  engagedViews?: number;
   uniqueVisitors: number;
   avgDurationSeconds: number;
   lastViewedAt?: string;
@@ -626,23 +676,44 @@ const dealRoomsInflight = new Map<
 >();
 
 export const api = {
-  login: async (email: string, password: string) => {
+  login: async (email: string, password: string, inviteToken?: string) => {
     const res = await request<{ user: User; expires_in: number }>(
       undefined,
       "/auth/login",
-      { method: "POST", body: JSON.stringify({ email, password }), skipAuth: true }
+      {
+        method: "POST",
+        body: JSON.stringify({
+          email,
+          password,
+          ...(inviteToken ? { invite_token: inviteToken } : {}),
+        }),
+        skipAuth: true,
+      }
     );
     setCachedAccountEmail(res.user.email);
     return res.user;
   },
-  register: async (email: string, password: string) => {
-    const res = await request<{ user: User; expires_in: number }>(
+  register: async (email: string, password: string, turnstileToken?: string) => {
+    const res = await request<{ user: User; expires_in?: number; verification_required?: boolean }>(
       undefined,
       "/auth/register",
-      { method: "POST", body: JSON.stringify({ email, password }), skipAuth: true }
+      {
+        method: "POST",
+        body: JSON.stringify({
+          email,
+          password,
+          ...(turnstileToken ? { turnstile_token: turnstileToken } : {}),
+        }),
+        skipAuth: true,
+      }
     );
-    setCachedAccountEmail(res.user.email);
-    return res.user;
+    if (!res.verification_required && res.user?.email) {
+      setCachedAccountEmail(res.user.email);
+    }
+    return res;
+  },
+  getCaptcha: async () => {
+    return request<{ turnstile_site_key: string }>(undefined, "/auth/captcha", { skipAuth: true });
   },
   logout: async () => {
     try {
@@ -668,7 +739,47 @@ export const api = {
   },
 
   verifyEmail: async (token: string) => {
-    return request<{ code: string; message: string }>(undefined, `/auth/verify-email/${token}`, {
+    const res = await request<{ code: string; message: string; user?: User; expires_in?: number }>(
+      undefined,
+      "/auth/verify-email",
+      {
+        method: "POST",
+        body: JSON.stringify({ token }),
+        skipAuth: true,
+      },
+    );
+    if (res.user?.email) {
+      setCachedAccountEmail(res.user.email);
+    }
+    return res;
+  },
+
+  resendVerification: async (email: string, turnstileToken?: string) => {
+    return request<{ code: string }>(undefined, "/auth/resend-verification", {
+      method: "POST",
+      body: JSON.stringify({
+        email,
+        ...(turnstileToken ? { turnstile_token: turnstileToken } : {}),
+      }),
+      skipAuth: true,
+    });
+  },
+
+  forgotPassword: async (email: string, turnstileToken?: string) => {
+    return request<{ code: string }>(undefined, "/auth/forgot-password", {
+      method: "POST",
+      body: JSON.stringify({
+        email,
+        ...(turnstileToken ? { turnstile_token: turnstileToken } : {}),
+      }),
+      skipAuth: true,
+    });
+  },
+
+  resetPassword: async (token: string, password: string) => {
+    return request<{ code: string }>(undefined, "/auth/reset-password", {
+      method: "POST",
+      body: JSON.stringify({ token, password }),
       skipAuth: true,
     });
   },
@@ -724,6 +835,10 @@ export const api = {
   },
   getDocumentById: (id: string) =>
     request<Document>(getWorkspaceSlug(), `/documents/${id}`),
+  getDocumentStatus: (id: string, opts?: { signal?: AbortSignal }) =>
+    request<Document>(getWorkspaceSlug(), `/documents/${id}/status`, {
+      signal: opts?.signal,
+    }),
   checkDocumentExists: (filename: string) =>
     request<{ exists: boolean; document?: { id: string; title: string } }>(
       getWorkspaceSlug(),
@@ -732,7 +847,11 @@ export const api = {
   deleteDocument: (id: string) =>
     request<void>(getWorkspaceSlug(), `/documents/${id}`, { method: "DELETE" }),
   getDocumentDeleteImpact: (id: string) =>
-    request<{ active_link_count: number; deal_room_count: number }>(
+    request<{
+      active_link_count: number;
+      revoked_link_count?: number;
+      deal_room_count: number;
+    }>(
       getWorkspaceSlug(),
       `/documents/${id}/delete-impact`,
     ),
@@ -1095,12 +1214,22 @@ export const api = {
   uploadDocument: (
     file: File,
     category?: string,
-    opts?: { replace?: boolean },
+    opts?: {
+      replace?: boolean;
+      onUploadProgress?: (event: { loaded: number; total: number }) => void;
+    },
   ) => {
     const formData = new FormData();
     formData.append("file", file);
     if (category) formData.append("category", category);
     if (opts?.replace) formData.append("replace", "true");
+    if (opts?.onUploadProgress) {
+      return requestWithUploadProgress<Document>(getWorkspaceSlug(), "/documents", {
+        method: "POST",
+        body: formData,
+        onUploadProgress: opts.onUploadProgress,
+      });
+    }
     return request<Document>(getWorkspaceSlug(), "/documents", {
       method: "POST",
       body: formData,
@@ -1827,6 +1956,19 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(payload),
     }),
+  signDealRoomMemberNda: (roomId: string) =>
+    request<DealRoom>(getWorkspaceSlug(), `/deal-rooms/${roomId}/sign-nda`, {
+      method: "POST",
+    }),
+  updateDealRoomMemberRole: (
+    roomId: string,
+    memberId: string,
+    payload: { role: DealRoomMember["role"] },
+  ) =>
+    request<DealRoomMember>(getWorkspaceSlug(), `/deal-rooms/${roomId}/members/${memberId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
   removeDealRoomMember: (roomId: string, memberId: string) =>
     request<void>(getWorkspaceSlug(), `/deal-rooms/${roomId}/members/${memberId}`, {
       method: "DELETE",
@@ -1979,10 +2121,36 @@ export const api = {
       `/insights/documents/${documentId}/sessions?${qs.toString()}`,
     );
   },
-  getLinkHeatScore: (linkId: string, circle: "founder" | "investor_ir" | "sales" = "founder") =>
+  getLinkHeatScore: (linkId: string, circle?: "founder" | "investor_ir" | "sales") =>
     request<LinkHeatScore>(
       getWorkspaceSlug(),
-      `/analytics/links/${linkId}/score?circle=${encodeURIComponent(circle)}`,
+      circle
+        ? `/analytics/links/${linkId}/score?circle=${encodeURIComponent(circle)}`
+        : `/analytics/links/${linkId}/score`,
+    ),
+  getDocumentHeatScore: (documentId: string, circle?: "founder" | "investor_ir" | "sales") =>
+    request<DocumentHeatScore>(
+      getWorkspaceSlug(),
+      circle
+        ? `/analytics/documents/${documentId}/score?circle=${encodeURIComponent(circle)}`
+        : `/analytics/documents/${documentId}/score`,
+    ),
+  /** GET /analytics/documents/scores — document-native heat for library overlay. */
+  listDocumentHeatScores: (circle?: "founder" | "investor_ir" | "sales") =>
+    request<{
+      documents: {
+        id: string;
+        title: string;
+        views: number;
+        score?: number;
+        heatLevel: HeatLevel;
+        primaryLinkId?: string;
+      }[];
+    }>(
+      getWorkspaceSlug(),
+      circle
+        ? `/analytics/documents/scores?circle=${encodeURIComponent(circle)}`
+        : "/analytics/documents/scores",
     ),
   getSuggestions: () =>
     request<{ data: Suggestion[] }>(getWorkspaceSlug(), "/insights/suggestions"),

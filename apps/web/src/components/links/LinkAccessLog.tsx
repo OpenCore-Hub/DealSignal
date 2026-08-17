@@ -16,13 +16,16 @@ import { ClockCounterClockwise } from "@phosphor-icons/react";
 import { useTranslation } from "react-i18next";
 import { formatDate } from "@/lib/formatters";
 import { EmptyState } from "@/components/common/EmptyState";
-import type { AccessLog } from "@/types";
+import { accessLogDocumentTitle } from "@/lib/shareDocumentLabel";
+import type { AccessLog, DocumentSummary } from "@/types";
 
 interface LinkAccessLogProps {
   logs: AccessLog[];
+  documents?: Pick<DocumentSummary, "id" | "title">[];
+  primaryDocumentId?: string;
 }
 
-export function LinkAccessLog({ logs }: LinkAccessLogProps) {
+export function LinkAccessLog({ logs, documents = [], primaryDocumentId }: LinkAccessLogProps) {
   "use no memo";
   const { t } = useTranslation("links");
   const columns: ColumnDef<AccessLog>[] = [
@@ -39,7 +42,15 @@ export function LinkAccessLog({ logs }: LinkAccessLogProps) {
     {
       accessorKey: "pageNumber",
       header: t("accessLog.page"),
-      cell: ({ row }) => row.original.pageNumber || "-",
+      cell: ({ row }) => {
+        const page = row.original.pageNumber;
+        if (!page) return "-";
+        const title = accessLogDocumentTitle(row.original, documents, primaryDocumentId);
+        if (title && documents.length > 1) {
+          return t("detail.pageOnDocument", { title, page });
+        }
+        return page;
+      },
     },
     {
       accessorKey: "durationSeconds",

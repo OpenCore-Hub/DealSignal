@@ -140,3 +140,15 @@ export function gateTimelineSummary(
   }
   return { kind: "events_only", total };
 }
+
+/** True when top pages span more than one document (bundle collision risk). */
+export function topPagesSpanMultipleDocuments(
+  pages: Array<{ documentId?: string }>,
+): boolean {
+  const ids = new Set<string>();
+  for (const page of pages) {
+    const id = page.documentId?.trim();
+    if (id) ids.add(id);
+  }
+  return ids.size > 1;
+}

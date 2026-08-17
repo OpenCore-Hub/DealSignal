@@ -128,7 +128,7 @@ test.describe("Deal room management (real backend)", () => {
     const email = `room-member-${Date.now()}@example.com`;
     const addRes = await apiFetch(`/api/workspaces/${workspaceSlug}/deal-rooms/${roomId}/members`, {
       method: "POST",
-      body: JSON.stringify({ email, role: "viewer" }),
+      body: JSON.stringify({ email, role: "guest" }),
     });
     expect(addRes.ok).toBe(true);
 

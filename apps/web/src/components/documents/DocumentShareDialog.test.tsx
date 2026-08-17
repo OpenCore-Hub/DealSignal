@@ -1,19 +1,21 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { I18nextProvider, initReactI18next } from "react-i18next";
 import i18n from "i18next";
 import { DocumentShareDialog } from "./DocumentShareDialog";
 
-const { createLinkMock, copyToClipboardMock } = vi.hoisted(() => ({
+const { createLinkMock, copyToClipboardMock, getDocumentsMock } = vi.hoisted(() => ({
   createLinkMock: vi.fn(),
   copyToClipboardMock: vi.fn(),
+  getDocumentsMock: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({
   api: {
     createLink: createLinkMock,
+    getDocuments: getDocumentsMock,
   },
 }));
 
@@ -68,6 +70,7 @@ async function initI18n() {
             copied: "Share link copied",
             createFailed: "Failed to create share link",
             notReady: "Document must be ready before sharing",
+            noFilesSelected: "Select at least one document to create a share link.",
           },
         },
         common: {
@@ -129,6 +132,13 @@ async function initI18n() {
 }
 
 describe("DocumentShareDialog", () => {
+  const pitchDoc = {
+    id: "doc_1",
+    title: "Pitch Deck.pdf",
+    status: "ready",
+    createdAt: "2026-08-16T00:00:00Z",
+  };
+
   beforeEach(() => {
     vi.clearAllMocks();
     createLinkMock.mockResolvedValue({
@@ -136,6 +146,24 @@ describe("DocumentShareDialog", () => {
       shortUrl: "https://example.test/v/abc",
     });
     copyToClipboardMock.mockResolvedValue(true);
+    getDocumentsMock.mockResolvedValue({
+      data: [
+        {
+          id: "doc_old",
+          title: "Older Memo.pdf",
+          fileName: "Older Memo.pdf",
+          status: "ready",
+          createdAt: "2026-01-01T00:00:00Z",
+        },
+        {
+          id: "doc_1",
+          title: "Pitch Deck.pdf",
+          fileName: "Pitch Deck.pdf",
+          status: "ready",
+          createdAt: "2026-08-16T00:00:00Z",
+        },
+      ],
+    });
   });
 
   it("creates a link with library defaults and copies the URL", async () => {
@@ -148,8 +176,7 @@ describe("DocumentShareDialog", () => {
           <DocumentShareDialog
             open
             onOpenChange={onOpenChange}
-            documentId="doc_1"
-            documentTitle="Pitch Deck.pdf"
+            documents={[pitchDoc]}
             workspaceSlug="acme"
             onCreated={onCreated}
           />
@@ -158,6 +185,7 @@ describe("DocumentShareDialog", () => {
     );
 
     expect(screen.getByTestId("document-share-dialog")).toBeInTheDocument();
+    await waitFor(() => expect(getDocumentsMock).toHaveBeenCalled());
     fireEvent.click(screen.getByTestId("document-share-create"));
 
     await waitFor(() => {
@@ -188,14 +216,14 @@ describe("DocumentShareDialog", () => {
           <DocumentShareDialog
             open
             onOpenChange={onOpenChange}
-            documentId="doc_1"
-            documentTitle="Pitch Deck.pdf"
+            documents={[pitchDoc]}
             workspaceSlug="acme"
           />
         </MemoryRouter>
       </I18nextProvider>,
     );
 
+    await waitFor(() => expect(getDocumentsMock).toHaveBeenCalled());
     expect(screen.getByTestId("document-share-advanced-card")).toBeInTheDocument();
     expect(screen.getByText("Access control")).toBeInTheDocument();
     expect(screen.getByText("Content protection")).toBeInTheDocument();
@@ -217,8 +245,7 @@ describe("DocumentShareDialog", () => {
           <DocumentShareDialog
             open
             onOpenChange={vi.fn()}
-            documentId="doc_1"
-            documentTitle="Pitch Deck.pdf"
+            documents={[pitchDoc]}
             workspaceSlug="acme"
           />
         </MemoryRouter>
@@ -247,8 +274,7 @@ describe("DocumentShareDialog", () => {
           <DocumentShareDialog
             open
             onOpenChange={vi.fn()}
-            documentId="doc_1"
-            documentTitle="Pitch Deck.pdf"
+            documents={[pitchDoc]}
             workspaceSlug="acme"
           />
         </MemoryRouter>
@@ -284,18 +310,70 @@ describe("DocumentShareDialog", () => {
           <DocumentShareDialog
             open
             onOpenChange={vi.fn()}
-            documentId="doc_1"
-            documentTitle="Pitch Deck.pdf"
+            documents={[pitchDoc]}
             workspaceSlug="acme"
           />
         </MemoryRouter>
       </I18nextProvider>,
     );
 
+    await waitFor(() => expect(getDocumentsMock).toHaveBeenCalled());
     fireEvent.click(screen.getByTestId("security-switch-ndaEnabled"));
 
     expect(screen.getByTestId("security-switch-requireEmailVerification")).toBeChecked();
     expect(screen.getByTestId("security-switch-requireEmailVerification")).toBeDisabled();
     expect(screen.getByTestId("document-share-contact-selector")).toBeInTheDocument();
+  });
+
+  it("lists library files by newest upload and keeps this batch selected", async () => {
+    const i18nInstance = await initI18n();
+    render(
+      <I18nextProvider i18n={i18nInstance}>
+        <MemoryRouter>
+          <DocumentShareDialog
+            open
+            onOpenChange={vi.fn()}
+            documents={[
+              {
+                id: "doc_1",
+                title: "Pitch Deck.pdf",
+                status: "ready",
+                createdAt: "2026-08-16T00:00:00Z",
+              },
+              {
+                id: "doc_new",
+                title: "CFI-Case-Study.xlsx",
+                fileName: "CFI-Case-Study.xlsx",
+                status: "ready",
+                createdAt: "2026-08-16T12:00:00Z",
+              },
+            ]}
+            workspaceSlug="acme"
+          />
+        </MemoryRouter>
+      </I18nextProvider>,
+    );
+
+    const list = await screen.findByTestId("document-share-file-list");
+    await waitFor(() => {
+      expect(getDocumentsMock).toHaveBeenCalledWith("all", "general");
+    });
+    const labels = within(list).getAllByTestId(/document-share-file-/);
+    expect(labels.map((node) => node.getAttribute("data-testid"))).toEqual([
+      "document-share-file-doc_new",
+      "document-share-file-doc_1",
+      "document-share-file-doc_old",
+    ]);
+    expect(within(labels[0]!).getByRole("checkbox")).toBeChecked();
+    expect(within(labels[1]!).getByRole("checkbox")).toBeChecked();
+    expect(within(labels[2]!).getByRole("checkbox")).not.toBeChecked();
+
+    fireEvent.click(screen.getByTestId("document-share-create"));
+    await waitFor(() => {
+      expect(createLinkMock).toHaveBeenCalledWith(
+        ["doc_new", "doc_1"],
+        expect.objectContaining({ watermarkEnabled: true }),
+      );
+    });
   });
 });

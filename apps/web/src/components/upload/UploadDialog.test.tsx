@@ -12,6 +12,7 @@ vi.mock("@/lib/api", () => ({
     uploadDocument: uploadDocumentMock,
     checkDocumentExists: vi.fn().mockResolvedValue({ exists: false }),
     getBillingInfo: getBillingInfoMock,
+    getDocumentStatus: vi.fn().mockResolvedValue({ status: "ready" }),
   },
 }));
 

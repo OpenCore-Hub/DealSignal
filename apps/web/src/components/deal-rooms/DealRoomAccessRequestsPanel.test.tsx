@@ -4,7 +4,6 @@ import { render, screen, waitFor, fireEvent, act } from "@testing-library/react"
 import { I18nextProvider } from "react-i18next";
 import { createTestI18n } from "@/i18n/test-utils";
 import { DealRoomAccessRequestsPanel } from "./DealRoomAccessRequestsPanel";
-import { useWorkspaceAccess } from "@/hooks/useWorkspaceAccess";
 
 const {
   getDealRoomAccessRequestsMock,
@@ -31,7 +30,7 @@ vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn(), message: vi.fn() },
 }));
 
-async function renderPanel(opts?: { focusLinkId?: string }) {
+async function renderPanel(opts?: { focusLinkId?: string; canManage?: boolean }) {
   const i18nInstance = await createTestI18n({
     dealRooms: {
       "accessRequests.title": "Access requests",
@@ -67,7 +66,11 @@ async function renderPanel(opts?: { focusLinkId?: string }) {
   });
   const view = render(
     <I18nextProvider i18n={i18nInstance}>
-      <DealRoomAccessRequestsPanel roomId="room-1" focusLinkId={opts?.focusLinkId} />
+      <DealRoomAccessRequestsPanel
+        roomId="room-1"
+        focusLinkId={opts?.focusLinkId}
+        canManage={opts?.canManage ?? true}
+      />
     </I18nextProvider>
   );
   await act(async () => {
@@ -78,14 +81,6 @@ async function renderPanel(opts?: { focusLinkId?: string }) {
 
 describe("DealRoomAccessRequestsPanel", () => {
   beforeEach(() => {
-    vi.mocked(useWorkspaceAccess).mockReturnValue({
-      role: "member",
-      loading: false,
-      canRead: true,
-      canWrite: true,
-      canManage: false,
-      isGuest: false,
-    });
     getDealRoomAccessRequestsMock.mockReset();
     getPendingLinkAccessRequestsMock.mockReset();
     approveLinkAccessRequestMock.mockReset();
@@ -124,15 +119,7 @@ describe("DealRoomAccessRequestsPanel", () => {
   });
 
   it("does not fetch or show an error for read-only guests", async () => {
-    vi.mocked(useWorkspaceAccess).mockReturnValue({
-      role: "guest",
-      loading: false,
-      canRead: true,
-      canWrite: false,
-      canManage: false,
-      isGuest: false,
-    });
-    await renderPanel();
+    await renderPanel({ canManage: false });
     expect(getDealRoomAccessRequestsMock).not.toHaveBeenCalled();
     expect(getPendingLinkAccessRequestsMock).not.toHaveBeenCalled();
     expect(screen.queryByTestId("deal-room-access-requests-error")).not.toBeInTheDocument();

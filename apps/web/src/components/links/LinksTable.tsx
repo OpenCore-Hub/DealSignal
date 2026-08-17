@@ -50,6 +50,7 @@ import { documentsCreateLinkPath, documentsSharePath } from "@/lib/documentsShar
 import { exportLinkAccessLogsCsv } from "@/lib/exportLinkAccessLogs";
 import { formatDuration, formatRelativeTime } from "@/lib/formatters";
 import { copyToClipboard } from "@/lib/clipboard";
+import { formatShareDocumentLabel } from "@/lib/shareDocumentLabel";
 import {
   filterLinksForShareView,
   hasActiveShareListFilters,
@@ -162,6 +163,7 @@ export function LinksTable({
             t("export.csv.timestamp"),
             t("export.csv.visitorEmail"),
             t("export.csv.visitorName"),
+            t("export.csv.documentId"),
             t("export.csv.pageNumber"),
             t("export.csv.durationSeconds"),
             t("export.csv.device"),
@@ -216,11 +218,23 @@ export function LinksTable({
       {
         accessorKey: "documentTitle",
         header: t("table.document"),
-        cell: ({ row }) => (
-          <span className="block truncate text-sm" title={row.original.documentTitle}>
-            {row.original.documentTitle}
-          </span>
-        ),
+        cell: ({ row }) => {
+          const link = row.original;
+          const label = formatShareDocumentLabel(
+            link,
+            (title, count) => t("table.bundleDocument", { title, count }),
+            documentId,
+          );
+          const hover = (link.documents ?? [])
+            .map((d) => d.title)
+            .filter(Boolean)
+            .join(", ") || label;
+          return (
+            <span className="block truncate text-sm" title={hover}>
+              {label || link.documentTitle}
+            </span>
+          );
+        },
       },
       {
         accessorKey: "accessCount",
@@ -316,6 +330,7 @@ export function LinksTable({
     [
       busyLinkId,
       canWrite,
+      documentId,
       handleExportAccessData,
       navigate,
       workspaceSlug,

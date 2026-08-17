@@ -2,9 +2,98 @@ import { PRESET_TEMPLATES } from "../smart-link/levelConfig";
 import type { Document, DocumentSummary, PermissionConfig, PermissionPreset } from "@/types";
 
 import { LIBRARY_DOCUMENT_CATEGORY } from "@/lib/documentCategory";
+import { isDocumentReadyForLibraryShare } from "@/lib/documentsUploadedEvent";
+import { isDocumentIngestionFailed } from "@/lib/waitForDocumentIngestion";
 
 /** Share-content picker uses the same partition as the document library. */
 export const SHARE_CONTENT_DOCUMENT_CATEGORY = LIBRARY_DOCUMENT_CATEGORY;
+
+export type ShareDocumentReadiness = {
+  ready: boolean;
+  processingCount: number;
+  failedCount: number;
+  reason: "ok" | "empty" | "processing" | "failed";
+};
+
+/** Create-link rejects anything that is not ready. */
+export function resolveShareDocumentReadiness(
+  documents: readonly { status?: string }[],
+): ShareDocumentReadiness {
+  if (documents.length === 0) {
+    return { ready: false, processingCount: 0, failedCount: 0, reason: "empty" };
+  }
+  let processingCount = 0;
+  let failedCount = 0;
+  for (const document of documents) {
+    if (isDocumentIngestionFailed(document.status)) failedCount += 1;
+    else if (!isDocumentReadyForLibraryShare(document.status)) processingCount += 1;
+  }
+  if (failedCount > 0) {
+    return { ready: false, processingCount, failedCount, reason: "failed" };
+  }
+  if (processingCount > 0) {
+    return { ready: false, processingCount, failedCount, reason: "processing" };
+  }
+  return { ready: true, processingCount: 0, failedCount: 0, reason: "ok" };
+}
+
+export type DraftDocumentRestore = {
+  restoreIds: string[];
+  /** True only when a partial draft can still be shown. */
+  warnMissing: boolean;
+  missing: number;
+  total: number;
+  clearDraft: boolean;
+};
+
+/**
+ * Restore create-link draft selections against the current library list.
+ * An explicit URL document selection always wins. If every draft id is gone,
+ * start fresh instead of toasting a "documents expired" warning — that reads
+ * as if the files just uploaded are invalid.
+ */
+export function resolveDraftDocumentRestore(input: {
+  draftIds: readonly string[];
+  availableIds: readonly string[];
+  explicitDocumentIds?: readonly string[];
+}): DraftDocumentRestore {
+  const draftIds = [...new Set(input.draftIds.filter(Boolean))];
+  const explicitDocumentIds = [...new Set((input.explicitDocumentIds ?? []).filter(Boolean))];
+  if (draftIds.length === 0) {
+    return { restoreIds: [], warnMissing: false, missing: 0, total: 0, clearDraft: false };
+  }
+  if (explicitDocumentIds.length > 0) {
+    return {
+      restoreIds: [],
+      warnMissing: false,
+      missing: 0,
+      total: draftIds.length,
+      clearDraft: true,
+    };
+  }
+  const available = new Set(input.availableIds);
+  const restoreIds = draftIds.filter((id) => available.has(id));
+  const missing = draftIds.length - restoreIds.length;
+  if (missing === 0) {
+    return { restoreIds, warnMissing: false, missing: 0, total: draftIds.length, clearDraft: false };
+  }
+  if (restoreIds.length === 0) {
+    return {
+      restoreIds: [],
+      warnMissing: false,
+      missing,
+      total: draftIds.length,
+      clearDraft: true,
+    };
+  }
+  return {
+    restoreIds,
+    warnMissing: true,
+    missing,
+    total: draftIds.length,
+    clearDraft: false,
+  };
+}
 
 /**
  * Edit-mode lists: keep the available picker clean (no agreement / data-room merge-back),

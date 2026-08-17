@@ -54,6 +54,7 @@ async function renderSection(rooms: DealRoom[], roomsAtCap = false) {
       "empty.rooms.action": "Create",
       "empty.rooms.noDescription": "No description",
       "room.enter": "Enter {{name}}",
+      "room.visitorsHint": "Unique visitors who opened a share link, excluding workspace members.",
       "room.pendingApprovals_one": "{{count}} pending",
       "room.pendingApprovals_other": "{{count}} pending",
       "room.viewAllWithCount_one": "View all {{count}} room",

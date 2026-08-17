@@ -198,8 +198,47 @@ function ContactDetailPageInner({
               <CardHeader>
                 <CardTitle className="text-h3">{t("detail.heat")}</CardTitle>
               </CardHeader>
-              <CardContent>
+              <CardContent className="space-y-2">
                 <HeatBadge level={contact.heatLevel} />
+                {(contact.keyPages?.total ?? 0) > 0 ? (
+                  <div className="space-y-1">
+                    <p className="text-caption text-muted-foreground">{t("detail.keyPagesTitle")}</p>
+                    <p className="text-caption text-muted-foreground">
+                      {contact.keyPages && contact.keyPages.engaged > 0
+                        ? t("detail.keyPagesEngaged", {
+                            engaged: contact.keyPages.engaged,
+                            total: contact.keyPages.total,
+                            seconds: contact.keyPages.minSeconds,
+                          })
+                        : t("detail.keyPagesSkim", {
+                            seconds: contact.keyPages?.minSeconds ?? 3,
+                          })}
+                    </p>
+                    {contact.keyPages && contact.keyPages.pages.length > 0 ? (
+                      <ul className="space-y-1">
+                        {contact.keyPages.pages.map((page) => (
+                          <li
+                            key={`${page.pageNumber}-${page.title}`}
+                            className="flex items-center justify-between gap-2 text-caption"
+                          >
+                            <span className="min-w-0 truncate">
+                              {t("detail.keyPageRow", {
+                                page: page.pageNumber,
+                                title: page.title,
+                              })}
+                            </span>
+                            <span className="shrink-0 tabular-nums text-muted-foreground">
+                              {t("detail.keyPageRowViews", {
+                                engaged: page.engagedViews,
+                                total: page.totalViews,
+                              })}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </div>
+                ) : null}
               </CardContent>
             </Card>
           </div>

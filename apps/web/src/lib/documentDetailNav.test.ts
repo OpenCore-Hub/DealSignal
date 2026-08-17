@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   documentDetailPath,
+  documentEvidencePath,
   isLegacyDocumentDetailTab,
   parseDocumentDetailTab,
   parseDocumentFocusPage,
+  parseDocumentIdFromMetadata,
   parsePageFromMetadata,
   patchDocumentDetailSearchParams,
 } from "./documentDetailNav";
@@ -25,6 +27,26 @@ describe("documentDetailNav", () => {
     expect(parsePageFromMetadata({ pageNumber: "3" })).toBe(3);
     expect(parsePageFromMetadata({ page: "0" })).toBeNull();
     expect(parsePageFromMetadata(undefined)).toBeNull();
+  });
+
+  it("parses attributed document ids from metadata maps", () => {
+    expect(parseDocumentIdFromMetadata({ document_id: "doc-pdf" })).toBe("doc-pdf");
+    expect(parseDocumentIdFromMetadata({ documentId: "doc-xlsx" })).toBe("doc-xlsx");
+    expect(parseDocumentIdFromMetadata({ document_id: "  " })).toBeNull();
+    expect(parseDocumentIdFromMetadata(undefined)).toBeNull();
+  });
+
+  it("builds evidence paths from attributed metadata then primary then link", () => {
+    expect(
+      documentEvidencePath("acme", {
+        documentId: "doc-xlsx",
+        metadata: { page_number: "8", document_id: "doc-pdf" },
+      }),
+    ).toBe("/acme/documents/doc-pdf?tab=content&page=8");
+    expect(documentEvidencePath("acme", { documentId: "doc-1" })).toBe(
+      "/acme/documents/doc-1?tab=analytics",
+    );
+    expect(documentEvidencePath("acme", { linkId: "link-1" })).toBe("/acme/links/link-1");
   });
 
   it("parses focus pages and clamps to pageCount when provided", () => {

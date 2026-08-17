@@ -6,11 +6,32 @@ export type DocumentsUploadedDetail = {
   documentTitle: string;
   status: string;
   category?: string;
+  createdAt?: string;
 };
 
-export function dispatchDocumentsUploaded(detail?: DocumentsUploadedDetail): void {
+export type DocumentsUploadedEventDetail =
+  | DocumentsUploadedDetail
+  | DocumentsUploadedDetail[]
+  | { documents: DocumentsUploadedDetail[] }
+  | undefined;
+
+export function parseDocumentsUploadedDetail(
+  detail: DocumentsUploadedEventDetail,
+): DocumentsUploadedDetail[] {
+  if (!detail) return [];
+  if (Array.isArray(detail)) return detail.filter((item) => item?.documentId);
+  if ("documents" in detail && Array.isArray(detail.documents)) {
+    return detail.documents.filter((item) => item?.documentId);
+  }
+  if ("documentId" in detail && detail.documentId) return [detail];
+  return [];
+}
+
+export function dispatchDocumentsUploaded(
+  detail?: DocumentsUploadedDetail | DocumentsUploadedDetail[],
+): void {
   window.dispatchEvent(
-    new CustomEvent<DocumentsUploadedDetail | undefined>(DOCUMENTS_UPLOADED_EVENT, {
+    new CustomEvent<DocumentsUploadedEventDetail>(DOCUMENTS_UPLOADED_EVENT, {
       detail,
     }),
   );

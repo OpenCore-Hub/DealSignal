@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { TurnstileWidget, type TurnstileWidgetHandle } from "@/components/auth/TurnstileWidget";
 import { api } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/apiErrors";
 import {
@@ -24,6 +25,26 @@ export function RegisterPage() {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [siteKey, setSiteKey] = useState<string | null>(null);
+  const [captchaToken, setCaptchaToken] = useState("");
+  const captchaRef = useRef<TurnstileWidgetHandle>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getCaptcha()
+      .then((cfg) => {
+        if (!cancelled) setSiteKey(cfg.turnstile_site_key?.trim() ?? "");
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setError(t("register.errorCaptchaUnavailable"));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [t]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -64,9 +85,22 @@ export function RegisterPage() {
       return;
     }
 
+    if (siteKey && !captchaToken) {
+      setError(t("register.errorCaptchaRequired"));
+      setLoading(false);
+      return;
+    }
+
     try {
-      await api.register(trimmedEmail, password);
+      const res = await api.register(trimmedEmail, password, captchaToken || undefined);
       const redirect = safeAuthRedirect(searchParams.get("redirect"));
+      if (res.verification_required) {
+        const params = new URLSearchParams({ email: trimmedEmail });
+        if (redirect) params.set("redirect", redirect);
+        if (lockEmail && invitedEmail) params.set("invite", "1");
+        navigate(`/check-email?${params.toString()}`, { replace: true });
+        return;
+      }
       const params = new URLSearchParams({ registered: "true" });
       if (redirect) params.set("redirect", redirect);
       if (lockEmail && invitedEmail) {
@@ -75,6 +109,8 @@ export function RegisterPage() {
       }
       navigate(`/login?${params.toString()}`, { replace: true });
     } catch (err) {
+      captchaRef.current?.reset();
+      setCaptchaToken("");
       setError(apiErrorMessage(err, { context: "register", messageKey: "auth:register.errorRegistrationFailed" }));
       setLoading(false);
     }
@@ -122,8 +158,17 @@ export function RegisterPage() {
                 />
                 <p className="text-caption text-muted-foreground">{t("register.passwordRules")}</p>
               </div>
+              {siteKey ? (
+                <TurnstileWidget
+                  ref={captchaRef}
+                  siteKey={siteKey}
+                  action="register"
+                  onToken={setCaptchaToken}
+                  onError={() => setError(t("register.errorCaptchaFailed"))}
+                />
+              ) : null}
               {error && <p className="text-sm text-error-500">{error}</p>}
-              <Button type="submit" className="w-full" disabled={loading}>
+              <Button type="submit" className="w-full" disabled={loading || siteKey === null || Boolean(siteKey && !captchaToken)}>
                 {loading ? t("register.submitting") : t("register.submit")}
               </Button>
               <p className="text-center text-sm text-muted-foreground">
@@ -141,6 +186,22 @@ export function RegisterPage() {
                   }}
                 >
                   {t("register.signIn")}
+                </Button>
+              </p>
+              <p className="text-center text-sm text-muted-foreground">
+                <Button
+                  type="button"
+                  variant="link"
+                  className="p-0"
+                  onClick={() => {
+                    const current = (lockEmail ? invitedEmail : email).trim();
+                    const params = new URLSearchParams();
+                    if (current.includes("@")) params.set("email", current);
+                    const qs = params.toString();
+                    navigate(qs ? `/forgot-password?${qs}` : "/forgot-password");
+                  }}
+                >
+                  {t("register.forgotPassword")}
                 </Button>
               </p>
             </form>

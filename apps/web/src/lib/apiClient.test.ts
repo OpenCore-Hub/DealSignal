@@ -11,7 +11,7 @@ import {
 } from "vitest";
 import { http, HttpResponse } from "msw";
 import { server } from "@/lib/mocks/server";
-import { ApiError, request } from "@/lib/apiClient";
+import { ApiError, request, requestWithUploadProgress } from "@/lib/apiClient";
 
 describe("apiClient", () => {
   beforeAll(() => {
@@ -298,5 +298,74 @@ describe("apiClient", () => {
 
     await request("acme", "/client-test/lang");
     expect(captured!.headers.get("Accept-Language")).toBe("fr-FR");
+  });
+
+  it("rejects an already-aborted upload without sending", async () => {
+    const formData = new FormData();
+    formData.append("file", new Blob(["x"]), "x.txt");
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      requestWithUploadProgress("acme", "/client-test/upload-aborted", {
+        method: "POST",
+        body: formData,
+        onUploadProgress: () => {},
+        signal: controller.signal,
+      }),
+    ).rejects.toSatisfy(
+      (err: unknown) => err instanceof DOMException && err.name === "AbortError",
+    );
+  });
+
+  it("unwraps multipart upload responses on the XHR progress path", async () => {
+    const formData = new FormData();
+    formData.append("file", new Blob(["x"]), "x.txt");
+    const sent: unknown[] = [];
+    class MockXHR {
+      upload: { onload: ((ev: ProgressEvent<XMLHttpRequestEventTarget>) => void) | null } = {
+        onload: null,
+      };
+      status = 200;
+      statusText = "OK";
+      responseText = JSON.stringify({
+        code: "ok",
+        message: "success",
+        request_id: "req_up",
+        data: { id: "doc_1" },
+      });
+      responseType = "";
+      withCredentials = false;
+      onload: ((ev: ProgressEvent<EventTarget>) => void) | null = null;
+      onerror: ((ev: ProgressEvent<EventTarget>) => void) | null = null;
+      onabort: (() => void) | null = null;
+      open = vi.fn();
+      setRequestHeader = vi.fn();
+      getResponseHeader = vi.fn(() => null);
+      abort = vi.fn();
+      send(body: unknown) {
+        sent.push(body);
+        this.onload?.({} as ProgressEvent<EventTarget>);
+      }
+    }
+    vi.stubGlobal("XMLHttpRequest", MockXHR);
+
+    const onUploadProgress = vi.fn();
+    try {
+      const data = await requestWithUploadProgress<{ id: string }>(
+        "acme",
+        "/client-test/upload-progress",
+        {
+          method: "POST",
+          body: formData,
+          onUploadProgress,
+        },
+      );
+      expect(data.id).toBe("doc_1");
+      expect(sent).toEqual([formData]);
+      expect(onUploadProgress).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

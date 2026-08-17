@@ -14,6 +14,7 @@ export interface User {
   email: string;
   name: string;
   avatarUrl?: string;
+  email_verified?: boolean;
 }
 
 export interface IngestionJob {
@@ -121,6 +122,8 @@ export interface Link {
   requirePassword?: boolean;
   /** Deal room ID when this is a deal-room share link (available from v2.6+ backend). */
   dealRoomId?: string;
+  /** True when the caller can reply / Formal-publish / pin FAQ on this link. */
+  canManageAsk?: boolean;
   /** Custom hostname used for the public link URL. */
   customDomain?: string;
   /** Link type: "share" or "file_request" (available from v2.8+ backend). */
@@ -384,6 +387,18 @@ export interface Contact {
   viewedDocuments: string[];
   /** Prefer this for the Documents tab (id + title from access history). */
   viewedDocumentItems?: ContactViewedDocument[];
+  /** GET-only explain evidence. Scoring uses engaged (≥ minSeconds). */
+  keyPages?: {
+    engaged: number;
+    total: number;
+    minSeconds: number;
+    pages: {
+      pageNumber: number;
+      title: string;
+      engagedViews: number;
+      totalViews: number;
+    }[];
+  };
 }
 
 export interface Activity {
@@ -405,6 +420,7 @@ export interface AccessLog {
   linkId: string;
   visitorEmail: string;
   visitorName?: string;
+  documentId?: string;
   pageNumber?: number;
   durationSeconds: number;
   device?: string;
@@ -429,6 +445,14 @@ export interface LinkAnalytics {
   }[];
   recent_visitors_has_more?: boolean;
   key_pages: {
+    document_id?: string;
+    page_number: number;
+    views: number;
+    average_duration_seconds: number;
+  }[];
+  /** Full per-page dwell (member-excluded). Not the radar top-10 key_pages list. */
+  page_durations?: {
+    document_id?: string;
     page_number: number;
     views: number;
     average_duration_seconds: number;
@@ -544,7 +568,7 @@ export interface DealRoomFolderDocs {
   documents: DealRoomDocumentItem[];
 }
 
-export type DealRoomMemberRole = "owner" | "admin" | "member" | "viewer";
+export type DealRoomMemberRole = "owner" | "admin" | "member" | "guest";
 
 export interface DealRoomMember {
   id: string;
@@ -591,6 +615,16 @@ export interface DealRoom {
   accessRequests?: DealRoomAccessRequest[];
   /** True when the caller can administer this room (API isAdmin). */
   isAdmin?: boolean;
+  /** Workspace owner/admin viewing without a room role. */
+  oversight?: boolean;
+  /** True when the caller can add/move documents or write knowledge. */
+  canContribute?: boolean;
+  /** Caller's active room role; empty for workspace oversight. */
+  roomRole?: DealRoomMemberRole | "";
+  /** Invited but not yet active — usually waiting to sign NDA. */
+  ndaRequired?: boolean;
+  /** Caller's room_members.status when they have a row. */
+  memberStatus?: "active" | "pending" | "suspended" | "";
   /** Total views across all public/share links for this deal room. */
   viewCount?: number;
   /** Number of currently active share links for this deal room. */

@@ -49,6 +49,7 @@
   "stats": {
     "documents": "Documents",
     "views": "Views",
+    "viewsHint": "Link opens, excluding workspace members (same as data-room analytics).",
     "activeLinks": "Active Links"
   },
   "card": {
@@ -57,7 +58,16 @@
     "deleteTitle": "Delete data room",
     "deleteDescription": "Delete “{{name}}”? Documents return to the library. Share links, knowledge, and analytics for this room will be removed. This cannot be undone.",
     "deleted": "Data room deleted",
-    "deleteFailed": "Failed to delete data room"
+    "deleteFailed": "Failed to delete data room",
+    "ndaRequired": "Awaiting NDA"
+  },
+  "ndaGate": {
+    "title": "Sign NDA to continue",
+    "description": "You have been added to {{name}}. Sign the NDA to open documents and the rest of this data room.",
+    "sign": "Sign NDA and continue",
+    "signing": "Signing…",
+    "signed": "NDA signed",
+    "failed": "Could not sign the NDA"
   },
   "detail": {
     "back": "Back to data rooms",
@@ -75,7 +85,8 @@
     "processing": "Processing",
     "uploadProgress": "Upload progress",
     "uploadFailed": "Failed",
-    "noTemplate": "No matching template structure."
+    "noTemplate": "No matching template structure.",
+    "oversightBanner": "You are overseeing this data room. Ask a room owner to invite you if you need to make changes."
   },
   "tabs": {
     "documents": "Data Room",
@@ -88,6 +99,7 @@
   },
   "pageTabs": {
     "resources": "Resources",
+    "members": "Members",
     "access": "Access policy",
     "links": "Share links",
     "analytics": "Analytics",
@@ -115,6 +127,7 @@
     "ndaPlanRequired": "NDA floor requires Business or higher",
     "saveButton": "Save access policy",
     "saveHint": "Save first. Access blacklist applies to every share link immediately. Security domain locks verification/NDA on create and edit.",
+    "oversightHint": "You can view this policy. Changing the blacklist or security domain requires a room role.",
     "unsavedLeaveTitle": "Unsaved access policy",
     "unsavedLeaveDescription": "Your edits will be discarded if you leave this tab.",
     "unsavedLeaveCountdown": "Leaving in {{seconds}}s…",
@@ -511,6 +524,8 @@
     "description": "Current room policy at a glance. Editable controls will expand here.",
     "moreComing": "Freeze, default watermark, and retention controls are coming soon.",
     "inviteMembers": "Invite members",
+    "membersHint": "Invite and manage collaborators on the Members tab.",
+    "openMembers": "Open Members",
     "ndaSaved": "NDA agreement saved",
     "enabled": "On",
     "disabled": "Off",
@@ -572,7 +587,7 @@
     "table": {
       "name": "Name",
       "link": "Link",
-      "views": "Views",
+      "views": "Visits",
       "lastViewed": "Last Viewed",
       "active": "Active"
     },
@@ -594,7 +609,9 @@
       "table": {
         "name": "Name",
         "link": "Link",
-        "views": "Views",
+        "views": "Visits",
+        "visits": "Visits",
+        "visitsHint": "Visits are the share access count (quota). Last viewed excludes workspace members, same as the share list. Data-room analytics Views are member-excluded opens.",
         "lastViewed": "Last viewed",
         "createdAt": "Created",
         "sortCreatedDesc": "Sort by created time, descending",
@@ -677,6 +694,7 @@
     "views": "Views",
     "activeLinks": "Active links",
     "uniqueVisitors": "Unique visitors",
+    "actorHint": "Views, unique visitors, and recent visitors exclude workspace members (same as Deal Radar and heat).",
     "recentVisitors": "Recent visitors",
     "visitorViews_one": "{{count}} view",
     "visitorViews_other": "{{count}} views",
@@ -689,6 +707,7 @@
     "description": "Reply to visitor Ask questions across this data room's links. This is not the Signal inbox.",
     "loading": "Loading Ask questions...",
     "loadFailed": "Failed to load Ask questions",
+    "askManageRequired": "Replying, Formal publish, and pinning FAQs require a room owner or admin role.",
     "retry": "Retry",
     "emptyTitle": "No Ask questions yet",
     "emptyDescription": "When visitors ask on a share link for this room, questions appear here for you to answer.",
@@ -966,6 +985,7 @@
     "ndaAgreementPlaceholder": "Select an NDA agreement",
     "ndaAgreementRequired": "Select an NDA agreement before inviting members",
     "ndaAgreementEmpty": "No NDA agreements yet. Add one in Agreements.",
+    "ndaAgreementUntitled": "Untitled agreement",
     "email": "Email",
     "emailPlaceholder": "investor@example.com",
     "role": "Role",
@@ -973,7 +993,8 @@
       "owner": "Owner",
       "admin": "Admin",
       "member": "Member",
-      "viewer": "Visitor"
+      "viewer": "Visitor",
+      "guest": "Visitor"
     },
     "inviting": "Inviting...",
     "invited": "Invited {{email}}",
@@ -986,7 +1007,24 @@
     "remove": "Remove {{email}}",
     "removeConfirm": "Remove {{email}} from this data room?",
     "removed": "Removed {{email}}",
-    "ndaSigned": "NDA signed"
+    "removing": "Removing...",
+    "ndaSigned": "NDA signed",
+    "pageDescription": "Invite collaborators and assign data-room roles — not workspace roles. External viewers use share links.",
+    "listTitle": "Room members",
+    "listDescription": "These are data-room roles, not workspace roles. Change grantable roles or remove collaborators. The owner cannot be changed.",
+    "oversightHint": "You can view this roster. Inviting or changing roles requires a room role.",
+    "empty": "No members yet.",
+    "loadFailed": "Could not load members.",
+    "retry": "Retry",
+    "roleUpdated": "Updated role for {{email}}",
+    "cannotModifyOwner": "The room owner cannot be changed here.",
+    "cannotModifySelf": "You cannot change your own room role here.",
+    "cannotManageMember": "You do not have permission to manage this member.",
+    "status": {
+      "active": "Active",
+      "pending": "Awaiting NDA",
+      "suspended": "Suspended"
+    }
   },
   "public": {
     "title": "Data Room",

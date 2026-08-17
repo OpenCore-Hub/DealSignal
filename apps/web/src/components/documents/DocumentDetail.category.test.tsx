@@ -25,6 +25,7 @@ vi.mock("@/lib/api", () => ({
     getLinksByDocumentId: getLinksByDocumentIdMock,
     getPageAnalytics: getPageAnalyticsMock,
     getDocumentVisitors: getDocumentVisitorsMock,
+    getDocumentHeatScore: vi.fn().mockResolvedValue(null),
     updateDocumentCategory: vi.fn(),
   },
 }));

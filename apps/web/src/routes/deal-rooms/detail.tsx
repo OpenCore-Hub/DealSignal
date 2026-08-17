@@ -28,8 +28,10 @@ import { DealRoomAnalyticsTab } from "@/components/deal-rooms/DealRoomAnalyticsT
 import { DealRoomQATab } from "@/components/deal-rooms/DealRoomQATab";
 import { DealRoomDocumentsHome } from "@/components/deal-rooms/DealRoomDocumentsHome";
 import { DealRoomActivityTab } from "@/components/deal-rooms/DealRoomActivityTab";
+import { DealRoomMembersTab } from "@/components/deal-rooms/DealRoomMembersTab";
 import { DealRoomSettingsTab } from "@/components/deal-rooms/DealRoomSettingsTab";
 import { DealRoomKnowledgeTab } from "@/components/deal-rooms/DealRoomKnowledgeTab";
+import { DealRoomNdaGate } from "@/components/deal-rooms/DealRoomNdaGate";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   useDealRoomNavSignals,
@@ -39,12 +41,19 @@ import {
 import { useDealRoomNavStore } from "@/stores/dealRoomNavStore";
 import { useUIStore } from "@/stores/uiStore";
 import { matchesRecommendedFile } from "@/lib/dealRoomReadiness";
+import { ingestionBarPercent, transferBarPercent } from "@/lib/uploadProgress";
 import { parseOwnerAskInboxView } from "@/lib/ownerAskInbox";
 import {
   UploadCancelledError,
   useDocumentUploadConflict,
 } from "@/hooks/useDocumentUploadConflict";
 import { useWorkspaceAccess } from "@/hooks/useWorkspaceAccess";
+import {
+  canContributeToRoom,
+  canManageRoom,
+  canViewRoomAccessPolicy,
+  canViewRoomKnowledge,
+} from "@/lib/dealRoomCapabilities";
 import type { DealRoomFolderDocs, Link } from "@/types";
 
 interface UploadProgressItem {
@@ -77,7 +86,7 @@ export function DealRoomDetailPage() {
   const { t: td } = useTranslation("documents");
   const { uploadDocument, conflictDialog } = useDocumentUploadConflict();
   const { workspaceSlug, roomId } = useParams<{ workspaceSlug: string; roomId: string }>();
-  const { canWrite, loading: accessLoading } = useWorkspaceAccess(workspaceSlug);
+  const { loading: accessLoading } = useWorkspaceAccess(workspaceSlug);
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams] = useSearchParams();
@@ -85,7 +94,6 @@ export function DealRoomDetailPage() {
   const deepLinkAskInbox = parseOwnerAskInboxView(searchParams.get("askInbox"));
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uploadTargetFolderRef = useRef<string | null>(null);
-  const activeIntervalsRef = useRef<Set<ReturnType<typeof setInterval>>>(new Set());
   const activePollsRef = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
   const [uploadItems, setUploadItems] = useState<UploadProgressItem[]>([]);
   const [linksRevision, setLinksRevision] = useState(0);
@@ -95,13 +103,6 @@ export function DealRoomDetailPage() {
   const [accessPolicyDirty, setAccessPolicyDirty] = useState(false);
   const [pendingLeaveTab, setPendingLeaveTab] = useState<DealRoomTab | null>(null);
   const { tab, setTab } = useDealRoomTab();
-
-  useEffect(() => {
-    if (accessLoading || canWrite) return;
-    if (tab === "access" || tab === "knowledge") {
-      setTab("documents");
-    }
-  }, [accessLoading, canWrite, tab, setTab]);
 
   const requestTabChange = useCallback(
     (next: DealRoomTab) => {
@@ -130,20 +131,14 @@ export function DealRoomDetailPage() {
   const reducedMotion = useReducedMotion();
   const setBreadcrumbTail = useUIStore((state) => state.setBreadcrumbTail);
   const navSignals = useDealRoomNavStore();
-  useDealRoomNavSignals(roomId, linksRevision);
   const bumpLinksRevision = useCallback(() => {
     setLinksRevision((n) => n + 1);
   }, []);
 
-  // Cleanup all progress intervals and document-status polls on unmount to
-  // prevent state updates on an unmounted component.
+  // Cleanup document-status polls on unmount to prevent state updates after leave.
   useEffect(() => {
-    const intervals = activeIntervalsRef.current;
     const polls = activePollsRef.current;
     return () => {
-      for (const id of intervals) {
-        clearInterval(id);
-      }
       for (const poll of polls.values()) {
         clearInterval(poll);
       }
@@ -163,13 +158,22 @@ export function DealRoomDetailPage() {
 
   const { data, loading, error, refetch } = useAsyncData(fetchRoom, [roomId]);
 
-  const room = data?.room ?? null;
-
-  // Folder-tree admin chrome: workspace write + server-resolved room admin.
-  const isRoomAdmin = Boolean(canWrite && room?.isAdmin);
+  const room = data?.room?.id === roomId ? data.room : null;
+  useDealRoomNavSignals(room && !room.ndaRequired ? roomId : undefined, linksRevision);
+  const canManage = canManageRoom(room);
+  const canContribute = canContributeToRoom(room);
+  const canViewKnowledge = canViewRoomKnowledge(room);
+  const canViewAccess = canViewRoomAccessPolicy(room);
 
   useEffect(() => {
-    if (!roomId) {
+    if (!room) return;
+    if (tab === "access" && !canViewAccess) {
+      setTab("documents");
+    }
+  }, [room, canViewAccess, tab, setTab]);
+
+  useEffect(() => {
+    if (!roomId || !room || room.ndaRequired) {
       setRoomLinks([]);
       return;
     }
@@ -184,7 +188,7 @@ export function DealRoomDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [roomId, linksRevision]);
+  }, [roomId, linksRevision, room]);
 
   // Append room name after the shared workspace nav breadcrumbs (Home >> Deal rooms).
   useEffect(() => {
@@ -230,17 +234,21 @@ export function DealRoomDetailPage() {
             prev.map((item) => {
               if (item.id !== itemId) return item;
               if (doc.status === "ready") {
-                return { ...item, status: "done", progress: doc.progress ?? 100 };
+                return { ...item, status: "done", progress: 100 };
               }
               if (doc.status === "failed") {
                 return {
                   ...item,
                   status: "error",
-                  progress: doc.progress ?? item.progress,
+                  progress: item.progress,
                   error: doc.ingestionJob?.errorMessage ?? tc("error.saveFailed"),
                 };
               }
-              return { ...item, status: "processing", progress: doc.progress ?? item.progress };
+              return {
+                ...item,
+                status: "processing",
+                progress: ingestionBarPercent(doc.progress, item.progress, doc.status),
+              };
             })
           );
           if (doc.status === "ready") {
@@ -291,23 +299,21 @@ export function DealRoomDetailPage() {
         },
       ]);
 
-      const interval = setInterval(() => {
-        setUploadItems((prev) =>
-          prev.map((item) =>
-            item.id === id && item.status === "uploading"
-              ? { ...item, progress: Math.min(item.progress + Math.random() * 15, 95) }
-              : item
-          )
-        );
-      }, 300);
-
-      activeIntervalsRef.current.add(interval);
-
       try {
         // Upload as general; AddDocument promotes to deal_room atomically in sequence.
-        const doc = await uploadDocument(file);
-        clearInterval(interval);
-        activeIntervalsRef.current.delete(interval);
+        const doc = await uploadDocument(file, undefined, {
+          onUploadProgress: ({ loaded, total }) => {
+            const pct = transferBarPercent(loaded, total);
+            if (pct == null) return;
+            setUploadItems((prev) =>
+              prev.map((item) =>
+                item.id === id && item.status === "uploading"
+                  ? { ...item, progress: Math.max(item.progress, pct) }
+                  : item,
+              ),
+            );
+          },
+        });
 
         const order =
           sortOrder ??
@@ -327,15 +333,18 @@ export function DealRoomDetailPage() {
         setUploadItems((prev) =>
           prev.map((item) =>
             item.id === id
-              ? { ...item, documentId: doc.id, status: "processing", progress: doc.progress ?? 95 }
+              ? {
+                  ...item,
+                  documentId: doc.id,
+                  status: "processing",
+                  progress: ingestionBarPercent(doc.progress, item.progress, doc.status),
+                }
               : item
           )
         );
         pollDocumentStatus(id, doc.id);
         void refetch();
       } catch (e) {
-        clearInterval(interval);
-        activeIntervalsRef.current.delete(interval);
         const cancelled = e instanceof UploadCancelledError;
         const message = cancelled
           ? td("upload.replaceCancelled")
@@ -521,12 +530,19 @@ export function DealRoomDetailPage() {
     navSignals.activeLinkCount,
     room.activeLinkCount ?? 0,
   );
-  const description = room.description?.trim() ?? "";
+  const description = room.ndaRequired ? "" : (room.description?.trim() ?? "");
   const descriptionLong = description.length > 120;
 
-  const showPageTabs = isDealRoomPageTab(tab);
+  const showPageTabs = !room.ndaRequired && isDealRoomPageTab(tab);
   // Plain derivation (not a hook) so it can sit after loading early-returns safely.
-  const pageTabs = orderDealRoomPageTabs(tab, visibleDealRoomPageTabs(canWrite || accessLoading));
+  const pageTabs = orderDealRoomPageTabs(
+    tab,
+    visibleDealRoomPageTabs({
+      canManage: canManage || accessLoading,
+      canViewKnowledge: canViewKnowledge || accessLoading,
+      canViewAccess: canViewAccess || accessLoading,
+    }),
+  );
 
   return (
     <motion.div className="space-y-6" {...(reducedMotion ? {} : pageTransition)}>
@@ -554,6 +570,20 @@ export function DealRoomDetailPage() {
         ) : null}
       </PageHeader>
 
+      {room.ndaRequired ? (
+        <DealRoomNdaGate roomId={room.id} roomName={room.name} onSigned={() => void refetch()} />
+      ) : null}
+
+      {room.oversight && !canManage && !room.ndaRequired ? (
+        <div
+          className="rounded-lg border border-border bg-muted/40 px-4 py-2.5 text-sm text-muted-foreground"
+          data-testid="deal-room-oversight-banner"
+          role="status"
+        >
+          {t("detail.oversightBanner")}
+        </div>
+      ) : null}
+
       {showPageTabs && (
         <Tabs
           value={tab}
@@ -579,6 +609,7 @@ export function DealRoomDetailPage() {
         </Tabs>
       )}
 
+      {!room.ndaRequired && (
       <AnimatePresence mode="wait">
         <motion.div
           key={tab}
@@ -598,7 +629,8 @@ export function DealRoomDetailPage() {
                     folders={room.folders ?? []}
                     folderDocs={room.documents ?? []}
                     roomDocuments={allRoomDocuments}
-                    isAdmin={isRoomAdmin}
+                    canManage={canManage}
+                    canContribute={canContribute}
                     onFolderCreate={handleFolderCreate}
                     onFolderRename={handleFolderRename}
                     onFolderDelete={handleFolderDelete}
@@ -619,11 +651,21 @@ export function DealRoomDetailPage() {
             </DealRoomDocumentsHome>
           )}
 
-          {tab === "access" && canWrite && (
+          {tab === "members" && (
+            <DealRoomMembersTab
+              roomId={room.id}
+              room={room}
+              canManage={canManage}
+              onChanged={refetch}
+            />
+          )}
+
+          {tab === "access" && canViewAccess && (
             <DealRoomAccessControlTab
               roomId={room.id}
               initialLinkId={resolvedAccessLinkId}
               focusLinkId={deepLinkAccessLinkId}
+              canManage={canManage}
               onDirtyChange={setAccessPolicyDirty}
               onChanged={async () => {
                 await refetch();
@@ -635,6 +677,7 @@ export function DealRoomDetailPage() {
             <FolderPermissionsSection
               roomId={room.id}
               slug={room.slug}
+              canManage={canManage}
               refreshKey={linksRevision}
               onLinksChanged={bumpLinksRevision}
               onManageAccess={(linkId) => {
@@ -644,11 +687,14 @@ export function DealRoomDetailPage() {
             />
           )}
 
-          {tab === "knowledge" && canWrite && <DealRoomKnowledgeTab roomId={room.id} />}
+          {tab === "knowledge" && canViewKnowledge && (
+            <DealRoomKnowledgeTab roomId={room.id} canContribute={canContribute} />
+          )}
 
           {tab === "qa" && (
             <DealRoomQATab
               roomId={room.id}
+              canManage={canManage}
               initialLinkId={deepLinkAccessLinkId}
               initialAskInbox={deepLinkAskInbox}
             />
@@ -671,12 +717,15 @@ export function DealRoomDetailPage() {
             <DealRoomSettingsTab
               room={room}
               roomId={room.id}
+              canManage={canManage}
               activeLinkCount={activeLinkCount}
               onMemberInvited={refetch}
+              onOpenMembers={() => requestTabChange("members")}
             />
           )}
         </motion.div>
       </AnimatePresence>
+      )}
 
       {/* Full-screen centered upload progress overlay.
           The deal room page is pushed into the background with a blur. */}

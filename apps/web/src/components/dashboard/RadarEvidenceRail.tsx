@@ -4,10 +4,12 @@ import { useTranslation } from "react-i18next";
 import { ArrowRight, SpinnerGap } from "@phosphor-icons/react";
 import { useAsyncData } from "@/hooks/useAsyncData";
 import { api } from "@/lib/api";
+import { documentDetailPath } from "@/lib/documentDetailNav";
 import {
   coalesceSecurityEvents,
   evidenceEmptyPrimaryKey,
   gateTimelineSummary,
+  topPagesSpanMultipleDocuments,
   type CoalescedSecurityEvent,
   type GateTimelineSummary,
 } from "@/lib/radarEvidencePresentation";
@@ -70,6 +72,7 @@ export function RadarEvidenceRail({
       : null;
   // Selected radar row already shows deal / headline / actor / why-now — Evidence leads with facets only.
   const cardActor = item.actor?.trim().toLowerCase() ?? "";
+  const labelTopPagesWithDocument = topPagesSpanMultipleDocuments(data?.topPages ?? []);
 
   return (
     <section
@@ -238,19 +241,41 @@ export function RadarEvidenceRail({
           {data.topPages && data.topPages.length > 0 ? (
             <Block title={t("radar.evidenceRail.topPages")}>
               <ul className="space-y-1.5" data-testid="radar-evidence-top-pages">
-                {data.topPages.map((p) => (
-                  <li
-                    key={p.pageNumber}
-                    className={cn(EMBEDDED_ITEM, "flex justify-between gap-2")}
-                  >
-                    <span>
-                      {t("radar.evidenceRail.page", { page: p.pageNumber })}
-                    </span>
-                    <span className="tabular-nums text-muted-foreground">
-                      {t("radar.evidenceRail.views", { count: p.views })}
-                    </span>
-                  </li>
-                ))}
+                {data.topPages.map((p) => {
+                  const documentId = p.documentId?.trim();
+                  const title =
+                    p.documentTitle?.trim() || documentId || "";
+                  const label =
+                    labelTopPagesWithDocument && title
+                      ? t("radar.evidenceRail.pageOnDocument", {
+                          title,
+                          page: p.pageNumber,
+                        })
+                      : t("radar.evidenceRail.page", { page: p.pageNumber });
+                  return (
+                    <li
+                      key={`${documentId ?? ""}-${p.pageNumber}`}
+                      className={cn(EMBEDDED_ITEM, "flex justify-between gap-2")}
+                    >
+                      {documentId ? (
+                        <Link
+                          to={documentDetailPath(workspaceSlug, documentId, {
+                            tab: "content",
+                            page: p.pageNumber,
+                          })}
+                          className="hover:underline"
+                        >
+                          {label}
+                        </Link>
+                      ) : (
+                        <span>{label}</span>
+                      )}
+                      <span className="tabular-nums text-muted-foreground">
+                        {t("radar.evidenceRail.views", { count: p.views })}
+                      </span>
+                    </li>
+                  );
+                })}
               </ul>
             </Block>
           ) : null}

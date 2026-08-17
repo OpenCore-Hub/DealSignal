@@ -6,6 +6,7 @@ import { MemoryRouter, Routes, Route } from "react-router";
 import { VerifyEmailPage } from "./verify-email";
 import { createTestI18n } from "@/i18n/test-utils";
 
+const navigateMock = vi.fn();
 const { verifyEmailMock } = vi.hoisted(() => ({
   verifyEmailMock: vi.fn(),
 }));
@@ -16,12 +17,21 @@ vi.mock("@/lib/api", () => ({
   },
 }));
 
+vi.mock("react-router", async () => {
+  const actual = await vi.importActual<typeof import("react-router")>("react-router");
+  return {
+    ...actual,
+    useNavigate: () => navigateMock,
+  };
+});
+
 async function renderPage(token: string) {
   const i18n = await createTestI18n({
     auth: {
       "verifyEmail.error": "Verification failed. The link may be invalid or expired.",
       "verifyEmail.success": "Email verified.",
       "verifyEmail.verifying": "Verifying…",
+      "verifyEmail.continue": "Continue",
       "login.submit": "Sign in",
       "register.signIn": "Sign in",
     },
@@ -45,6 +55,7 @@ async function renderPage(token: string) {
 describe("VerifyEmailPage", () => {
   beforeEach(() => {
     verifyEmailMock.mockReset();
+    navigateMock.mockReset();
   });
 
   it("shows success when verification succeeds", async () => {
@@ -52,7 +63,7 @@ describe("VerifyEmailPage", () => {
     await renderPage("valid-token");
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /sign in/i })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /continue/i })).toBeInTheDocument();
     });
     expect(verifyEmailMock).toHaveBeenCalledWith("valid-token");
   });

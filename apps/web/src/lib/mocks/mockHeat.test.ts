@@ -1,9 +1,12 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import {
+  computeMockDocumentHeat,
   computeMockLinkHeat,
   countLinksByHeatLevel,
+  mockHeatInputFromDocumentPages,
   mockHeatInputFromLink,
+  pagesForLinkHeat,
   syncMockLinkHeatLevels,
 } from "./mockHeat";
 import type { Link } from "@/types";
@@ -64,6 +67,41 @@ describe("mockHeat", () => {
     const counts = countLinksByHeatLevel(links);
     expect(counts.cold).toBe(1);
     expect(counts.hot + counts.warm).toBe(1);
+  });
+
+  it("unions page analytics from every bundle member", () => {
+    const pages = pagesForLinkHeat(
+      {
+        documentId: "doc_xlsx",
+        documentIds: ["doc_xlsx", "doc_pdf"],
+        documents: [
+          { id: "doc_xlsx", title: "Model.xlsx", sourceType: "xlsx", pageCount: 3, status: "ready" },
+          { id: "doc_pdf", title: "Memo.pdf", sourceType: "pdf", pageCount: 16, status: "ready" },
+        ],
+      },
+      {
+        doc_xlsx: [{ pageNumber: 1, title: "Cover", viewCount: 1, avgDurationSeconds: 4, exitRate: 0 }],
+        doc_pdf: [
+          { pageNumber: 8, title: "Financial projections", viewCount: 2, avgDurationSeconds: 20, exitRate: 0 },
+        ],
+      },
+    );
+    expect(pages?.map((p) => p.pageNumber)).toEqual([1, 8]);
+  });
+
+  it("scores documents from page analytics without link access_count", () => {
+    const pages = [
+      { pageNumber: 1, title: "Cover", viewCount: 4, avgDurationSeconds: 20, exitRate: 0 },
+      { pageNumber: 8, title: "Financial projections", viewCount: 3, avgDurationSeconds: 40, exitRate: 0 },
+    ];
+    const input = mockHeatInputFromDocumentPages(pages);
+    expect(input.opens).toBe(4);
+    expect(input.forwardSignals).toBe(0);
+    expect(input.downloads).toBe(0);
+    const heat = computeMockDocumentHeat(pages);
+    expect(heat.score).toBeGreaterThan(0);
+    expect(heat.breakdown.forwardSignals).toBe(0);
+    expect(heat.breakdown.downloads).toBe(0);
   });
 
   it("never applies constant score inflation", () => {

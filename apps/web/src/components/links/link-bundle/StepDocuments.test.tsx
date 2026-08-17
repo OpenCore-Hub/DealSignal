@@ -148,17 +148,41 @@ describe("StepDocuments", () => {
     );
   });
 
-  it("warns with missing=total when every draft document is gone", async () => {
+  it("starts fresh without warning when every draft document is gone", async () => {
     const warningSpy = vi.spyOn(toast, "warning").mockImplementation(() => "");
 
     await renderStepDocuments("/links/new", {
-      pendingDraftDocIds: ["missing-doc"],
+      pendingDraftDocIds: ["missing-doc", "also-missing"],
     });
 
     await waitFor(() => {
-      expect(warningSpy).toHaveBeenCalledWith(
-        "1 of 1 documents from your saved draft are no longer available and have been removed.",
-      );
+      expect(getDocumentsMock).toHaveBeenCalledWith("all", "general");
     });
+
+    expect(warningSpy).not.toHaveBeenCalled();
+  });
+
+  it("auto-selects multiple URL documents and ignores a stale draft", async () => {
+    const warningSpy = vi.spyOn(toast, "warning").mockImplementation(() => "");
+    getDocumentsMock.mockResolvedValue({
+      data: [
+        ...mockDocs,
+        {
+          ...mockDocs[0],
+          id: "doc-3",
+          title: "Newest Upload",
+          createdAt: "2026-08-16T00:00:00Z",
+        },
+      ],
+    });
+
+    await renderStepDocuments("/links/new?documentId=doc-2&documentId=doc-3", {
+      pendingDraftDocIds: ["gone-1", "gone-2"],
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("2 selected")).toBeInTheDocument();
+    });
+    expect(warningSpy).not.toHaveBeenCalled();
   });
 });

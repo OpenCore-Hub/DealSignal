@@ -77,17 +77,17 @@ export function resolveCorpusAttentionStage(
 
 export interface KnowledgeRoomMetrics {
   documentCount: number;
-  /** Unique share-link visitors who asked (Q&A). */
-  askUniqueVisitors: number;
-  /** Distinct share links that have received at least one visitor open. */
-  visitedLinkCount: number;
+  /** Member-excluded link_opened count (align GetDealRoomAnalytics.totalViews). */
+  viewCount: number;
+  /** Live shares: status=active and not past-due (align GetDealRoomAnalytics.activeLinkCount). */
+  activeLinkCount: number;
 }
 
 export interface CorpusIntegrityRailProps {
   corpus: DealRoomKnowledgeCorpus;
   metrics: KnowledgeRoomMetrics;
   syncing: boolean;
-  onSync: () => void;
+  onSync?: () => void;
 }
 
 /**
@@ -296,8 +296,8 @@ export function CorpusIntegrityRail({
         }
         metrics={[
           { label: t("stats.documents"), value: metrics.documentCount },
-          { label: t("stats.views"), value: metrics.askUniqueVisitors },
-          { label: t("stats.activeLinks"), value: metrics.visitedLinkCount },
+          { label: t("stats.views"), value: metrics.viewCount },
+          { label: t("stats.activeLinks"), value: metrics.activeLinkCount },
         ]}
         footerNote={
           <span className="flex flex-col gap-0.5">
@@ -337,6 +337,7 @@ export function CorpusIntegrityRail({
                 <CaretDown size={14} className="ml-1.5" weight="bold" />
               )}
             </Button>
+            {onSync ? (
             <Button
               size="sm"
               variant="outline"
@@ -351,6 +352,7 @@ export function CorpusIntegrityRail({
               />
               {syncing ? t("knowledge.syncing") : t("knowledge.sync")}
             </Button>
+            ) : null}
             <Button
               size="sm"
               variant="outline"

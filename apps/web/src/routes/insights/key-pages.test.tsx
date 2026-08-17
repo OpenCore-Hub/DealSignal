@@ -64,6 +64,7 @@ const mockReport: KeyPageCompliance = {
       pageTitle: "Financial Projections",
       category: "financials",
       views: 3,
+      engagedViews: 2,
       uniqueVisitors: 2,
       avgDurationSeconds: 12,
       lastViewedAt: "2026-08-07T12:00:00Z",
@@ -82,6 +83,21 @@ const mockReport: KeyPageCompliance = {
       category: "financials",
       durationSeconds: 15,
       createdAt: "2026-08-07T12:00:00Z",
+      dealRoomName: "Series A",
+      dealRoomId: "room-1",
+    },
+    {
+      id: "pv-2",
+      linkId: "link-1",
+      visitorId: "v2",
+      visitorEmail: "skim@example.com",
+      documentId: "doc-1",
+      documentTitle: "Pitch Deck",
+      pageNumber: 4,
+      pageTitle: "Financial Projections",
+      category: "financials",
+      durationSeconds: 1,
+      createdAt: "2026-08-07T12:01:00Z",
       dealRoomName: "Series A",
       dealRoomId: "room-1",
     },
@@ -174,6 +190,10 @@ describe("InsightsKeyPagesPage", () => {
     expect(screen.getByText("buyer@example.com")).toBeInTheDocument();
     expect(screen.getAllByText("Financial Projections").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Financials").length).toBeGreaterThan(0);
+    expect(screen.getByText("2/3")).toBeInTheDocument();
+    expect(screen.getByText("skim@example.com")).toBeInTheDocument();
+    expect(screen.getByText("Skim")).toBeInTheDocument();
+    expect(screen.queryByText("buyer@example.com")?.closest("tr")?.textContent).not.toMatch(/Skim/);
   });
 
   it("saves per-category workspace extras", async () => {

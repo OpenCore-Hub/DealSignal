@@ -189,6 +189,33 @@ describe("AnalyticsTab", () => {
     expect(screen.queryByRole("tab", { name: /Delivery/ })).not.toBeInTheDocument();
   });
 
+  it("uses analytics unique visitors, not the complete activity log", async () => {
+    vi.mocked(api.getLinkAnalytics).mockResolvedValue({
+      data: { ...emptyAnalytics, unique_visitors: 1, total_views: 2 },
+    });
+
+    render(
+      <Wrapper>
+        <AnalyticsTab
+          link={{ ...baseLink, accessCount: 99, requireEmailVerification: false } as Link}
+          logs={[
+            { visitorEmail: "owner@acme.com" },
+            { visitorEmail: "owner@acme.com" },
+            { visitorEmail: "guest@example.com" },
+          ] as never}
+        />
+      </Wrapper>,
+    );
+
+    expect(
+      await screen.findByText(
+        "Views, unique visitors, duration, and last visit exclude workspace members (same as Deal Radar and heat). The activity log stays complete.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText("2")).toBeInTheDocument();
+    expect(screen.queryByText("99")).not.toBeInTheDocument();
+  });
+
   it("resends only remediable contacts and refreshes analytics", async () => {
     vi.mocked(api.getLinkAnalytics)
       .mockResolvedValueOnce({
@@ -663,7 +690,7 @@ describe("AnalyticsTab", () => {
     render(
       <Wrapper>
         <AnalyticsTab
-          link={{ ...baseLink, dealRoomId: "room_1" } as Link}
+          link={{ ...baseLink, dealRoomId: "room_1", canManageAsk: true } as Link}
           logs={[]}
         />
       </Wrapper>,
@@ -679,6 +706,30 @@ describe("AnalyticsTab", () => {
     expect(screen.getByText("Refuse rate")).toBeInTheDocument();
     expect(screen.getByText("Escalation rate")).toBeInTheDocument();
     expect(screen.getAllByText("33%").length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("hides Engage on deal-room links without room manage even if workspace can write", async () => {
+    vi.mocked(useWorkspaceAccess).mockReturnValue({
+      role: "admin",
+      loading: false,
+      canRead: true,
+      canWrite: true,
+      canManage: true,
+      isGuest: false,
+    });
+    vi.mocked(api.getLinkAnalytics).mockResolvedValue({ data: emptyAnalytics });
+
+    render(
+      <Wrapper>
+        <AnalyticsTab link={{ ...baseLink, dealRoomId: "room_1" } as Link} logs={[]} />
+      </Wrapper>,
+    );
+
+    await waitFor(() => {
+      expect(api.getLinkAnalytics).toHaveBeenCalled();
+    });
+    expect(screen.queryByRole("tab", { name: /Engage/i })).not.toBeInTheDocument();
+    expect(api.listLinkAsk).not.toHaveBeenCalled();
   });
 
   it("does not fetch management data or toast for read-only guests", async () => {

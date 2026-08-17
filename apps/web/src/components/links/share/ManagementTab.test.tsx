@@ -33,6 +33,7 @@ async function renderTab(props: {
         <ManagementTab
           linkId="link_1"
           dealRoomId="room_1"
+          canManageAsk
           fileRequests={props.fileRequests ?? []}
           onUpdateFileRequest={props.onUpdateFileRequest ?? vi.fn()}
         />

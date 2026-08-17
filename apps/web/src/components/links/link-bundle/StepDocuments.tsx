@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiErrorMessage } from "@/lib/apiErrors";
 import { useSearchParams } from "react-router";
 import { useTranslation } from "react-i18next";
@@ -6,16 +6,32 @@ import { clearPipelineDraft, useBundlePipeline } from "./BundlePipelineContext";
 import { BundleDocumentPicker } from "./BundleDocumentPicker";
 import { PipelineProgress } from "./PipelineProgress";
 import { PipelinePaper } from "./PipelinePaper";
-import { SHARE_CONTENT_DOCUMENT_CATEGORY } from "./pipelineUtils";
+import { resolveDraftDocumentRestore, SHARE_CONTENT_DOCUMENT_CATEGORY } from "./pipelineUtils";
+import { sortDocumentsByNewestUpload } from "@/lib/sortDocumentsByUploadTime";
 import { api } from "@/lib/api";
 import type { Document } from "@/types";
 import { toast } from "sonner";
+
+function readExplicitDocumentIds(searchParams: URLSearchParams): string[] {
+  return [
+    ...new Set(
+      searchParams
+        .getAll("documentId")
+        .flatMap((value) => value.split(","))
+        .map((id) => id.trim())
+        .filter(Boolean),
+    ),
+  ];
+}
 
 export function StepDocuments() {
   const { state, dispatch } = useBundlePipeline();
   const { t } = useTranslation("links");
   const [searchParams] = useSearchParams();
-  const initialDocumentId = searchParams.get("documentId") ?? undefined;
+  const explicitDocumentIds = useMemo(
+    () => readExplicitDocumentIds(searchParams),
+    [searchParams],
+  );
   const [loading, setLoading] = useState(false);
   const loadedRef = useRef(false);
 
@@ -31,62 +47,59 @@ export function StepDocuments() {
       // Share content picker: same scope as Document Library (not agreements / data-room docs).
       // NDA templates are chosen separately in the security step via category=agreement.
       const res = await api.getDocuments("all", SHARE_CONTENT_DOCUMENT_CATEGORY);
-      dispatch({ type: "SET_DOCUMENTS", documents: res.data });
+      const documents = sortDocumentsByNewestUpload(res.data);
+      dispatch({ type: "SET_DOCUMENTS", documents });
 
       // Restore selected documents from pending draft IDs (set in createInitialState).
-      // When the user enters from a single-document action (e.g. clicking "Create link"
-      // on a document row), discard any stale draft so it doesn't interfere with the
-      // explicit document choice or show confusing "draft unavailable" warnings.
+      // Explicit URL documentIds (row Share / post-upload) always win. If every
+      // draft id is gone, start fresh — do not toast "documents expired".
       if (state.pendingDraftDocIds.length > 0) {
-        if (initialDocumentId) {
+        const decision = resolveDraftDocumentRestore({
+          draftIds: state.pendingDraftDocIds,
+          availableIds: documents.map((doc) => doc.id),
+          explicitDocumentIds,
+        });
+        if (decision.restoreIds.length > 0) {
+          const restored = documents.filter((doc: Document) =>
+            decision.restoreIds.includes(doc.id),
+          );
+          dispatch({ type: "SET_SELECTED_DOCUMENTS", documents: restored });
+        }
+        if (decision.warnMissing) {
+          toast.warning(
+            t("creator.draftDocsUnavailable", {
+              missing: decision.missing,
+              total: decision.total,
+            }),
+          );
+        }
+        if (decision.clearDraft) {
           clearPipelineDraft();
-        } else {
-          const draftIds = state.pendingDraftDocIds;
-          const restored = res.data.filter((d: Document) => draftIds.includes(d.id));
-          if (restored.length > 0) {
-            dispatch({ type: "SET_SELECTED_DOCUMENTS", documents: restored });
-          }
-          const missing = draftIds.length - restored.length;
-          if (missing > 0) {
-            console.warn("Draft restore: some documents are no longer available", {
-              total: draftIds.length,
-              restored: restored.length,
-              missing,
-            });
-            toast.warning(
-              t("creator.draftDocsUnavailable", {
-                missing,
-                total: draftIds.length,
-              }),
-            );
-            // When none of the draft documents are available, clear the stale draft
-            // so the user doesn't keep seeing this warning on subsequent visits.
-            if (restored.length === 0) {
-              clearPipelineDraft();
-            }
-          }
         }
         dispatch({ type: "CLEAR_PENDING_DRAFT_DOC_IDS" });
       }
 
-      // Single-document entry point: auto-select the document from the URL query
-      // param (e.g. /links/new?documentId=xxx). This unifies the single-doc and
-      // multi-doc creation flows under the same bundle pipeline.
-      if (
-        initialDocumentId &&
-        !state.selectedDocuments.some((d) => d.id === initialDocumentId)
-      ) {
-        const target = res.data.find((d) => d.id === initialDocumentId);
-        if (target) {
-          dispatch({ type: "TOGGLE_DOCUMENT", document: target });
-        }
+      const selectedIds = new Set(state.selectedDocuments.map((doc) => doc.id));
+      const toSelect = documents.filter(
+        (doc) => explicitDocumentIds.includes(doc.id) && !selectedIds.has(doc.id),
+      );
+      if (toSelect.length === 1) {
+        dispatch({ type: "TOGGLE_DOCUMENT", document: toSelect[0] });
+      } else if (toSelect.length > 1) {
+        dispatch({
+          type: "SET_SELECTED_DOCUMENTS",
+          documents: [
+            ...state.selectedDocuments,
+            ...toSelect,
+          ],
+        });
       }
     } catch (e) {
       toast.error(apiErrorMessage(e, { messageKey: "links:creator.loadDocsFailed" }));
     } finally {
       setLoading(false);
     }
-  }, [dispatch, t, state.mode, state.pendingDraftDocIds, state.selectedDocuments, initialDocumentId]);
+  }, [dispatch, t, state.mode, state.pendingDraftDocIds, state.selectedDocuments, explicitDocumentIds]);
 
   useEffect(() => {
     loadDocuments();

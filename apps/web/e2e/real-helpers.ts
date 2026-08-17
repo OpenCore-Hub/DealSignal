@@ -231,6 +231,20 @@ export async function apiFetch(input: string, init?: RequestInit): Promise<Respo
   return res;
 }
 
+export async function turnstileRegisterFields(): Promise<Record<string, string>> {
+  const res = await apiFetch("/api/auth/captcha");
+  if (!res.ok) return {};
+  const data = (await res.json()) as { turnstile_site_key?: string };
+  const key = (data.turnstile_site_key ?? "").trim();
+  if (!key) return {};
+  if (key.startsWith("1x000000")) {
+    return { turnstile_token: "XXXX.DUMMY.TOKEN.XXXX" };
+  }
+  const envToken = process.env.E2E_TURNSTILE_TOKEN;
+  if (envToken) return { turnstile_token: envToken };
+  throw new Error("Turnstile is enabled with a real site key; set E2E_TURNSTILE_TOKEN");
+}
+
 export async function apiGetJson<T>(path: string): Promise<T> {
   const res = await apiFetch(path);
   if (!res.ok) throw new Error(`GET ${path} failed: ${res.status} ${await res.text()}`);
@@ -289,7 +303,8 @@ export async function seedRealBackend(): Promise<SeedResult> {
   const password = "Password123!";
 
   // 1. Register (with retry/backoff for auth rate limiting in parallel E2E runs)
-  const regBody = JSON.stringify({ email, password });
+  const captcha = await turnstileRegisterFields();
+  const regBody = JSON.stringify({ email, password, ...captcha });
   let regRes: Response | undefined;
   let lastRegError: string | undefined;
   for (let attempt = 0; attempt < 5; attempt++) {

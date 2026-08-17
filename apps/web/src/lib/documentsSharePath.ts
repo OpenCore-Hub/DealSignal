@@ -31,11 +31,19 @@ export function documentsSharePath(
 /** Create-link pipeline entry (kept under /links/new). */
 export function documentsCreateLinkPath(
   workspaceSlug: string,
-  opts?: { documentId?: string },
+  opts?: { documentId?: string; documentIds?: string[] },
 ): string {
+  const ids = [
+    ...new Set(
+      [...(opts?.documentIds ?? []), opts?.documentId ?? ""]
+        .map((id) => id.trim())
+        .filter(Boolean),
+    ),
+  ];
   const base = `/${workspaceSlug}/links/new`;
-  if (!opts?.documentId) return base;
-  const params = new URLSearchParams({ documentId: opts.documentId });
+  if (ids.length === 0) return base;
+  const params = new URLSearchParams();
+  for (const id of ids) params.append("documentId", id);
   return `${base}?${params.toString()}`;
 }
 

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { HeatBreakdownDialog } from "@/components/insights/HeatBreakdownDialog";
 import { useNavigate, useParams, useSearchParams } from "react-router";
 import { Buildings, Eye, Link as LinkIcon, Scales } from "@phosphor-icons/react";
 import { useTranslation } from "react-i18next";
@@ -52,6 +53,7 @@ export function DocumentDetail() {
   const { canWrite } = useWorkspaceAccess(workspaceSlug);
   const [addToRoomOpen, setAddToRoomOpen] = useState(false);
   const [togglingCategory, setTogglingCategory] = useState(false);
+  const [heatExplainOpen, setHeatExplainOpen] = useState(false);
 
   const loadDetail = useCallback(async (): Promise<DocumentDetailData> => {
     if (!documentId) {
@@ -67,6 +69,15 @@ export function DocumentDetail() {
   }, [documentId, t]);
 
   const { data, loading, error, refetch } = useAsyncData(loadDetail, [loadDetail]);
+
+  const { data: documentHeat } = useAsyncData(async () => {
+    if (!documentId || !data || isAgreementCategory(data.doc.category)) return null;
+    try {
+      return await api.getDocumentHeatScore(documentId);
+    } catch {
+      return null;
+    }
+  }, [documentId, data?.doc.category]);
 
   const rawTab = searchParams.get("tab");
   const tab = parseDocumentDetailTab(rawTab);
@@ -240,7 +251,24 @@ export function DocumentDetail() {
         </div>
       </header>
 
-      <DocumentStats links={links} visitors={visitors} />
+      <DocumentStats
+        links={links}
+        visitors={visitors}
+        pages={analytics}
+        heat={
+          documentHeat
+            ? { level: documentHeat.level, score: documentHeat.score }
+            : null
+        }
+        onExplainHeat={documentHeat ? () => setHeatExplainOpen(true) : undefined}
+      />
+      <HeatBreakdownDialog
+        open={heatExplainOpen}
+        onOpenChange={setHeatExplainOpen}
+        kind="document"
+        entityId={documentId}
+        label={doc.title}
+      />
 
       <Tabs
         value={tab}

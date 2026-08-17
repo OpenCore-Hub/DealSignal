@@ -12,6 +12,7 @@ export type AccessLogCsvHeaders = readonly [
   string,
   string,
   string,
+  string,
 ];
 
 function csvEscape(value: string): string {
@@ -29,6 +30,7 @@ function logsToCsv(logs: AccessLog[], headers: AccessLogCsvHeaders): string {
         csvEscape(log.timestamp ?? ""),
         csvEscape(log.visitorEmail ?? ""),
         csvEscape(log.visitorName ?? ""),
+        csvEscape(log.documentId ?? ""),
         csvEscape(log.pageNumber != null ? String(log.pageNumber) : ""),
         csvEscape(String(log.durationSeconds ?? 0)),
         csvEscape(log.device ?? ""),

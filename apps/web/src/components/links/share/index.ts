@@ -34,6 +34,7 @@ export {
   loadNdaPickerSources,
   mapAgreementDocuments,
   mapNdaTemplates,
+  ndaPickerDisplayTitle,
   resolveNdaDocumentFallback,
 } from "./ndaPicker";
 export type { NdaDocumentOption, NdaPickerSources, NdaTemplateOption } from "./ndaPicker";

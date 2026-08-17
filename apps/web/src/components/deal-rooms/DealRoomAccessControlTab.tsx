@@ -9,7 +9,6 @@ import { Switch } from "@/components/ui/switch";
 import { ApiError } from "@/lib/apiClient";
 import { api } from "@/lib/api";
 import { useAsyncData } from "@/hooks/useAsyncData";
-import { useWorkspaceAccess } from "@/hooks/useWorkspaceAccess";
 import { ContactEmailTagInput } from "@/components/links/share";
 import { DealRoomAccessRequestsPanel } from "./DealRoomAccessRequestsPanel";
 import {
@@ -27,6 +26,7 @@ interface DealRoomAccessControlTabProps {
   onChanged?: () => void | Promise<void>;
   /** Notifies parent when local edits are unsaved (for tab-leave guard). */
   onDirtyChange?: (dirty: boolean) => void;
+  canManage?: boolean;
 }
 
 export function DealRoomAccessControlTab({
@@ -34,11 +34,11 @@ export function DealRoomAccessControlTab({
   focusLinkId,
   onChanged,
   onDirtyChange,
+  canManage = false,
 }: DealRoomAccessControlTabProps) {
   const { t } = useTranslation("dealRooms");
   const { t: lt } = useTranslation("linkShare");
   const { t: tc } = useTranslation("common");
-  const { canWrite } = useWorkspaceAccess();
 
   const [draft, setDraft] = useState<DraftLink>(() => draftFromRoomAccessPolicy(null));
   const [saving, setSaving] = useState(false);
@@ -50,8 +50,8 @@ export function DealRoomAccessControlTab({
     [roomId],
   );
   const { data: billing } = useAsyncData(
-    () => (canWrite ? api.getBillingInfo().catch(() => null) : Promise.resolve(null)),
-    [canWrite],
+    () => (canManage ? api.getBillingInfo().catch(() => null) : Promise.resolve(null)),
+    [canManage],
   );
 
   const setDirtyState = useCallback(
@@ -103,6 +103,7 @@ export function DealRoomAccessControlTab({
   const ndaEnableBlocked = billing != null && billing.ndaEnabled === false && !draft.requireNda;
 
   const handleSave = async () => {
+    if (!canManage) return;
     setSaving(true);
     try {
       await api.upsertDealRoomAccessPolicy(roomId, roomAccessPolicyPayloadFromDraft(draft));
@@ -128,6 +129,7 @@ export function DealRoomAccessControlTab({
       <DealRoomAccessRequestsPanel
         roomId={roomId}
         focusLinkId={focusLinkId}
+        canManage={canManage}
         onChanged={() => {
           void refetch();
         }}
@@ -137,6 +139,11 @@ export function DealRoomAccessControlTab({
         <p className="py-10 text-center text-sm text-muted-foreground">{tc("loading")}</p>
       ) : (
         <div className="space-y-4" data-testid="room-security-form">
+          {!canManage ? (
+            <p className="text-sm text-muted-foreground" data-testid="access-policy-oversight-hint">
+              {t("accessControl.oversightHint")}
+            </p>
+          ) : null}
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-sm font-normal text-muted-foreground">
@@ -156,7 +163,7 @@ export function DealRoomAccessControlTab({
                     ? t("accessControl.accessControlsPlanRequired")
                     : lt("accessRules.blockedViewers.roomHint")
                 }
-                disabled={!canWrite || blocklistEnableBlocked}
+                disabled={!canManage || blocklistEnableBlocked}
               />
             </CardContent>
           </Card>
@@ -182,7 +189,7 @@ export function DealRoomAccessControlTab({
                         requireEmail: checked ? false : draft.requireEmail,
                       });
                     }}
-                    disabled={!canWrite || verifyEnableBlocked}
+                    disabled={!canManage || verifyEnableBlocked}
                     aria-label={t("accessControl.floorMustVerify")}
                   />
                 </div>
@@ -203,7 +210,7 @@ export function DealRoomAccessControlTab({
                       if (checked && ndaEnableBlocked) return;
                       updateDraft({ requireNda: checked });
                     }}
-                    disabled={!canWrite || ndaEnableBlocked}
+                    disabled={!canManage || ndaEnableBlocked}
                     aria-label={t("accessControl.floorMustNda")}
                   />
                 </div>
@@ -216,7 +223,7 @@ export function DealRoomAccessControlTab({
         </div>
       )}
 
-      {!loading && data && canWrite ? (
+      {!loading && data && canManage ? (
         <div className="sticky bottom-[-1.5rem] z-10 -mx-6 border-t bg-background/95 px-6 pt-3 pb-[calc(0.75rem+1.5rem)] backdrop-blur supports-[backdrop-filter]:bg-background/80 md:bottom-[-2rem] md:-mx-8 md:px-8 md:pb-[calc(0.75rem+2rem)]">
           <div className="flex items-center justify-between gap-3">
             <p className="text-xs text-muted-foreground">{t("accessControl.saveHint")}</p>

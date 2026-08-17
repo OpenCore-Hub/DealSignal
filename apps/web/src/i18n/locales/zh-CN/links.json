@@ -11,6 +11,7 @@
   "table": {
     "link": "链接",
     "document": "文档",
+    "bundleDocument": "{{title}} +{{count}}",
     "accessCount": "访问次数",
     "accessCountValue": "{{count}} 次访问",
     "avgDuration": "平均",
@@ -48,6 +49,7 @@
       "timestamp": "时间",
       "visitorEmail": "访客邮箱",
       "visitorName": "访客姓名",
+      "documentId": "文档ID",
       "pageNumber": "页码",
       "durationSeconds": "停留秒数",
       "device": "设备",
@@ -77,13 +79,16 @@
     "copySuccess": "链接已复制",
     "totalVisits": "总访问",
     "uniqueVisitors": "独立访客",
+    "uniqueVisitorsHint": "按 visitor ID 去重，已排除工作区成员（与交易雷达、热力一致）。总访问仍按分享 access count。",
     "avgDuration": "平均时长",
     "lastVisit": "最后访问",
     "permissionConfig": "权限配置",
     "expiresAt": "过期于 {{time}}",
     "trendTitle": "访问量趋势",
     "pageDurationTitle": "页面停留时长",
+    "pageDurationHint": "各页平均停留，不含工作区成员（与平均时长、交易雷达一致）。",
     "pageLabel": "第 {{page}} 页",
+    "pageOnDocument": "{{title}} · 第{{page}}页",
     "pageAxisTitle": "页码",
     "durationAxisTitle": "停留时长（秒）",
     "avgDurationTooltip": "平均停留时长",
@@ -94,6 +99,7 @@
   },
   "timeline": {
     "viewedPage": "{{visitor}} 查看第 {{page}} 页",
+    "viewedPageOnDocument": "{{visitor}} 查看了 {{title}} 第 {{page}} 页",
     "viewedLink": "{{visitor}} 访问链接",
     "description": "停留 {{duration}} · {{device}} · {{location}}"
   },
@@ -246,7 +252,13 @@
       "sourceTypeXLSX": "XLSX",
       "moveUp": "上移",
       "moveDown": "下移",
-      "remove": "移除"
+      "remove": "移除",
+      "status": {
+        "processing": "处理中",
+        "uploading": "上传中",
+        "failed": "失败",
+        "archived": "已归档"
+      }
     },
     "review": {
       "titleCreate": "确认并创建",
@@ -255,6 +267,8 @@
       "documentsSection": "链接包内容",
       "securitySection": "安全配置",
       "createButton": "创建链接包",
+      "notReady": "请等待所选文档全部处理完成后再创建。",
+      "ingestionFailed": "请先移除处理失败的文档，再创建链接。",
       "saveButton": "保存",
       "submitting": "保存中...",
       "successCreate": "链接包已创建！",

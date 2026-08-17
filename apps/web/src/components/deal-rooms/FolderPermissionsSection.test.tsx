@@ -29,7 +29,10 @@ i18nInstance.use(initReactI18next).init({
             table: {
               name: "Name",
               link: "Link",
-              views: "Views",
+              views: "Visits",
+              visits: "Visits",
+              visitsHint:
+                "Visits are the share access count (quota). Last viewed excludes workspace members.",
               lastViewed: "Last viewed",
               createdAt: "Created",
               sortCreatedDesc: "Sort by created time, descending",
@@ -171,7 +174,7 @@ describe("FolderPermissionsSection refresh", () => {
 
     const { rerender } = render(
       <I18nextProvider i18n={i18nInstance}>
-        <FolderPermissionsSection roomId="room-1" refreshKey={0} />
+        <FolderPermissionsSection roomId="room-1" canManage refreshKey={0} />
       </I18nextProvider>,
     );
 
@@ -179,7 +182,7 @@ describe("FolderPermissionsSection refresh", () => {
 
     rerender(
       <I18nextProvider i18n={i18nInstance}>
-        <FolderPermissionsSection roomId="room-1" refreshKey={1} />
+        <FolderPermissionsSection roomId="room-1" canManage refreshKey={1} />
       </I18nextProvider>,
     );
 
@@ -192,7 +195,7 @@ describe("FolderPermissionsSection refresh", () => {
 
     render(
       <I18nextProvider i18n={i18nInstance}>
-        <FolderPermissionsSection roomId="room-1" />
+        <FolderPermissionsSection roomId="room-1" canManage />
       </I18nextProvider>,
     );
 
@@ -201,13 +204,29 @@ describe("FolderPermissionsSection refresh", () => {
     expect(screen.getByTestId("deal-room-share-dialog")).toBeInTheDocument();
   });
 
+  it("labels share access count as visits, not analytics views", async () => {
+    vi.mocked(api.getDealRoomLinks).mockResolvedValue(pageResponse([makeLink()]));
+    vi.mocked(api.getPendingLinkAccessRequests).mockResolvedValue({ data: [] });
+
+    render(
+      <I18nextProvider i18n={i18nInstance}>
+        <FolderPermissionsSection roomId="room-1" canManage />
+      </I18nextProvider>,
+    );
+
+    expect(await screen.findByText("Visits")).toBeInTheDocument();
+    expect(
+      screen.getByText(/Visits are the share access count/),
+    ).toBeInTheDocument();
+  });
+
   it("opens link activity when clicking a share link row", async () => {
     vi.mocked(api.getDealRoomLinks).mockResolvedValue(pageResponse([makeLink()]));
     vi.mocked(api.getPendingLinkAccessRequests).mockResolvedValue({ data: [] });
 
     render(
       <I18nextProvider i18n={i18nInstance}>
-        <FolderPermissionsSection roomId="room-1" />
+        <FolderPermissionsSection roomId="room-1" canManage />
       </I18nextProvider>,
     );
 
@@ -226,7 +245,7 @@ describe("FolderPermissionsSection refresh", () => {
 
     render(
       <I18nextProvider i18n={i18nInstance}>
-        <FolderPermissionsSection roomId="room-1" />
+        <FolderPermissionsSection roomId="room-1" canManage />
       </I18nextProvider>,
     );
 
@@ -245,7 +264,7 @@ describe("FolderPermissionsSection refresh", () => {
 
     render(
       <I18nextProvider i18n={i18nInstance}>
-        <FolderPermissionsSection roomId="room-1" />
+        <FolderPermissionsSection roomId="room-1" canManage />
       </I18nextProvider>,
     );
 
@@ -261,7 +280,7 @@ describe("FolderPermissionsSection refresh", () => {
 
     render(
       <I18nextProvider i18n={i18nInstance}>
-        <FolderPermissionsSection roomId="room-1" />
+        <FolderPermissionsSection roomId="room-1" canManage />
       </I18nextProvider>,
     );
 
@@ -282,7 +301,7 @@ describe("FolderPermissionsSection refresh", () => {
 
     render(
       <I18nextProvider i18n={i18nInstance}>
-        <FolderPermissionsSection roomId="room-1" />
+        <FolderPermissionsSection roomId="room-1" canManage />
       </I18nextProvider>,
     );
 
@@ -322,7 +341,7 @@ describe("FolderPermissionsSection refresh", () => {
 
     render(
       <I18nextProvider i18n={i18nInstance}>
-        <FolderPermissionsSection roomId="room-1" />
+        <FolderPermissionsSection roomId="room-1" canManage />
       </I18nextProvider>,
     );
 
@@ -373,7 +392,7 @@ describe("FolderPermissionsSection refresh", () => {
 
     render(
       <I18nextProvider i18n={i18nInstance}>
-        <FolderPermissionsSection roomId="room-1" />
+        <FolderPermissionsSection roomId="room-1" canManage />
       </I18nextProvider>,
     );
 

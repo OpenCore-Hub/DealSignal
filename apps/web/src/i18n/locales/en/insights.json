@@ -32,6 +32,7 @@
     "trendCaptionCustom": "{{opens}} opens · {{visitors}} unique visitors · {{from}} – {{to}} (UTC)",
     "kpiOpens": "Link opens",
     "kpiVisitors": "Unique visitors",
+    "kpiVisitorsHint": "Distinct visitor IDs. Workspace members are excluded, same as Deal Radar and heat.",
     "kpiMedianDwell": "Median dwell",
     "kpiMedianDwellValue": "{{seconds}}s",
     "kpiMedianDwellHint": "Page-view duration (UTC window)",
@@ -63,13 +64,17 @@
     "exportColDate": "date",
     "exportColOpens": "opens",
     "exportColVisitors": "unique_visitors",
-    "topsLifetimeHint": "Rankings below use lifetime heat — not limited to the selected trend range.",
     "topDocuments": "Top documents",
     "topDocumentsEmptyTitle": "No document engagement yet",
-    "topDocumentsEmptyDescription": "Share a document link to populate this ranking.",
+    "topDocumentsEmptyDescription": "Rankings appear after visitors read pages in a file — not when a share is only opened.",
     "topLinks": "Top links",
     "topLinksEmptyTitle": "No share links yet",
     "topLinksEmptyDescription": "Create a share link to see heat rankings.",
+    "shareKind": {
+      "room": "Data room",
+      "bundle": "Bundle",
+      "document": "Document"
+    },
     "radarCtaTitle": "Follow-ups live on Deal Radar",
     "radarCtaDescription": "Insights is the analysis center — trends, sessions, and page depth. Who to contact next stays on Deal Radar.",
     "radarSignalsCount_one": "{{count}} open signal on Deal Radar",
@@ -87,6 +92,7 @@
       "depthLite": "Lite depth",
       "depthBase": "Base depth",
       "depthHint": "Same six Deal Radar products — this scenario only changes ranking, copy, and SLA.",
+      "kpiWindowHint": "Key-page views and hot links use lifetime heat. Forward signals follow the selected range. Open follow-ups are pending Deal Radar items.",
       "keyPages": "Key-page categories",
       "unknownScenario": "Scenario focus",
       "unknownCategory": "Category",
@@ -108,10 +114,21 @@
   "pages": {
     "title": "Page engagement",
     "scopeHint": "Library and data-room documents (agreements are managed separately).",
+    "actorHint": "Page views, sessions, and visitors exclude workspace members (same as Deal Radar and heat).",
     "selectPlaceholder": "Select document",
     "searchPlaceholder": "Search documents…",
+    "searchPlaceholderDealRoom": "Search files…",
     "noSearchResults": "No matching documents",
+    "noRoomDocuments": "No files in this data room",
     "untitledDocument": "Untitled document",
+    "scopeFilter": "Source",
+    "scopeLibrary": "Document",
+    "scopeDealRoom": "Data room",
+    "roomFilter": "Data room",
+    "roomAll": "All data rooms",
+    "roomAllShort": "All",
+    "roomSearchPlaceholder": "Filter rooms…",
+    "noRoomMatches": "No matching rooms",
     "categoryDealRoom": "Data room",
     "emptyTitle": "No documents yet",
     "emptyDescription": "Upload a document to view page engagement analysis.",
@@ -245,9 +262,14 @@
     "colPage": "Page",
     "colCategory": "Category",
     "colViews": "Views",
+    "colViewsSplit": "{{engaged}}/{{total}}",
+    "colViewsHint": "Engaged (≥3s) / title matches. Skims stay in the audit and are not scored.",
     "colVisitors": "Visitors",
     "colAvgDwell": "Avg dwell",
     "colDwell": "Dwell",
+    "colDwellHint": "Skims (<{{seconds}}s) stay in the audit and are not scored.",
+    "eventSkim": "Skim",
+    "eventSkimHint": "Title matched, but dwell was under {{seconds}}s — counted in the audit, not scored.",
     "pageNumber": "p{{page}}",
     "avgDwellValue": "{{seconds}}s",
     "categories": {
@@ -307,7 +329,12 @@
   },
   "heatBreakdown": {
     "title": "Why this heat level",
-    "subtitle": "Founder circle · engagement factors",
+    "subtitle": "{{circle}} · engagement factors",
+    "subtitleDocument": "{{circle}} · reading on this file",
+    "circleFallback": "Heat",
+    "contributingLinks": "Shares that contributed page views",
+    "contributingLinkViews_one": "{{count}} page view",
+    "contributingLinkViews_other": "{{count}} page views",
     "explain": "Explain",
     "score": "{{score}} pts",
     "trend": {
@@ -315,6 +342,12 @@
       "falling": "Falling",
       "stable": "Stable"
     },
+    "overlayTitle": "File extras",
+    "keyPagesTitle": "Key-page evidence",
+    "keyPagesEngaged": "{{engaged}} engaged (≥{{seconds}}s) of {{total}} title matches",
+    "keyPagesSkim": "Title matched, but dwell was under {{seconds}}s — not scored",
+    "keyPageRow": "p{{page}} · {{title}}",
+    "keyPageRowViews": "{{engaged}}/{{total}}",
     "factors": {
       "opens": "Opens",
       "revisits": "Revisits",
@@ -322,11 +355,21 @@
       "keyPageViews": "Key pages",
       "forwardSignals": "Detected forwards",
       "downloads": "Downloads",
-      "bouncePenalty": "Bounce penalty"
+      "bouncePenalty": "Bounce penalty",
+      "readingDepth": "Reading depth",
+      "qaCitations": "Q&A citations",
+      "crossDomain": "Cross-domain attention"
     },
     "factorHints": {
       "forwardSignals": "Counts confirmed forward markers from visitor sessions (not unique-visitor estimates).",
-      "bouncePenalty": "Opens where the visitor left without viewing any page on that link."
+      "forwardSignalsDocument": "Detected forwards stay on the share — they are not copied onto this file.",
+      "bouncePenalty": "Opens where the visitor left without viewing any page on that link.",
+      "bouncePenaltyDocument": "A visitor who viewed only one short page on this file.",
+      "keyPageViewsDocument": "Title-matched pages on this file with dwell of at least 3 seconds. Skims are listed below and not scored.",
+      "keyPageViewsLink": "Title-matched pages on this share with dwell of at least 3 seconds. Skims are listed below and not scored.",
+      "readingDepth": "How much of this file a visitor covered in a reading session.",
+      "qaCitations": "Visitor Ask turns that cited this file — not the whole share.",
+      "crossDomain": "Distinct visitor email domains that read this file. Company names are never inferred."
     }
   }
 }

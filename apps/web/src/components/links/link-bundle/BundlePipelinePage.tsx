@@ -21,6 +21,11 @@ import {
   resolveExpiryDaysFromExpiresAt,
   resolveMaxViewsFromAccessCount,
 } from "./pipelineUtils";
+import { isDocumentReadyForLibraryShare } from "@/lib/documentsUploadedEvent";
+import {
+  DOCUMENT_INGESTION_POLL_MS,
+  isDocumentIngestionFailed,
+} from "@/lib/waitForDocumentIngestion";
 import type { PermissionConfig } from "@/types";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
@@ -39,6 +44,45 @@ function BundlePipelineInner() {
   const canProceedNav = state.selectedDocuments.length >= 1;
 
   const { contacts } = useWorkspaceContacts(workspaceSlug);
+
+  const pendingIngestionKey = state.selectedDocuments
+    .filter(
+      (doc) =>
+        !isDocumentReadyForLibraryShare(doc.status) &&
+        !isDocumentIngestionFailed(doc.status),
+    )
+    .map((doc) => doc.id)
+    .sort()
+    .join(",");
+
+  useEffect(() => {
+    if (!pendingIngestionKey) return;
+    const pendingIngestionIds = pendingIngestionKey.split(",");
+    let cancelled = false;
+    const refresh = async () => {
+      const updates = await Promise.all(
+        pendingIngestionIds.map(async (documentId) => {
+          try {
+            return await api.getDocumentStatus(documentId);
+          } catch {
+            return null;
+          }
+        }),
+      );
+      const documents = updates.filter((doc): doc is NonNullable<typeof doc> => Boolean(doc));
+      if (!cancelled && documents.length > 0) {
+        dispatch({ type: "PATCH_DOCUMENTS", documents });
+      }
+    };
+    void refresh();
+    const interval = setInterval(() => {
+      void refresh();
+    }, DOCUMENT_INGESTION_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [dispatch, pendingIngestionKey]);
 
   // beforeunload protection for edit mode dirty state
   useEffect(() => {

@@ -112,6 +112,26 @@ describe("ContactDetailPage", () => {
     expect(screen.getByText(/acme\.capital/)).toBeInTheDocument();
     expect(screen.getByText("12")).toBeInTheDocument();
     expect(screen.getByText("Engagement trend")).toBeInTheDocument();
+    expect(screen.queryByText("Key-page evidence")).not.toBeInTheDocument();
+  });
+
+  it("shows skim key-page evidence without changing the heat badge", async () => {
+    getContactByIdMock.mockResolvedValue({
+      ...mockContact,
+      keyPages: {
+        engaged: 0,
+        total: 1,
+        minSeconds: 3,
+        pages: [{ pageNumber: 1, title: "Financials", engagedViews: 0, totalViews: 1 }],
+      },
+    });
+    await renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("Key-page evidence")).toBeInTheDocument();
+    });
+    expect(screen.getByText(/Title matched, but dwell was under 3s/i)).toBeInTheDocument();
+    expect(screen.getByText(/p1 · Financials/i)).toBeInTheDocument();
   });
 
   it("switches to timeline tab and shows activities", async () => {

@@ -21,6 +21,11 @@
     "totalDuration": "累计时长",
     "score": "热度分",
     "heat": "热度",
+    "keyPagesTitle": "关键页证据",
+    "keyPagesEngaged": "{{total}} 次标题命中中，{{engaged}} 次停留 ≥{{seconds}} 秒",
+    "keyPagesSkim": "标题命中但停留不足 {{seconds}} 秒，不计分",
+    "keyPageRow": "第 {{page}} 页 · {{title}}",
+    "keyPageRowViews": "{{engaged}}/{{total}}",
     "tabs": {
       "overview": "概览",
       "timeline": "活动时间线",

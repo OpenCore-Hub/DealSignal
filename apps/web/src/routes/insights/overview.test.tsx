@@ -76,7 +76,9 @@ const mockOverview: InsightsOverview = {
   topLinks: [
     {
       id: "link-1",
-      title: "Q3 Pitch",
+      name: "Investor share",
+      title: "Investor share",
+      documentTitle: "Q3 Pitch",
       documentId: "doc-1",
       shortUrl: "http://localhost:8080/l/abc",
       views: 12,
@@ -179,7 +181,9 @@ describe("InsightsOverviewPage", () => {
     expect(getInsightsOverviewMock).toHaveBeenCalledWith({ days: 7 });
     expect(screen.getByText("4")).toBeInTheDocument();
     expect(screen.getAllByText("2").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText("Q3 Pitch").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText("Q3 Pitch")).toBeInTheDocument();
+    expect(screen.getByText("Investor share")).toBeInTheDocument();
+    expect(screen.getByText("Document")).toBeInTheDocument();
     // Primary label is document title — not localhost URL as visible text.
     expect(screen.queryByText(/localhost/i)).not.toBeInTheDocument();
     // Contact action list lives on Deal Radar — Insights only shows a CTA.
@@ -190,14 +194,46 @@ describe("InsightsOverviewPage", () => {
     expect(screen.getAllByText(/\+100% vs prior 7d/i).length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText(/Link opens/i).length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText(/Unique visitors/i).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText(/Workspace members are excluded/i)).toBeInTheDocument();
     expect(screen.getByText(/Median dwell/i)).toBeInTheDocument();
     expect(screen.getByText(/48s/i)).toBeInTheDocument();
     expect(screen.getByText(/Completion rate/i)).toBeInTheDocument();
     expect(screen.getByText("50%")).toBeInTheDocument();
     expect(screen.getByText(/2 of 4 measurable sessions/i)).toBeInTheDocument();
-    expect(screen.getByText(/lifetime heat/i)).toBeInTheDocument();
+    expect(
+      screen.queryByText(/Rankings below use lifetime heat/i),
+    ).not.toBeInTheDocument();
     expect(screen.getByText(/Opens & visitors/i)).toBeInTheDocument();
     expect(screen.getByText(/Updated /i)).toBeInTheDocument();
+  });
+
+  it("labels unnamed document shares with the absolute URL, not the short path or file title", async () => {
+    getInsightsOverviewMock.mockResolvedValue({
+      ...mockOverview,
+      topLinks: [
+        {
+          id: "link-1",
+          name: "",
+          title: "",
+          documentTitle: "CFI-Case-Study-Three-Statement.xlsx",
+          documentId: "doc-1",
+          shareKind: "document",
+          shortUrl: "/l/abc",
+          views: 12,
+          score: 55,
+          heatLevel: "warm",
+        },
+      ],
+    });
+    await renderPage();
+    const longUrl = `${window.location.origin}/l/abc`;
+    await waitFor(() => {
+      expect(screen.getByText(longUrl)).toBeInTheDocument();
+    });
+    expect(screen.queryByText("CFI-Case-Study-Three-Statement.xlsx")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Share ·/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^\/l\/abc$/)).not.toBeInTheDocument();
+    expect(screen.getByText("Document")).toBeInTheDocument();
   });
 
   it("renders lite scenario pack depth, rules, and translated key-page categories", async () => {
@@ -235,6 +271,7 @@ describe("InsightsOverviewPage", () => {
     expect(pack).toHaveAttribute("data-pack-depth", "lite");
     expect(pack).toHaveTextContent(/Lite depth/i);
     expect(pack).toHaveTextContent(/Same six Deal Radar products/i);
+    expect(pack).toHaveTextContent(/lifetime heat/i);
     expect(pack).toHaveTextContent(/Title & ownership/i);
     expect(pack).toHaveTextContent(/Leases & tenancies/i);
     const gateKpi = screen.getByTestId("insights-scenario-kpi-gate_pending");

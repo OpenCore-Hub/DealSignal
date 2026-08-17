@@ -253,6 +253,11 @@ export function BundleDocumentPicker({
                   <p className="min-w-0 flex-1 truncate text-[13px] font-medium leading-tight">
                     {doc.fileName}
                   </p>
+                  {doc.status && doc.status !== "ready" ? (
+                    <span className="shrink-0 text-[11px] text-amber-700 dark:text-amber-400">
+                      {t(`bundle.documents.status.${doc.status}`)}
+                    </span>
+                  ) : null}
                   <div className="flex shrink-0 items-center gap-0.5 opacity-70 transition-opacity group-hover:opacity-100">
                     <button
                       type="button"

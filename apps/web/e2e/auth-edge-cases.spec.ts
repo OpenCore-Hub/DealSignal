@@ -3,7 +3,7 @@
  * Covers: POST /auth/refresh, POST /auth/logout, edge error responses
  */
 import { test, expect } from "@playwright/test";
-import { apiFetch, getCookieJar, clearCookieJar } from "./real-helpers";
+import { apiFetch, getCookieJar, clearCookieJar, turnstileRegisterFields } from "./real-helpers";
 
 const API_BASE = process.env.REAL_API_BASE_URL || "http://localhost:8080";
 
@@ -14,10 +14,10 @@ test.describe("Auth edge cases (real backend)", () => {
     const ts = Date.now();
     const email = `refresh-${ts}@example.com`;
 
-    // Register — cookies are populated from the Set-Cookie headers.
+    const captcha = await turnstileRegisterFields();
     const regRes = await apiFetch("/api/auth/register", {
       method: "POST",
-      body: JSON.stringify({ email, password: "Password123!" }),
+      body: JSON.stringify({ email, password: "Password123!", ...captcha }),
     });
     expect(regRes.ok).toBe(true);
     expect(getCookieJar().some((c) => c.startsWith("access_token="))).toBe(true);
@@ -58,9 +58,10 @@ test.describe("Auth edge cases (real backend)", () => {
     const ts = Date.now();
     const email = `logout-${ts}@example.com`;
 
+    const captcha = await turnstileRegisterFields();
     const regRes = await apiFetch("/api/auth/register", {
       method: "POST",
-      body: JSON.stringify({ email, password: "Password123!" }),
+      body: JSON.stringify({ email, password: "Password123!", ...captcha }),
     });
     expect(regRes.ok).toBe(true);
 
@@ -108,15 +109,15 @@ test.describe("Auth edge cases (real backend)", () => {
     const email = `dup-${ts}@example.com`;
 
     // First registration
+    const captcha = await turnstileRegisterFields();
     await apiFetch("/api/auth/register", {
       method: "POST",
-      body: JSON.stringify({ email, password: "Password123!" }),
+      body: JSON.stringify({ email, password: "Password123!", ...captcha }),
     });
 
-    // Duplicate registration
     const res = await apiFetch("/api/auth/register", {
       method: "POST",
-      body: JSON.stringify({ email, password: "Password123!" }),
+      body: JSON.stringify({ email, password: "Password123!", ...captcha }),
     });
     expect(res.status).toBe(409);
   });

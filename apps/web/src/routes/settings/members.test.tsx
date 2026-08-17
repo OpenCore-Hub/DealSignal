@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, act, within } from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router";
 import { I18nextProvider, initReactI18next } from "react-i18next";
 import i18n from "i18next";
@@ -54,9 +54,11 @@ const settingsResources = {
   en: {
     settings: {
       members: {
-        title: "Members",
+        title: "Workspace members",
+        description:
+          "These are workspace roles, not data-room roles. Invite people into a specific data room from that room’s Members tab.",
         emailPlaceholder: "Email address",
-        roleLabel: "Role",
+        roleLabel: "Workspace role",
         invite: "Invite",
         inviting: "Inviting...",
         invited: "Invitation sent to {{email}}",
@@ -73,7 +75,8 @@ const settingsResources = {
         roleUpdateFailed: "Could not update role. Please try again.",
         remove: "Remove",
         removeTitle: "Remove member",
-        removeDescription: "Remove {{email}} from this workspace?",
+        removeDescription:
+          "Remove {{email}} from this workspace? They will lose workspace access. If they are the only operator of a data room, removal is blocked.",
         removePendingDescription: "Revoke the invitation sent to {{email}}?",
         removing: "Removing...",
         removed: "{{email}} was removed",
@@ -84,9 +87,19 @@ const settingsResources = {
         cannotManageMember: "You do not have permission to manage this member",
         seatsUsage: "Internal seats",
         seatLimitReached:
-          "You've reached the team seat limit. Invite guests for free, or upgrade to add more members.",
+          "You've reached the team seat limit. Invite workspace guests for free, or upgrade to add more members.",
+        roleHints: {
+          admin: "Can manage workspace settings and view every data room.",
+          member: "Can create data rooms and only sees rooms they belong to.",
+          guest: "Free workspace access. Does not use a seat. Not a share-link visitor.",
+        },
         status: { pending: "Pending", active: "Active", suspended: "Suspended" },
-        roles: { owner: "Owner", admin: "Admin", member: "Member", guest: "Guest" },
+        roles: {
+          owner: "Workspace owner",
+          admin: "Workspace admin",
+          member: "Workspace member",
+          guest: "Workspace guest",
+        },
       },
     },
     common: {
@@ -142,7 +155,7 @@ async function renderPage() {
 describe("SettingsMembersPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(getCachedAccountEmail).mockReturnValue(undefined);
+    vi.mocked(getCachedAccountEmail).mockReturnValue("owner@acme.com");
     getWorkspaceMembersMock.mockResolvedValue({
       data: [
         {
@@ -238,7 +251,7 @@ describe("SettingsMembersPage", () => {
 
     await renderPage();
     expect(await screen.findByText("owner@acme.com")).toBeTruthy();
-    expect(screen.getAllByText("Owner").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Workspace owner").length).toBeGreaterThan(0);
 
     const emailInput = screen.getByPlaceholderText("Email address");
     fireEvent.change(emailInput, { target: { value: "New@Example.com" } });
@@ -270,17 +283,17 @@ describe("SettingsMembersPage", () => {
     await renderPage();
     expect(await screen.findByText("pending@acme.com")).toBeTruthy();
     expect(screen.getByText("Pending")).toBeTruthy();
-    expect(screen.getByText("Admin")).toBeTruthy();
+    expect(screen.getByText("Workspace admin")).toBeTruthy();
   });
 
   it("exposes invite role options", async () => {
     await renderPage();
     await screen.findByText("owner@acme.com");
 
-    fireEvent.click(screen.getByLabelText("Role"));
-    expect(await screen.findByRole("option", { name: "Admin" })).toBeTruthy();
-    expect(screen.getByRole("option", { name: "Member" })).toBeTruthy();
-    expect(screen.getByRole("option", { name: "Guest" })).toBeTruthy();
+    fireEvent.click(screen.getByLabelText("Workspace role"));
+    expect(await screen.findByRole("option", { name: "Workspace admin" })).toBeTruthy();
+    expect(screen.getByRole("option", { name: "Workspace member" })).toBeTruthy();
+    expect(screen.getByRole("option", { name: "Workspace guest" })).toBeTruthy();
   });
 
   it("hides admin invite option for admin actors", async () => {
@@ -302,10 +315,10 @@ describe("SettingsMembersPage", () => {
     await renderPage();
     await screen.findByText("admin@acme.com");
 
-    fireEvent.click(screen.getByLabelText("Role"));
-    expect(await screen.findByRole("option", { name: "Member" })).toBeTruthy();
-    expect(screen.getByRole("option", { name: "Guest" })).toBeTruthy();
-    expect(screen.queryByRole("option", { name: "Admin" })).toBeNull();
+    fireEvent.click(screen.getByLabelText("Workspace role"));
+    expect(await screen.findByRole("option", { name: "Workspace member" })).toBeTruthy();
+    expect(screen.getByRole("option", { name: "Workspace guest" })).toBeTruthy();
+    expect(screen.queryByRole("option", { name: "Workspace admin" })).toBeNull();
   });
 
   it("rejects invalid email before calling the API", async () => {
@@ -344,28 +357,14 @@ describe("SettingsMembersPage", () => {
     getWorkspaceMembersMock.mockResolvedValue({
       data: [
         {
-          id: "inv_pending",
-          userId: "",
-          email: "pending@acme.com",
-          name: "pending@acme.com",
-          role: "member",
-          joinedAt: "2026-01-02T00:00:00Z",
-          status: "pending",
+          id: "m_1",
+          userId: "u_1",
+          email: "owner@acme.com",
+          name: "Owner",
+          role: "owner",
+          joinedAt: "2026-01-01T00:00:00Z",
+          status: "active",
         },
-      ],
-    });
-
-    await renderPage();
-    await screen.findByText("pending@acme.com");
-    fireEvent.click(screen.getByLabelText("More actions"));
-    fireEvent.click(await screen.findByText("Edit role"));
-    expect(await screen.findByText("Choose a new role for pending@acme.com.")).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Save role/i })).toBeTruthy();
-  });
-
-  it("revokes a pending invitation from row actions", async () => {
-    getWorkspaceMembersMock.mockResolvedValue({
-      data: [
         {
           id: "inv_pending",
           userId: "",
@@ -380,7 +379,43 @@ describe("SettingsMembersPage", () => {
 
     await renderPage();
     await screen.findByText("pending@acme.com");
-    fireEvent.click(screen.getByLabelText("More actions"));
+    const pendingRow = screen.getByText("pending@acme.com").closest("li");
+    expect(pendingRow).toBeTruthy();
+    fireEvent.click(within(pendingRow as HTMLElement).getByLabelText("More actions"));
+    fireEvent.click(await screen.findByText("Edit role"));
+    expect(await screen.findByText("Choose a new role for pending@acme.com.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Save role/i })).toBeTruthy();
+  });
+
+  it("revokes a pending invitation from row actions", async () => {
+    getWorkspaceMembersMock.mockResolvedValue({
+      data: [
+        {
+          id: "m_1",
+          userId: "u_1",
+          email: "owner@acme.com",
+          name: "Owner",
+          role: "owner",
+          joinedAt: "2026-01-01T00:00:00Z",
+          status: "active",
+        },
+        {
+          id: "inv_pending",
+          userId: "",
+          email: "pending@acme.com",
+          name: "pending@acme.com",
+          role: "member",
+          joinedAt: "2026-01-02T00:00:00Z",
+          status: "pending",
+        },
+      ],
+    });
+
+    await renderPage();
+    await screen.findByText("pending@acme.com");
+    const pendingRow = screen.getByText("pending@acme.com").closest("li");
+    expect(pendingRow).toBeTruthy();
+    fireEvent.click(within(pendingRow as HTMLElement).getByLabelText("More actions"));
     fireEvent.click(await screen.findByRole("menuitem", { name: "Remove" }));
     fireEvent.click(await screen.findByRole("button", { name: /^Remove$/i }));
 
@@ -443,5 +478,26 @@ describe("SettingsMembersPage", () => {
         "You've reached the team seat limit for your plan. Upgrade to invite more members.",
       );
     });
+  });
+
+  it("does not treat a missing account email as workspace owner", async () => {
+    vi.mocked(getCachedAccountEmail).mockReturnValue(undefined);
+    await renderPage();
+    expect(await screen.findByText("owner@acme.com")).toBeTruthy();
+    expect(screen.queryByTestId("workspace-members-invite")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Invite$/i })).not.toBeInTheDocument();
+  });
+
+  it("explains workspace roles separately from data-room roles", async () => {
+    await renderPage();
+    expect(await screen.findByTestId("workspace-members-plane-hint")).toHaveTextContent(
+      "These are workspace roles, not data-room roles",
+    );
+    expect(await screen.findByTestId("members-seat-usage")).not.toHaveTextContent(
+      "Data-room members and share-link visitors are not counted here",
+    );
+    expect(screen.getByTestId("workspace-members-invite")).toHaveTextContent(
+      "Can create data rooms and only sees rooms they belong to.",
+    );
   });
 });

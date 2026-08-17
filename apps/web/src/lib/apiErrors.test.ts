@@ -22,7 +22,12 @@ const translations: Record<string, string> = {
     "This share link is no longer active. Please contact the sender if you need access.",
   "linkShare:share.linkNameDuplicate": "Name taken",
   "auth:login.errorInvalidCredentials": "Bad credentials",
+  "auth:login.emailNotVerified": "Verify your email before signing in.",
+  "auth:register.errorDisposableEmail": "Use a permanent work email.",
+  "auth:register.errorCaptchaRequired": "Complete the verification challenge.",
   "auth:verifyEmail.error": "Verify failed",
+  "auth:resetPassword.errorInvalidToken": "Reset link expired.",
+  "auth:forgotPassword.errorFailed": "Could not send reset email.",
   "auth:acceptInvitation.emailMismatch":
     "You're signed in with a different email than this invitation. Sign out and continue with the invited email.",
   "auth:acceptInvitation.planLimitSeats":
@@ -63,6 +68,34 @@ describe("apiErrorMessage", () => {
     expect(apiErrorMessage(err, { context: "viewerGate" })).not.toBe("email is blocked");
   });
 
+  it("maps captcha register errors", () => {
+    expect(
+      apiErrorMessage(
+        new ApiError({
+          status: 400,
+          code: "captcha_required",
+          message: "complete the verification challenge",
+          requestId: "req-c",
+        }),
+        { context: "register" },
+      ),
+    ).toBe("Complete the verification challenge.");
+  });
+
+  it("maps disposable register emails", () => {
+    expect(
+      apiErrorMessage(
+        new ApiError({
+          status: 400,
+          code: "disposable_email",
+          message: "disposable email addresses are not allowed",
+          requestId: "req-d",
+        }),
+        { context: "register" },
+      ),
+    ).toBe("Use a permanent work email.");
+  });
+
   it("maps login context", () => {
     const err = new ApiError({
       status: 401,
@@ -71,6 +104,31 @@ describe("apiErrorMessage", () => {
       requestId: "req-2",
     });
     expect(apiErrorMessage(err, { context: "login" })).toBe("Bad credentials");
+    expect(
+      apiErrorMessage(
+        new ApiError({
+          status: 403,
+          code: "email_not_verified",
+          message: "email not verified",
+          requestId: "req-uv",
+        }),
+        { context: "login" },
+      ),
+    ).toBe("Verify your email before signing in.");
+  });
+
+  it("maps password reset token errors", () => {
+    expect(
+      apiErrorMessage(
+        new ApiError({
+          status: 400,
+          code: "invalid_or_expired_token",
+          message: "reset link is invalid or has expired",
+          requestId: "req-rp",
+        }),
+        { context: "resetPassword" },
+      ),
+    ).toBe("Reset link expired.");
   });
 
   it("maps duplicate slug and name", () => {

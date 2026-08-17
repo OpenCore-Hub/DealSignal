@@ -46,6 +46,7 @@
   "stats": {
     "documents": "文档",
     "views": "浏览量",
+    "viewsHint": "链接打开次数，不含工作区成员（与数据室分析一致）。",
     "activeLinks": "活跃链接"
   },
   "card": {
@@ -54,7 +55,16 @@
     "deleteTitle": "删除数据室",
     "deleteDescription": "确定删除「{{name}}」？文档将退回文档库。该数据室的分享链接、知识库和分析将被删除，此操作无法撤销。",
     "deleted": "数据室已删除",
-    "deleteFailed": "删除数据室失败"
+    "deleteFailed": "删除数据室失败",
+    "ndaRequired": "待签署 NDA"
+  },
+  "ndaGate": {
+    "title": "签署 NDA 后继续",
+    "description": "你已被加入「{{name}}」。签署 NDA 后即可查看文档和数据室其他内容。",
+    "sign": "签署 NDA 并继续",
+    "signing": "签署中…",
+    "signed": "NDA 已签署",
+    "failed": "签署 NDA 失败"
   },
   "detail": {
     "back": "返回数据室",
@@ -72,7 +82,8 @@
     "processing": "处理中",
     "uploadProgress": "文件上传进度",
     "uploadFailed": "上传失败",
-    "noTemplate": "未匹配到模板结构。"
+    "noTemplate": "未匹配到模板结构。",
+    "oversightBanner": "你正在巡视此数据室。如需管理，请让室主邀请你加入。"
   },
   "tabs": {
     "documents": "数据室",
@@ -85,6 +96,7 @@
   },
   "pageTabs": {
     "resources": "资源文件",
+    "members": "成员",
     "access": "访问策略",
     "links": "分享链接",
     "analytics": "数据分析",
@@ -112,6 +124,7 @@
     "ndaPlanRequired": "NDA 安全域需 Business 或更高方案",
     "saveButton": "保存访问策略",
     "saveHint": "请先保存。访问黑名单会立即对本数据室所有分享链接生效。安全域会在创建/编辑分享时锁定验证与 NDA。",
+    "oversightHint": "你可以查看此策略。修改黑名单或安全域需要房间角色。",
     "unsavedLeaveTitle": "访问策略尚未保存",
     "unsavedLeaveDescription": "离开此页将丢弃当前修改。",
     "unsavedLeaveCountdown": "{{seconds}} 秒后离开…",
@@ -508,6 +521,8 @@
     "description": "当前房间策略一览。可编辑控件将逐步完善。",
     "moreComing": "冻结房间、默认水印与保留策略即将上线。",
     "inviteMembers": "邀请成员",
+    "membersHint": "邀请与管理协作者请到「成员」页签。",
+    "openMembers": "打开成员",
     "ndaSaved": "NDA 协议已保存",
     "enabled": "开启",
     "disabled": "关闭",
@@ -569,7 +584,7 @@
     "table": {
       "name": "名称",
       "link": "链接",
-      "views": "浏览量",
+      "views": "访问次数",
       "lastViewed": "最近查看",
       "active": "活跃"
     },
@@ -591,7 +606,9 @@
       "table": {
         "name": "名称",
         "link": "链接",
-        "views": "浏览量",
+        "views": "访问次数",
+        "visits": "访问次数",
+        "visitsHint": "访问次数是分享 access count（配额口径）。最近查看已排除工作区成员，与分享列表一致。数据室分析里的「浏览量」是排除成员后的打开次数。",
         "lastViewed": "最近查看",
         "createdAt": "创建时间",
         "sortCreatedDesc": "按创建时间降序",
@@ -674,6 +691,7 @@
     "views": "浏览量",
     "activeLinks": "活跃链接",
     "uniqueVisitors": "独立访客",
+    "actorHint": "浏览量、独立访客和最近访客不含工作区成员（与交易雷达、热力一致）。",
     "recentVisitors": "最近访客",
     "visitorViews_one": "{{count}} 次浏览",
     "visitorViews_other": "{{count}} 次浏览",
@@ -686,6 +704,7 @@
     "description": "回复本数据室各分享链接访客的 Ask 问题。这不是信号收件箱。",
     "loading": "正在加载 Ask 问题...",
     "loadFailed": "加载 Ask 问题失败",
+    "askManageRequired": "回复、正式发布和固定 FAQ 需要房间所有者或管理员角色。",
     "retry": "重试",
     "emptyTitle": "暂无 Ask 问题",
     "emptyDescription": "访客在本室分享链接提问后，问题会显示在这里供你回复。",
@@ -960,6 +979,7 @@
     "ndaAgreementPlaceholder": "选择 NDA 协议",
     "ndaAgreementRequired": "邀请成员前请先选择 NDA 协议",
     "ndaAgreementEmpty": "还没有 NDA 协议，请先在协议库中添加。",
+    "ndaAgreementUntitled": "未命名协议",
     "email": "邮箱",
     "emailPlaceholder": "investor@example.com",
     "role": "角色",
@@ -967,7 +987,8 @@
       "owner": "所有者",
       "admin": "管理员",
       "member": "成员",
-      "viewer": "访客"
+      "viewer": "访客",
+      "guest": "访客"
     },
     "inviting": "邀请中...",
     "invited": "已邀请 {{email}}",
@@ -980,7 +1001,24 @@
     "remove": "移除 {{email}}",
     "removeConfirm": "将 {{email}} 从该数据室移除？",
     "removed": "已移除 {{email}}",
-    "ndaSigned": "NDA 已签署"
+    "removing": "移除中...",
+    "ndaSigned": "NDA 已签署",
+    "pageDescription": "邀请协作者并分配数据室角色（不是工作区角色）。外部访客请使用分享链接。",
+    "listTitle": "房间成员",
+    "listDescription": "这里是数据室角色，不是工作区角色。可调整可授予的角色，或移除协作者。所有者不可更改。",
+    "oversightHint": "你可以查看成员名单。邀请或改角色需要房间角色。",
+    "empty": "暂无成员。",
+    "loadFailed": "无法加载成员。",
+    "retry": "重试",
+    "roleUpdated": "已更新 {{email}} 的角色",
+    "cannotModifyOwner": "无法在此更改房间所有者。",
+    "cannotModifySelf": "无法在此更改自己的房间角色。",
+    "cannotManageMember": "你没有权限管理该成员。",
+    "status": {
+      "active": "活跃",
+      "pending": "待签署 NDA",
+      "suspended": "已停用"
+    }
   },
   "public": {
     "title": "数据室",

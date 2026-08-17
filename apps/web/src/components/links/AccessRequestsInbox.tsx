@@ -32,6 +32,8 @@ interface AccessRequestsInboxProps {
   itemTestIdPrefix: string;
   onApprove: (request: AccessRequestInboxItem) => void;
   onReject: (request: AccessRequestInboxItem) => void;
+  /** When omitted, falls back to workspace write (document-library inbox). */
+  canReview?: boolean;
 }
 
 export function AccessRequestsInbox({
@@ -44,9 +46,11 @@ export function AccessRequestsInbox({
   itemTestIdPrefix,
   onApprove,
   onReject,
+  canReview,
 }: AccessRequestsInboxProps) {
   const { t } = useTranslation("linkShare");
   const { canWrite } = useWorkspaceAccess();
+  const showActions = canReview ?? canWrite;
   const focusRef = useRef<HTMLDivElement | null>(null);
   const focusRequestId = useMemo(() => {
     if (!focusLinkId) return null;
@@ -144,7 +148,7 @@ export function AccessRequestsInbox({
                   {formatRelativeTime(request.created_at)}
                 </p>
               </div>
-              {canWrite ? (
+              {showActions ? (
                 <div className="flex shrink-0 gap-2">
                   <Button
                     size="sm"

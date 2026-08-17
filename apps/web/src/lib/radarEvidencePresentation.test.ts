@@ -4,6 +4,7 @@ import {
   coalesceSecurityEvents,
   evidenceEmptyPrimaryKey,
   gateTimelineSummary,
+  topPagesSpanMultipleDocuments,
 } from "./radarEvidencePresentation";
 
 const events = [
@@ -94,5 +95,22 @@ describe("gateTimelineSummary", () => {
   it("handles request-only-after pattern", () => {
     const summary = gateTimelineSummary(events.slice(0, 3), "2026-08-11T10:15:22Z");
     expect(summary).toEqual({ kind: "after_only", after: 3, total: 3 });
+  });
+});
+
+describe("topPagesSpanMultipleDocuments", () => {
+  it("is false for a single document or missing ids", () => {
+    expect(topPagesSpanMultipleDocuments([{ documentId: "doc-1" }, { documentId: "doc-1" }])).toBe(
+      false,
+    );
+    expect(topPagesSpanMultipleDocuments([{ pageNumber: 1 } as { documentId?: string }])).toBe(
+      false,
+    );
+  });
+
+  it("is true when pages come from more than one document", () => {
+    expect(
+      topPagesSpanMultipleDocuments([{ documentId: "doc-xlsx" }, { documentId: "doc-pdf" }]),
+    ).toBe(true);
   });
 });

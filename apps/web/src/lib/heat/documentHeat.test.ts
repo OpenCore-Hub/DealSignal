@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { documentHeatFromLinks } from "./documentHeat";
-import type { Link } from "@/types";
+import { documentHeatFromLinks, overlayDocumentNativeHeat } from "./documentHeat";
+import type { HeatLevel, Link } from "@/types";
 
 function link(partial: Partial<Link> & Pick<Link, "id" | "heatLevel">): Link {
   return {
@@ -38,5 +38,42 @@ describe("documentHeatFromLinks", () => {
         link({ id: "l1", heatLevel: "cold", accessCount: 100 }),
       ]),
     ).toBe("cold");
+  });
+});
+
+describe("overlayDocumentNativeHeat", () => {
+  function row(partial: { id: string; heatLevel?: HeatLevel; totalViews?: number; links?: string[] }) {
+    return {
+      id: partial.id,
+      heatLevel: partial.heatLevel ?? "cold",
+      totalViews: partial.totalViews ?? 0,
+      links: partial.links ?? [],
+    };
+  }
+
+  it("is a no-op when scores are empty", () => {
+    const rows = [row({ id: "doc_1", heatLevel: "warm", totalViews: 4 })];
+    expect(overlayDocumentNativeHeat(rows, [])).toBe(rows);
+  });
+
+  it("overlays heat and page views without attaching shares", () => {
+    const rows = [row({ id: "doc_1", heatLevel: "cold", totalViews: 0, links: [] })];
+    const out = overlayDocumentNativeHeat(rows, [
+      { id: "doc_1", views: 12, heatLevel: "hot" },
+    ]);
+    expect(out[0]).toEqual({
+      id: "doc_1",
+      heatLevel: "hot",
+      totalViews: 12,
+      links: [],
+    });
+  });
+
+  it("keeps library-link fallback when the file has no native score", () => {
+    const rows = [row({ id: "doc_1", heatLevel: "warm", totalViews: 5 })];
+    const out = overlayDocumentNativeHeat(rows, [
+      { id: "doc_other", views: 99, heatLevel: "hot" },
+    ]);
+    expect(out[0]).toEqual(rows[0]);
   });
 });

@@ -41,7 +41,8 @@ async function withI18n(ui: React.ReactElement) {
             title: "Room Settings",
             description: "Policy",
             moreComing: "More coming",
-            inviteMembers: "Invite members",
+            membersHint: "Invite on Members",
+            openMembers: "Open Members",
             ndaSaved: "NDA agreement saved",
             enabled: "On",
             disabled: "Off",
@@ -65,6 +66,11 @@ async function withI18n(ui: React.ReactElement) {
             inviteTitle: "Invite members",
             inviteDescription: "Invite people",
             inviteDescriptionNda: "They must sign the NDA.",
+            listTitle: "Room members",
+            listDescription: "Change grantable roles.",
+            oversightHint: "View only",
+            empty: "No members yet.",
+            roles: { owner: "Owner", admin: "Admin", member: "Member", guest: "Visitor" },
           },
           detail: { invite: "Invite" },
         },
@@ -98,6 +104,9 @@ vi.mock("@/lib/api", () => ({
     }),
     patchDealRoomNdaAgreement: vi.fn(),
     inviteDealRoomMember: vi.fn(),
+    getDealRoomMembers: vi.fn().mockResolvedValue({ data: [] }),
+    updateDealRoomMemberRole: vi.fn(),
+    removeDealRoomMember: vi.fn(),
   },
 }));
 
@@ -221,12 +230,14 @@ describe("deal room nav B′ pieces", () => {
           requiresApproval: false,
           memberCount: 4,
         }}
+        canManage
         activeLinkCount={2}
       />
     );
     expect(screen.getByTestId("deal-room-settings-tab")).toBeInTheDocument();
     expect(screen.getAllByText("Open").length).toBeGreaterThan(0);
     expect(screen.getByText("On")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /invite members/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /invite members/i })).not.toBeInTheDocument();
+    expect(screen.queryByTestId("deal-room-members-panel")).not.toBeInTheDocument();
   });
 });

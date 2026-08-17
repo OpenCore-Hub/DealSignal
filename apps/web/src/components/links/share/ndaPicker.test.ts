@@ -3,6 +3,7 @@ import { api } from "@/lib/api";
 import {
   mapAgreementDocuments,
   mapNdaTemplates,
+  ndaPickerDisplayTitle,
   resolveNdaDocumentFallback,
   loadNdaPickerSources,
 } from "./ndaPicker";
@@ -33,6 +34,12 @@ describe("ndaPicker", () => {
       { id: "a3", title: "Archived", status: "archived" },
     ] as Document[];
     expect(mapAgreementDocuments(docs)).toEqual([{ id: "a1", title: "Ready NDA" }]);
+  });
+
+  it("falls back to untitled when the agreement has no display name", () => {
+    expect(ndaPickerDisplayTitle("Mutual NDA", "Untitled agreement")).toBe("Mutual NDA");
+    expect(ndaPickerDisplayTitle("  ", "Untitled agreement")).toBe("Untitled agreement");
+    expect(ndaPickerDisplayTitle(undefined, "Untitled agreement")).toBe("Untitled agreement");
   });
 
   it("keeps agreement library only — never falls back to room/share docs", () => {

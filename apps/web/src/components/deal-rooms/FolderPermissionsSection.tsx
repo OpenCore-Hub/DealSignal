@@ -40,7 +40,6 @@ import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { copyToClipboard } from "@/lib/clipboard";
 import { useAsyncData } from "@/hooks/useAsyncData";
-import { useWorkspaceAccess } from "@/hooks/useWorkspaceAccess";
 import { DealRoomShareDialog } from "./DealRoomShareDialog";
 import { SendVerificationCodeDialog } from "./SendVerificationCodeDialog";
 import { LinkActivityDialog } from "@/components/links/share";
@@ -60,6 +59,7 @@ interface FolderPermissionsSectionProps {
   onLinksChanged?: () => void;
   /** Open Room Security tab for a specific link (approval inbox deep link). */
   onManageAccess?: (linkId: string) => void;
+  canManage?: boolean;
 }
 
 function formatDateTime(value: string | undefined, emptyLabel: string): string {
@@ -81,9 +81,9 @@ export function FolderPermissionsSection({
   refreshKey = 0,
   onLinksChanged,
   onManageAccess,
+  canManage = false,
 }: FolderPermissionsSectionProps) {
   const { t } = useTranslation("dealRooms");
-  const { canWrite } = useWorkspaceAccess();
   const emptyCell = t("common:emDash");
   const [page, setPage] = useState(1);
   // null = default newest-first load; first header click locks to desc, then toggles.
@@ -321,7 +321,7 @@ export function FolderPermissionsSection({
           <div className="flex flex-col items-center justify-center rounded-xl bg-rose-50/40 px-6 py-16 text-center dark:bg-rose-950/15">
             <LinkIcon size={40} className="mb-3 text-muted-foreground" />
             <p className="text-body text-muted-foreground">{t("permissions.links.emptyTitle")}</p>
-            {canWrite ? (
+            {canManage ? (
               <Button className="mt-4" onClick={handleCreateLink}>
                 {t("permissions.links.createLink")}
               </Button>
@@ -350,12 +350,12 @@ export function FolderPermissionsSection({
                 maxLength={MAX_SEARCH_LEN}
               />
             </div>
-            {canWrite ? (
+            {canManage ? (
               <Button onClick={handleCreateLink} data-testid="deal-room-create-new-link">
                 {t("permissions.links.createNewLink")}
               </Button>
             ) : null}
-            {canWrite ? (
+            {canManage ? (
               <Button
                 variant="outline"
                 disabled={selectedIds.size === 0 || bulkDeleteLoading}
@@ -393,7 +393,7 @@ export function FolderPermissionsSection({
                     {t("permissions.links.table.link")}
                   </TableHead>
                   <TableHead className="text-muted-foreground">
-                    {t("permissions.links.table.views")}
+                    {t("permissions.links.table.visits")}
                   </TableHead>
                   <TableHead className="text-muted-foreground">
                     {t("permissions.links.table.lastViewed")}
@@ -509,7 +509,7 @@ export function FolderPermissionsSection({
                           <Switch
                             checked={link.isActive ?? false}
                             onCheckedChange={(checked) => handleActiveChange(link.id, checked)}
-                            disabled={!canWrite}
+                            disabled={!canManage}
                             aria-label={t("permissions.links.table.active")}
                           />
                         </TableCell>
@@ -526,7 +526,7 @@ export function FolderPermissionsSection({
                             >
                               <ChartLine size={16} />
                             </Button>
-                            {canWrite ? (
+                            {canManage ? (
                               <Button
                                 type="button"
                                 size="icon-sm"
@@ -539,7 +539,7 @@ export function FolderPermissionsSection({
                                 <PencilSimple size={16} />
                               </Button>
                             ) : null}
-                            {pendingCount > 0 && onManageAccess && canWrite ? (
+                            {pendingCount > 0 && onManageAccess && canManage ? (
                               <Button
                                 type="button"
                                 size="icon-sm"
@@ -552,7 +552,7 @@ export function FolderPermissionsSection({
                                 <UserPlus size={16} />
                               </Button>
                             ) : null}
-                            {canWrite && link.requireEmailVerification ? (
+                            {canManage && link.requireEmailVerification ? (
                               <Button
                                 type="button"
                                 size="icon-sm"
@@ -565,7 +565,7 @@ export function FolderPermissionsSection({
                                 <EnvelopeSimple size={16} />
                               </Button>
                             ) : null}
-                            {canWrite ? (
+                            {canManage ? (
                               <Button
                                 type="button"
                                 size="icon-sm"
@@ -587,6 +587,9 @@ export function FolderPermissionsSection({
               </TableBody>
             </Table>
           </div>
+          <p className="text-caption text-muted-foreground">
+            {t("permissions.links.table.visitsHint")}
+          </p>
 
           <div
             className="flex flex-wrap items-center justify-end gap-2"

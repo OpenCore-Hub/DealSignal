@@ -232,6 +232,9 @@ export function DealRoomsPage() {
                         >
                           {isActive(room) ? t("status.active") : t("status.inactive")}
                         </span>
+                        {room.ndaRequired ? (
+                          <Badge variant="secondary">{t("card.ndaRequired")}</Badge>
+                        ) : null}
                         {room.ndaEnabled && (
                           <Lock size={14} className="ml-1 text-muted-foreground" />
                         )}
@@ -295,7 +298,7 @@ export function DealRoomsPage() {
                         <span className="text-muted-foreground">{t("stats.documents")}</span>
                         <span className="font-medium tabular-nums">{room.documentCount}</span>
                       </div>
-                      <div className="flex items-center justify-between text-body">
+                      <div className="flex items-center justify-between text-body" title={t("stats.viewsHint")}>
                         <span className="text-muted-foreground">{t("stats.views")}</span>
                         <span className="font-medium tabular-nums">{room.viewCount ?? 0}</span>
                       </div>

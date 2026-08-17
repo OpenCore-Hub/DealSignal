@@ -85,6 +85,13 @@ export interface RequestOptions extends RequestInit {
   signal?: AbortSignal;
 }
 
+export type UploadProgressHandler = (event: { loaded: number; total: number }) => void;
+
+/** Multipart POST options. Isolated from `request()` so fetch callers stay untouched. */
+export interface UploadRequestOptions extends RequestOptions {
+  onUploadProgress?: UploadProgressHandler;
+}
+
 function getBaseUrl(): string {
   const env = import.meta.env.VITE_API_BASE_URL as string | undefined;
   return env?.replace(/\/+$/, "") ?? "";
@@ -267,6 +274,171 @@ export async function request<T>(
     return payload.data as T;
   }
   return payload as T;
+}
+
+/**
+ * Same contract as `request`, but reports real `xhr.upload` bytes.
+ * Do not route other callers through this — `request` stays fetch-only (CRITICAL).
+ */
+export async function requestWithUploadProgress<T>(
+  workspaceSlug: string | undefined,
+  path: string,
+  options: UploadRequestOptions = {},
+): Promise<T> {
+  if (!options.onUploadProgress || !(options.body instanceof FormData)) {
+    const { onUploadProgress: _ignored, ...rest } = options;
+    return request<T>(workspaceSlug, path, rest);
+  }
+
+  const send = () =>
+    executeAuthorizedXhr<T>(workspaceSlug, path, options, /* retried */ false);
+  try {
+    return await send();
+  } catch (err) {
+    if (!(err instanceof ApiError) || err.status !== 401 || options.skipAuth) {
+      throw err;
+    }
+    try {
+      await refreshAccessToken(getBaseUrl());
+    } catch {
+      redirectToLogin();
+      throw err;
+    }
+    return executeAuthorizedXhr<T>(workspaceSlug, path, options, /* retried */ true);
+  }
+}
+
+function executeAuthorizedXhr<T>(
+  workspaceSlug: string | undefined,
+  path: string,
+  options: UploadRequestOptions,
+  retried: boolean,
+): Promise<T> {
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  const prefix = workspaceSlug
+    ? `/api/workspaces/${encodeURIComponent(workspaceSlug)}`
+    : "/api";
+  const url = `${getBaseUrl()}${prefix}${normalizedPath}`;
+  const requestId = generateRequestId();
+
+  return new Promise<T>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open((options.method ?? "POST").toString().toUpperCase(), url);
+    xhr.withCredentials = true;
+    xhr.responseType = "text";
+
+    const headers = new Headers(options.headers);
+    if (!headers.has("Accept")) {
+      headers.set("Accept", "application/json");
+    }
+    headers.set("X-Request-ID", requestId);
+    headers.set("Accept-Language", getLanguage());
+    if (options.idempotencyKey) {
+      headers.set("X-Idempotency-Key", options.idempotencyKey);
+    }
+    if (options.token && !options.skipAuth) {
+      headers.set("Authorization", `Bearer ${options.token}`);
+    }
+    headers.forEach((value, key) => {
+      if (key.toLowerCase() === "content-type") return;
+      xhr.setRequestHeader(key, value);
+    });
+
+    const onAbort = () => {
+      xhr.abort();
+    };
+    if (options.signal?.aborted) {
+      reject(new DOMException("Aborted", "AbortError"));
+      return;
+    }
+    options.signal?.addEventListener("abort", onAbort);
+
+    xhr.upload.onprogress = (event) => {
+      if (!event.lengthComputable) return;
+      options.onUploadProgress?.({ loaded: event.loaded, total: event.total });
+    };
+
+    const sessionHeaders = {
+      headers: { get: (name: string) => xhr.getResponseHeader(name) },
+    } as Response;
+
+    xhr.onload = () => {
+      options.signal?.removeEventListener("abort", onAbort);
+
+      if (xhr.status === 401 && !options.skipAuth && !retried) {
+        reject(
+          new ApiError({
+            status: 401,
+            code: "unauthorized",
+            message: "unauthorized",
+            requestId,
+          }),
+        );
+        return;
+      }
+
+      if (xhr.status === 204) {
+        handleSessionRefresh(sessionHeaders, options);
+        resolve(undefined as T);
+        return;
+      }
+
+      let payload: unknown = null;
+      if (xhr.responseText) {
+        try {
+          payload = JSON.parse(xhr.responseText) as unknown;
+        } catch {
+          payload = null;
+        }
+      }
+
+      if (xhr.status < 200 || xhr.status >= 300) {
+        const body = payload as BaseResponse<unknown> | null;
+        const gateFlags = body as GateErrorFlags | null;
+        reject(
+          new ApiError({
+            status: xhr.status,
+            code: body?.code ?? "http_error",
+            message: body?.message ?? xhr.statusText,
+            requestId: body?.request_id ?? requestId,
+            details: body?.details,
+            requiresEmail: gateFlags?.requiresEmail,
+            requiresEmailVerification: gateFlags?.requiresEmailVerification,
+            requiresPassword: gateFlags?.requiresPassword,
+            requiresNda: gateFlags?.requiresNda,
+            isDealRoom: gateFlags?.isDealRoom,
+          }),
+        );
+        return;
+      }
+
+      handleSessionRefresh(sessionHeaders, options);
+      if (isBaseResponse<T>(payload)) {
+        resolve(payload.data as T);
+        return;
+      }
+      resolve(payload as T);
+    };
+
+    xhr.onerror = () => {
+      options.signal?.removeEventListener("abort", onAbort);
+      reject(
+        new ApiError({
+          status: 0,
+          code: "network_error",
+          message: "network_error",
+          requestId,
+        }),
+      );
+    };
+
+    xhr.onabort = () => {
+      options.signal?.removeEventListener("abort", onAbort);
+      reject(new DOMException("Aborted", "AbortError"));
+    };
+
+    xhr.send(options.body instanceof FormData ? options.body : null);
+  });
 }
 
 /**

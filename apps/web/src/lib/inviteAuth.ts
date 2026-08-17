@@ -13,6 +13,23 @@ export function isInviteAuthFlow(searchParams: URLSearchParams): boolean {
   return searchParams.get("invite") === "1" && Boolean(inviteEmailFromSearchParams(searchParams));
 }
 
+const workspaceInviteAcceptPath = /^\/invitations\/([^/?#]+)\/accept$/;
+
+/** Workspace invite token from a safe login/register redirect, or empty. */
+export function workspaceInviteTokenFromRedirect(redirect: string | null): string {
+  const path = safeAuthRedirect(redirect);
+  if (!path) return "";
+  const pathname = path.split("?")[0] ?? "";
+  const match = pathname.match(workspaceInviteAcceptPath);
+  const raw = match?.[1] ?? "";
+  if (!raw || raw.includes("..") || raw.includes("/")) return "";
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return "";
+  }
+}
+
 export function buildInviteAuthPath(
   mode: "login" | "register",
   opts: { redirect?: string | null; email?: string | null },

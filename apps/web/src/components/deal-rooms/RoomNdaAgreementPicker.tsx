@@ -8,7 +8,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useNdaPickerSources } from "@/components/links/share";
+import { ndaPickerDisplayTitle, useNdaPickerSources } from "@/components/links/share";
 
 export type RoomNdaSelection = {
   ndaTemplateId: string;
@@ -59,15 +59,22 @@ export function RoomNdaAgreementPicker({
         (o) => o.templateId === value.ndaTemplateId || o.id === value.ndaTemplateId,
       );
       if (byTpl) return byTpl.id;
+      return value.ndaTemplateId;
     }
     if (value.ndaDocumentId) {
       const byDoc = ndaOptions.find(
         (o) => o.documentId === value.ndaDocumentId || o.id === value.ndaDocumentId,
       );
       if (byDoc) return byDoc.id;
+      return value.ndaDocumentId;
     }
     return null;
   }, [value.ndaTemplateId, value.ndaDocumentId, ndaOptions]);
+
+  const selectedLabel = useMemo(() => {
+    const opt = ndaOptions.find((o) => o.id === selectedValue);
+    return ndaPickerDisplayTitle(opt?.title, t("members.ndaAgreementUntitled"));
+  }, [ndaOptions, selectedValue, t]);
 
   const missing = !value.ndaTemplateId && !value.ndaDocumentId;
 
@@ -111,19 +118,24 @@ export function RoomNdaAgreementPicker({
           className="h-9 w-full"
           data-testid="room-nda-agreement-select"
         >
-          <SelectValue placeholder={t("members.ndaAgreementPlaceholder")} />
+          <SelectValue placeholder={t("members.ndaAgreementPlaceholder")}>
+            {selectedValue ? selectedLabel : null}
+          </SelectValue>
         </SelectTrigger>
         <SelectContent>
           {ndaOptions.length === 0 ? (
-            <SelectItem value="__empty__" disabled>
+            <SelectItem value="__empty__" disabled label={t("members.ndaAgreementEmpty")}>
               {t("members.ndaAgreementEmpty")}
             </SelectItem>
           ) : (
-            ndaOptions.map((opt) => (
-              <SelectItem key={opt.id} value={opt.id}>
-                {opt.title}
-              </SelectItem>
-            ))
+            ndaOptions.map((opt) => {
+              const title = ndaPickerDisplayTitle(opt.title, t("members.ndaAgreementUntitled"));
+              return (
+                <SelectItem key={opt.id} value={opt.id} label={title}>
+                  {title}
+                </SelectItem>
+              );
+            })
           )}
         </SelectContent>
       </Select>

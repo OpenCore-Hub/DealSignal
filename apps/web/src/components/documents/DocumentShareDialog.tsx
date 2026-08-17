@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { motion } from "motion/react";
@@ -12,6 +12,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { BundleSecurityOptions } from "@/components/links/link-bundle/BundleSecurityOptions";
 import {
   bundleSecurityGuardI18nKey,
@@ -21,20 +22,30 @@ import { ContactSelector } from "@/components/links/smart-link/ContactSelector";
 import { api } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/apiErrors";
 import { copyToClipboard } from "@/lib/clipboard";
+import { LIBRARY_DOCUMENT_CATEGORY } from "@/lib/documentCategory";
 import { createDefaultLinkPermissionConfig } from "@/lib/defaultLinkPermissionConfig";
+import { isDocumentReadyForLibraryShare } from "@/lib/documentsUploadedEvent";
+import { sortDocumentsByNewestUpload } from "@/lib/sortDocumentsByUploadTime";
 import { cn } from "@/lib/utils";
-import type { PermissionConfig } from "@/types";
+import type { Document, PermissionConfig } from "@/types";
 
 const enterEase = [0.32, 0.72, 0, 1] as const;
+
+export type ShareDialogDocument = {
+  id: string;
+  title: string;
+  status?: string;
+  createdAt?: string;
+  fileName?: string;
+  fileType?: string;
+};
 
 export interface DocumentShareDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  documentId: string;
-  documentTitle: string;
+  /** Pre-selected files (row Share or this upload batch). */
+  documents: ShareDialogDocument[];
   workspaceSlug: string;
-  /** When not ready, Create & copy stays disabled (processing uploads). */
-  documentStatus?: string;
   onCreated?: () => void;
 }
 
@@ -44,36 +55,104 @@ function fileExtension(name: string): string {
   return name.slice(i + 1).toUpperCase();
 }
 
+function toShareFile(doc: ShareDialogDocument | Document): ShareDialogDocument {
+  return {
+    id: doc.id,
+    title: doc.title,
+    status: doc.status,
+    createdAt: doc.createdAt,
+    fileName: "fileName" in doc ? doc.fileName : undefined,
+    fileType: "fileType" in doc ? doc.fileType : undefined,
+  };
+}
+
+function displayName(doc: ShareDialogDocument): string {
+  return doc.fileName?.trim() || doc.title;
+}
+
 export function DocumentShareDialog({
   open,
   onOpenChange,
-  documentId,
-  documentTitle,
+  documents,
   workspaceSlug,
-  documentStatus = "ready",
   onCreated,
 }: DocumentShareDialogProps) {
   const { t } = useTranslation(["documents", "common", "links"]);
   const [creating, setCreating] = useState(false);
   const [config, setConfig] = useState<PermissionConfig>(createDefaultLinkPermissionConfig);
-  const shareReady = documentStatus === "ready";
-  const securityGuard = validateBundleSecurityConfig(config);
-  const createBlockedReason =
-    !shareReady
-      ? ("notReady" as const)
-      : !securityGuard.ok
-        ? securityGuard.reason
-        : null;
-  const extension = fileExtension(documentTitle);
+  const [libraryDocs, setLibraryDocs] = useState<ShareDialogDocument[]>([]);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(
+    () => new Set(documents.map((doc) => doc.id)),
+  );
+  const initialIdsKey = documents.map((doc) => doc.id).join(",");
 
   useEffect(() => {
     if (!open) return;
     setConfig(createDefaultLinkPermissionConfig());
     setCreating(false);
-  }, [open, documentId]);
+    setSelectedIds(new Set(documents.map((doc) => doc.id)));
+    let cancelled = false;
+    void api
+      .getDocuments("all", LIBRARY_DOCUMENT_CATEGORY)
+      .then((res) => {
+        if (cancelled) return;
+        setLibraryDocs(
+          res.data
+            .filter((doc) => doc.status !== "archived" && doc.status !== "failed")
+            .map(toShareFile),
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setLibraryDocs([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, initialIdsKey, documents]);
+
+  const fileList = useMemo(() => {
+    const byId = new Map<string, ShareDialogDocument>();
+    for (const doc of libraryDocs) byId.set(doc.id, doc);
+    for (const doc of documents) {
+      const current = byId.get(doc.id);
+      byId.set(doc.id, {
+        ...current,
+        ...doc,
+        createdAt: current?.createdAt || doc.createdAt,
+        status: current?.status || doc.status,
+      });
+    }
+    const all = sortDocumentsByNewestUpload([...byId.values()]);
+    const selected = all.filter((doc) => selectedIds.has(doc.id));
+    const rest = all.filter((doc) => !selectedIds.has(doc.id));
+    return [...selected, ...rest];
+  }, [documents, libraryDocs, selectedIds]);
+
+  const selectedDocuments = fileList.filter((doc) => selectedIds.has(doc.id));
+  const shareReady =
+    selectedDocuments.length > 0 &&
+    selectedDocuments.every((doc) => isDocumentReadyForLibraryShare(doc.status ?? "ready"));
+  const securityGuard = validateBundleSecurityConfig(config);
+  const createBlockedReason =
+    selectedDocuments.length === 0
+      ? ("noFiles" as const)
+      : !shareReady
+        ? ("notReady" as const)
+        : !securityGuard.ok
+          ? securityGuard.reason
+          : null;
+
+  const toggleDocument = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   const handleCreateAndCopy = async () => {
-    if (!shareReady) return;
+    if (!shareReady || selectedDocuments.length === 0) return;
     const guard = validateBundleSecurityConfig(config);
     if (!guard.ok) {
       toast.error(t(`links:${bundleSecurityGuardI18nKey(guard.reason)}`));
@@ -81,11 +160,14 @@ export function DocumentShareDialog({
     }
     setCreating(true);
     try {
-      const link = await api.createLink([documentId], {
-        ...config,
-        isCustomized: true,
-        level: "customized",
-      });
+      const link = await api.createLink(
+        selectedDocuments.map((doc) => doc.id),
+        {
+          ...config,
+          isCustomized: true,
+          level: "customized",
+        },
+      );
       const url = link.shortUrl?.trim();
       if (!url) {
         toast.error(t("documents:share.createFailed"));
@@ -134,19 +216,46 @@ export function DocumentShareDialog({
                 <DialogTitle className="text-[1.35rem] font-semibold leading-[1.15] tracking-[-0.03em]">
                   {t("documents:share.title")}
                 </DialogTitle>
-                <div className="flex items-start gap-2.5">
-                  {extension ? (
-                    <span className="mt-0.5 shrink-0 rounded-md px-1.5 py-0.5 font-mono text-[10px] tracking-[0.14em] text-muted-foreground ring-1 ring-foreground/[0.08]">
-                      {extension}
-                    </span>
-                  ) : null}
-                  <p className="min-w-0 break-words text-[13px] leading-snug text-foreground/90">
-                    {documentTitle}
-                  </p>
+                <div
+                  data-testid="document-share-file-list"
+                  className="max-h-40 space-y-1.5 overflow-y-auto pr-1"
+                >
+                  {fileList.map((doc) => {
+                    const extension = fileExtension(displayName(doc));
+                    const checked = selectedIds.has(doc.id);
+                    return (
+                      <label
+                        key={doc.id}
+                        data-testid={`document-share-file-${doc.id}`}
+                        className={cn(
+                          "flex cursor-pointer items-start gap-2.5 rounded-lg px-1 py-1",
+                          checked ? "bg-muted/40" : "hover:bg-muted/25",
+                        )}
+                      >
+                        <Checkbox
+                          checked={checked}
+                          onCheckedChange={() => toggleDocument(doc.id)}
+                          className="mt-0.5"
+                        />
+                        {extension ? (
+                          <span className="mt-0.5 shrink-0 rounded-md px-1.5 py-0.5 font-mono text-[10px] tracking-[0.14em] text-muted-foreground ring-1 ring-foreground/[0.08]">
+                            {extension}
+                          </span>
+                        ) : null}
+                        <p className="min-w-0 break-words text-[13px] leading-snug text-foreground/90">
+                          {displayName(doc)}
+                        </p>
+                      </label>
+                    );
+                  })}
                 </div>
                 <DialogDescription className="space-y-2 text-[13px] leading-relaxed text-muted-foreground">
                   <span className="block max-w-[42ch]">{t("documents:share.lead")}</span>
-                  {!shareReady ? (
+                  {createBlockedReason === "noFiles" ? (
+                    <span className="block text-amber-700 dark:text-amber-400">
+                      {t("documents:share.noFilesSelected")}
+                    </span>
+                  ) : !shareReady ? (
                     <span className="block text-amber-700 dark:text-amber-400">
                       {t("documents:share.notReady")}
                     </span>
@@ -173,7 +282,7 @@ export function DocumentShareDialog({
                 advancedCollapsible={false}
                 config={config}
                 onChange={setConfig}
-                excludeNdaDocumentIds={[documentId]}
+                excludeNdaDocumentIds={selectedDocuments.map((doc) => doc.id)}
                 contactSelector={
                   (config.requireEmailVerification || config.ndaEnabled) &&
                   workspaceSlug ? (
@@ -224,13 +333,15 @@ export function DocumentShareDialog({
               size="lg"
               disabled={creating || createBlockedReason != null}
               title={
-                createBlockedReason === "notReady"
-                  ? t("documents:share.notReady")
-                  : createBlockedReason === "ndaDocumentRequired"
-                    ? t("links:creator.ndaDocumentRequired")
-                    : createBlockedReason === "contactRequired"
-                      ? t("links:creator.contactRequired")
-                      : undefined
+                createBlockedReason === "noFiles"
+                  ? t("documents:share.noFilesSelected")
+                  : createBlockedReason === "notReady"
+                    ? t("documents:share.notReady")
+                    : createBlockedReason === "ndaDocumentRequired"
+                      ? t("links:creator.ndaDocumentRequired")
+                      : createBlockedReason === "contactRequired"
+                        ? t("links:creator.contactRequired")
+                        : undefined
               }
               onClick={() => {
                 void handleCreateAndCopy();

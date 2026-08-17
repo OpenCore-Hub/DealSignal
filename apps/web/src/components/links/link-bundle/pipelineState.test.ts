@@ -228,6 +228,19 @@ describe("BundlePipelineState transitions", () => {
       state = pipelineReducer(state, { type: "SET_DIRTY", isDirty: false });
       expect(state.isDirty).toBe(false);
     });
+
+    it("PATCH_DOCUMENTS updates picker and selection status without marking dirty", () => {
+      state.documents = [mockDoc, mockDoc2];
+      state.selectedDocuments = [{ ...mockDoc, status: "processing" }];
+      state.isDirty = false;
+      state = pipelineReducer(state, {
+        type: "PATCH_DOCUMENTS",
+        documents: [{ ...mockDoc, status: "ready" }],
+      });
+      expect(state.documents[0]?.status).toBe("ready");
+      expect(state.selectedDocuments[0]?.status).toBe("ready");
+      expect(state.isDirty).toBe(false);
+    });
   });
 
   describe("RESET action", () => {
