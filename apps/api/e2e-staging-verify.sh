@@ -27,6 +27,8 @@ set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 API_DIR="$SCRIPT_DIR"
+# shellcheck source=scripts/e2e-turnstile.sh
+source "$SCRIPT_DIR/scripts/e2e-turnstile.sh"
 REPO_ROOT=$(cd "$API_DIR/../.." && pwd)
 
 BASE_URL="${BASE_URL:-}"
@@ -104,7 +106,7 @@ COOKIE_JAR=$(mktemp)
 trap 'rm -f "$COOKIE_JAR"' EXIT
 REGISTER=$(curl -fsS -c "$COOKIE_JAR" -b "$COOKIE_JAR" -X POST "$BASE_URL/api/auth/register" \
   -H "Content-Type: application/json" \
-  -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\"}")
+  -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\"$(e2e_turnstile_field "$BASE_URL")}")
 echo "$REGISTER" | jq -c '{user_id: .user.id, email: .user.email}'
 
 echo -n "[workspace create] "

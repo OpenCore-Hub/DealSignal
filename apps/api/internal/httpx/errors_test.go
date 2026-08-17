@@ -213,6 +213,19 @@ func TestWriteIfPlanLimit(t *testing.T) {
 	}
 }
 
+func TestWriteNotRoomAdmin(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	WriteNotRoomAdmin(c, errors.New("not a room admin"))
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status=%d", w.Code)
+	}
+	if !containsAll(w.Body.String(), `"code":"not_room_admin"`) {
+		t.Fatalf("body=%s", w.Body.String())
+	}
+}
+
 func containsAll(s string, parts ...string) bool {
 	for _, p := range parts {
 		if !contains(s, p) {

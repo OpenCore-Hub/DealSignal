@@ -60,10 +60,13 @@ func RateLimitMiddleware(store RateLimiter, cfg *config.Config) gin.HandlerFunc 
 type rateLimitCategory string
 
 const (
-	categoryPublic    rateLimitCategory = "public"
-	categoryAuth      rateLimitCategory = "auth"
-	categoryUpload    rateLimitCategory = "upload"
-	categoryWorkspace rateLimitCategory = "workspace"
+	categoryPublic       rateLimitCategory = "public"
+	categoryAuth         rateLimitCategory = "auth"
+	categoryAuthRegister rateLimitCategory = "auth_register"
+	categoryAuthResend   rateLimitCategory = "auth_resend"
+	categoryAuthForgot   rateLimitCategory = "auth_forgot"
+	categoryUpload       rateLimitCategory = "upload"
+	categoryWorkspace    rateLimitCategory = "workspace"
 )
 
 func rateLimitKey(c *gin.Context) (rateLimitCategory, string) {
@@ -76,6 +79,15 @@ func rateLimitKey(c *gin.Context) (rateLimitCategory, string) {
 
 	if isPublicPath(path) {
 		return categoryPublic, string(categoryPublic) + ":" + clientIP + ":" + fullPath
+	}
+	if isRegisterPath(path, c.Request.Method) {
+		return categoryAuthRegister, string(categoryAuthRegister) + ":" + clientIP
+	}
+	if isResendPath(path, c.Request.Method) {
+		return categoryAuthResend, string(categoryAuthResend) + ":" + clientIP
+	}
+	if isForgotPath(path, c.Request.Method) {
+		return categoryAuthForgot, string(categoryAuthForgot) + ":" + clientIP
 	}
 	if isAuthPath(path) {
 		return categoryAuth, string(categoryAuth) + ":" + clientIP
@@ -105,6 +117,18 @@ func isPublicPath(path string) bool {
 
 func isAuthPath(path string) bool {
 	return hasPrefix(path, "/api/auth/")
+}
+
+func isRegisterPath(path, method string) bool {
+	return method == http.MethodPost && path == "/api/auth/register"
+}
+
+func isResendPath(path, method string) bool {
+	return method == http.MethodPost && path == "/api/auth/resend-verification"
+}
+
+func isForgotPath(path, method string) bool {
+	return method == http.MethodPost && path == "/api/auth/forgot-password"
 }
 
 // isUploadPath matches the multipart document create endpoint only:
@@ -153,6 +177,26 @@ func rateLimitForCategory(cat rateLimitCategory, cfg *config.Config) (int, time.
 		return cfg.RateLimitPublicRPM, time.Minute
 	case categoryAuth:
 		return cfg.RateLimitAuthRPM, time.Minute
+	case categoryAuthRegister:
+		limit := cfg.RateLimitRegisterLimit
+		if limit <= 0 {
+			limit = 5
+		}
+		window := cfg.RateLimitRegisterWindow
+		if window <= 0 {
+			window = 15 * time.Minute
+		}
+		return limit, window
+	case categoryAuthResend, categoryAuthForgot:
+		limit := cfg.RateLimitResendLimit
+		if limit <= 0 {
+			limit = 3
+		}
+		window := cfg.RateLimitResendWindow
+		if window <= 0 {
+			window = 15 * time.Minute
+		}
+		return limit, window
 	case categoryUpload:
 		return cfg.RateLimitUploadRPM, time.Minute
 	default:

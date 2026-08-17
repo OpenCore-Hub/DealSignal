@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/dealroom"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/roomacl"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -24,12 +26,12 @@ var (
 // room-wide blocklist + optional outbound floors (must verify / must NDA).
 // Allowlists and full protection toggles belong on each share link.
 type RoomAccessPolicy struct {
-	DealRoomID                     string   `json:"dealRoomId"`
-	Configured                     bool     `json:"configured"`
-	RequireEmailVerificationFloor  bool     `json:"requireEmailVerificationFloor"`
-	RequireNdaFloor                bool     `json:"requireNdaFloor"`
-	BlockedEmails                  []string `json:"blockedEmails"`
-	UpdatedAt                      string   `json:"updatedAt,omitempty"`
+	DealRoomID                    string   `json:"dealRoomId"`
+	Configured                    bool     `json:"configured"`
+	RequireEmailVerificationFloor bool     `json:"requireEmailVerificationFloor"`
+	RequireNdaFloor               bool     `json:"requireNdaFloor"`
+	BlockedEmails                 []string `json:"blockedEmails"`
+	UpdatedAt                     string   `json:"updatedAt,omitempty"`
 
 	// Legacy wire fields — always zero/empty so old clients do not treat the room
 	// page as a second full access-control form.
@@ -130,9 +132,23 @@ func dbRoomAccessPolicyToDomain(row db.DealRoomAccessPolicy) RoomAccessPolicy {
 
 const timeRFC3339 = "2006-01-02T15:04:05Z07:00"
 
-// GetRoomAccessPolicy returns the room security policy, or an unconfigured default.
-func (s *Service) GetRoomAccessPolicy(ctx context.Context, workspaceID, dealRoomID string) (RoomAccessPolicy, error) {
+func (s *Service) requireDealRoomView(ctx context.Context, userID, workspaceID, dealRoomID string) (db.DealRoom, error) {
 	room, err := s.getDealRoomForWorkspace(ctx, workspaceID, dealRoomID)
+	if err != nil {
+		return db.DealRoom{}, err
+	}
+	if err := authorizeLinkView(ctx, s.queries, room.WorkspaceID, room.ID, userID); err != nil {
+		if errors.Is(err, ErrLinkViewForbidden) {
+			return db.DealRoom{}, dealroom.ErrApprovalRequired
+		}
+		return db.DealRoom{}, err
+	}
+	return room, nil
+}
+
+// GetRoomAccessPolicy returns the room security policy, or an unconfigured default.
+func (s *Service) GetRoomAccessPolicy(ctx context.Context, userID, workspaceID, dealRoomID string) (RoomAccessPolicy, error) {
+	room, err := s.requireDealRoomView(ctx, userID, workspaceID, dealRoomID)
 	if err != nil {
 		return RoomAccessPolicy{}, err
 	}
@@ -178,6 +194,9 @@ func (s *Service) UpsertRoomAccessPolicy(
 	room, err := s.getDealRoomForWorkspace(ctx, workspaceID, dealRoomID)
 	if err != nil {
 		return RoomAccessPolicy{}, err
+	}
+	if _, aclErr := roomacl.Require(ctx, s.queries, room.WorkspaceID, room.ID, userID, roomacl.NeedManage); aclErr != nil {
+		return RoomAccessPolicy{}, dealroom.ErrNotRoomAdmin
 	}
 
 	blocked, err := normalizePolicyEmailList(req.BlockedEmails)

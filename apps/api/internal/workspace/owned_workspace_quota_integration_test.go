@@ -58,6 +58,55 @@ func billingFor(t *testing.T, q *db.Queries, wsID string) db.WorkspaceBilling {
 	return row
 }
 
+func TestBillingVerifyEmailPromotesFreeWorkspaceToTrial_Integration(t *testing.T) {
+	if !integrationReady {
+		t.Skip("postgres integration DB unavailable (set INTEGRATION_TEST_DATABASE_URL or start apps/api docker postgres)")
+	}
+	ctx := context.Background()
+	tx, err := testPool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	t.Cleanup(func() { _ = tx.Rollback(ctx) })
+
+	q := db.New(tx)
+	svc := workspace.NewService(q, workspace.WithDBPool(tx))
+	user, err := q.CreateUser(ctx, db.CreateUserParams{
+		Email:         fmt.Sprintf("promote-trial-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: false,
+	})
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	userID := userIDString(user)
+	first := createOwnedWorkspace(t, svc, userID, "Pending Verify")
+	if row := billingFor(t, q, first.ID); row.PlanCode != plan.CodeFree || row.TrialEndsAt.Valid {
+		t.Fatalf("unverified first workspace must be free, got %+v", row)
+	}
+
+	if err := q.VerifyUserEmail(ctx, user.ID); err != nil {
+		t.Fatalf("verify email: %v", err)
+	}
+	if err := svc.ActivateEligibleTrial(ctx, userID); err != nil {
+		t.Fatalf("ActivateEligibleTrial: %v", err)
+	}
+	row := billingFor(t, q, first.ID)
+	if row.PlanCode != plan.CodeTrial || !row.TrialEndsAt.Valid {
+		t.Fatalf("verified first workspace must become trial, got %+v", row)
+	}
+	granted, err := q.GetUserByID(ctx, user.ID)
+	if err != nil {
+		t.Fatalf("GetUserByID: %v", err)
+	}
+	if !granted.TrialGrantedAt.Valid {
+		t.Fatal("promote must stamp trial_granted_at")
+	}
+	if err := svc.ActivateEligibleTrial(ctx, userID); err != nil {
+		t.Fatalf("idempotent ActivateEligibleTrial: %v", err)
+	}
+}
+
 func postCreateWorkspace(router *gin.Engine, name, slug string) *httptest.ResponseRecorder {
 	body, _ := json.Marshal(map[string]string{"name": name, "slug": slug})
 	w := httptest.NewRecorder()
@@ -82,8 +131,9 @@ func TestBillingOwnedWorkspaceCapAndTrialGrant_Integration(t *testing.T) {
 	svc := workspace.NewService(q, workspace.WithDBPool(tx))
 
 	owner, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("owned-cap-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("owned-cap-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create user: %v", err)
@@ -108,8 +158,9 @@ func TestBillingOwnedWorkspaceCapAndTrialGrant_Integration(t *testing.T) {
 	}
 
 	reader, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("owned-reader-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("owned-reader-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create reader: %v", err)
@@ -127,8 +178,9 @@ func TestBillingOwnedWorkspaceCapAndTrialGrant_Integration(t *testing.T) {
 	}
 
 	writer, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("owned-writer-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("owned-writer-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create writer: %v", err)
@@ -146,8 +198,9 @@ func TestBillingOwnedWorkspaceCapAndTrialGrant_Integration(t *testing.T) {
 	}
 
 	adminUser, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("owned-admin-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("owned-admin-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create admin: %v", err)
@@ -216,8 +269,9 @@ func TestBillingOwnedWorkspaceUnverifiedProHTTP_Integration(t *testing.T) {
 	q := db.New(tx)
 	svc := workspace.NewService(q, workspace.WithDBPool(tx))
 	user, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("unverified-pro-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("unverified-pro-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: false,
 	})
 	if err != nil {
 		t.Fatalf("create user: %v", err)
@@ -273,8 +327,9 @@ func TestBillingOwnedWorkspaceHTTPCap_Integration(t *testing.T) {
 	q := db.New(tx)
 	svc := workspace.NewService(q, workspace.WithDBPool(tx))
 	user, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("http-cap-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("http-cap-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create user: %v", err)
@@ -309,8 +364,9 @@ func TestBillingOwnedWorkspaceExpiredTrialCap_Integration(t *testing.T) {
 	q := db.New(tx)
 	svc := workspace.NewService(q, workspace.WithDBPool(tx))
 	user, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("expired-trial-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("expired-trial-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create user: %v", err)
@@ -338,8 +394,9 @@ func TestBillingOwnedWorkspaceConcurrentCreate_Integration(t *testing.T) {
 	q := db.New(testPool)
 	svc := workspace.NewService(q, workspace.WithDBPool(testPool))
 	user, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("owned-race-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("owned-race-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create user: %v", err)
@@ -398,15 +455,17 @@ func TestBillingInviteJoinDoesNotConsumeOwnedCap_Integration(t *testing.T) {
 	svc := workspace.NewService(q, workspace.WithDBPool(tx))
 
 	ownerA, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("join-a-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("join-a-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create A: %v", err)
 	}
 	ownerB, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("join-b-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("join-b-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create B: %v", err)
@@ -432,8 +491,9 @@ func TestBillingInviteJoinDoesNotConsumeOwnedCap_Integration(t *testing.T) {
 	}
 
 	stranger, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("join-guest-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("join-guest-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create stranger: %v", err)
@@ -462,8 +522,9 @@ func TestBillingInviteRegisterThenCreatePersonalTrial_Integration(t *testing.T) 
 	svc := workspace.NewService(q, workspace.WithDBPool(tx))
 
 	host, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("host-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("host-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create host: %v", err)
@@ -472,8 +533,9 @@ func TestBillingInviteRegisterThenCreatePersonalTrial_Integration(t *testing.T) 
 	hostWS := createOwnedWorkspace(t, svc, hostID, "Host Room")
 
 	invitee, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("invitee-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("invitee-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create invitee: %v", err)

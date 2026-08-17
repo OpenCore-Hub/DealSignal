@@ -208,10 +208,7 @@ func (s *Service) Generate(ctx context.Context, workspaceID, linkID, lang string
 		LinkID:   linkUUID,
 		Patterns: rs.Patterns(),
 	})
-	keyPageTitles := make([]string, 0, len(keyPages))
-	for _, kp := range keyPages {
-		keyPageTitles = append(keyPageTitles, kp.Title)
-	}
+	keyPageTitles := keyPageDisplayTitles(keyPages)
 	focus := s.resolveFocusPages(ctx, linkUUID, keyPages)
 
 	totalDurationSeconds24h := 0
@@ -334,24 +331,24 @@ func (s *Service) evaluateRules(link db.Link, result heat.Result, m suggestionMe
 		LinkID:      uuid.UUID(link.ID.Bytes).String(),
 		Heat:        HeatInput{Level: result.Level, Score: result.Score, Trend: result.Trend},
 		Metrics: MetricsInput{
-			Opens:                 m.opens,
-			Revisits:              m.revisits,
-			AvgDurationMinutes:    m.avgDurationMinutes,
-			Bounces:               m.bounces,
-			Downloads:             m.downloads,
-			TotalPageViews:        m.totalPageViews,
-			KeyPageViews:          m.keyPageViews,
-			UniqueVisitors:        m.uniqueVisitors,
-			ForwardSignals:        m.forwardSignals,
-			Opens24h:              m.opens24h,
-			Revisits24h:           m.revisits24h,
-			AvgDurationMinutes24h: m.avgDurationMinutes24h,
-			Bounces24h:            m.bounces24h,
-			Downloads24h:          m.downloads24h,
-			TotalPageViews24h:     m.totalPageViews24h,
-			KeyPageViews24h:       m.keyPageViews24h,
-			UniqueVisitors24h:     m.uniqueVisitors24h,
-			ForwardSignals24h:     m.forwardSignals24h,
+			Opens:                       m.opens,
+			Revisits:                    m.revisits,
+			AvgDurationMinutes:          m.avgDurationMinutes,
+			Bounces:                     m.bounces,
+			Downloads:                   m.downloads,
+			TotalPageViews:              m.totalPageViews,
+			KeyPageViews:                m.keyPageViews,
+			UniqueVisitors:              m.uniqueVisitors,
+			ForwardSignals:              m.forwardSignals,
+			Opens24h:                    m.opens24h,
+			Revisits24h:                 m.revisits24h,
+			AvgDurationMinutes24h:       m.avgDurationMinutes24h,
+			Bounces24h:                  m.bounces24h,
+			Downloads24h:                m.downloads24h,
+			TotalPageViews24h:           m.totalPageViews24h,
+			KeyPageViews24h:             m.keyPageViews24h,
+			UniqueVisitors24h:           m.uniqueVisitors24h,
+			ForwardSignals24h:           m.forwardSignals24h,
 			CaptureAttempts24h:          m.captureAttempts24h,
 			ScreenshotProtectionEnabled: link.ScreenshotProtectionEnabled,
 		},
@@ -882,7 +879,7 @@ func countKeyPageViews(ctx context.Context, queries *db.Queries, linkID pgtype.U
 	if err != nil {
 		return 0, err
 	}
-	return int(metrics.TotalKeyPageViews), nil
+	return int(metrics.EngagedKeyPageViews), nil
 }
 
 // countKeyPageViews24h counts 24-hour key-page views for the given patterns.
@@ -897,7 +894,7 @@ func countKeyPageViews24h(ctx context.Context, queries *db.Queries, linkID pgtyp
 	if err != nil {
 		return 0, err
 	}
-	return int(metrics.TotalKeyPageViews), nil
+	return int(metrics.EngagedKeyPageViews), nil
 }
 
 func (s *Service) keyPagePatternsForLink(ctx context.Context, linkID pgtype.UUID) ([]string, heat.Circle) {
@@ -943,9 +940,11 @@ func metadataString(raw []byte, key string) string {
 
 // suggestionFocusPages holds real page anchors for deep links.
 type suggestionFocusPages struct {
-	hot            int
-	bounce         int
-	bounceExitRate float64 // 0..1; only set when bounce page comes from exit ranking
+	hot              int
+	hotDocumentID    string
+	bounce           int
+	bounceDocumentID string
+	bounceExitRate   float64 // 0..1; only set when bounce page comes from exit ranking
 }
 
 func (s *Service) resolveFocusPages(
@@ -954,66 +953,105 @@ func (s *Service) resolveFocusPages(
 	keyPages []db.GetLinkKeyPageViewDetailsRow,
 ) suggestionFocusPages {
 	var out suggestionFocusPages
-	out.hot = focusPageFromKeyPages(keyPages)
+	out.hot, out.hotDocumentID = focusPageFromKeyPages(keyPages)
 	if out.hot <= 0 {
 		if topPages, err := s.queries.ListTopPagesByLink(ctx, linkID); err == nil {
-			out.hot = focusPageFromTopPages(topPages)
+			out.hot, out.hotDocumentID = focusPageFromTopPages(topPages)
 		}
 	}
 
 	if highExit, err := s.queries.ListHighExitPagesByLink(ctx, linkID); err == nil {
-		if page, rate := focusPageFromHighExit(highExit); page > 0 {
+		if page, docID, rate := focusPageFromHighExit(highExit); page > 0 {
 			out.bounce = page
+			out.bounceDocumentID = docID
 			out.bounceExitRate = rate
 		}
 	}
 	// Bounce visitors may leave before any page_view; fall back to engagement focus.
 	if out.bounce <= 0 {
 		out.bounce = out.hot
+		out.bounceDocumentID = out.hotDocumentID
+	}
+	return out
+}
+
+func pgDocumentID(id pgtype.UUID) string {
+	if !id.Valid {
+		return ""
+	}
+	return uuid.UUID(id.Bytes).String()
+}
+
+// keyPageDisplayTitles keeps solo-share page titles unchanged.
+// Bundle rows that span more than one document prefix the file name so
+// two "Financials" pages are distinguishable in radar / signal copy.
+func keyPageDisplayTitles(pages []db.GetLinkKeyPageViewDetailsRow) []string {
+	ids := make(map[string]struct{}, len(pages))
+	for _, page := range pages {
+		if id := pgDocumentID(page.DocumentID); id != "" {
+			ids[id] = struct{}{}
+		}
+	}
+	spanMultiple := len(ids) > 1
+	out := make([]string, 0, len(pages))
+	for _, page := range pages {
+		title := strings.TrimSpace(page.Title)
+		if title == "" {
+			continue
+		}
+		if spanMultiple {
+			if doc := strings.TrimSpace(page.DocumentTitle); doc != "" {
+				title = doc + " · " + title
+			}
+		}
+		out = append(out, title)
 	}
 	return out
 }
 
 // focusPageFromKeyPages returns the highest-ranked key page number, or 0.
-func focusPageFromKeyPages(keyPages []db.GetLinkKeyPageViewDetailsRow) int {
+func focusPageFromKeyPages(keyPages []db.GetLinkKeyPageViewDetailsRow) (page int, documentID string) {
 	for _, kp := range keyPages {
 		if kp.PageNumber > 0 {
-			return int(kp.PageNumber)
+			return int(kp.PageNumber), pgDocumentID(kp.DocumentID)
 		}
 	}
-	return 0
+	return 0, ""
 }
 
 // focusPageFromTopPages returns the most-viewed page number, or 0.
-func focusPageFromTopPages(pages []db.ListTopPagesByLinkRow) int {
+func focusPageFromTopPages(pages []db.ListTopPagesByLinkRow) (page int, documentID string) {
 	for _, p := range pages {
 		if p.PageNumber > 0 {
-			return int(p.PageNumber)
+			return int(p.PageNumber), pgDocumentID(p.DocumentID)
 		}
 	}
-	return 0
+	return 0, ""
 }
 
 // focusPageFromHighExit returns the highest exit-rate page and its rate.
-func focusPageFromHighExit(pages []db.ListHighExitPagesByLinkRow) (page int, exitRate float64) {
+func focusPageFromHighExit(pages []db.ListHighExitPagesByLinkRow) (page int, documentID string, exitRate float64) {
 	for _, p := range pages {
 		if p.PageNumber > 0 && p.ExitRate > 0 {
-			return int(p.PageNumber), p.ExitRate
+			return int(p.PageNumber), pgDocumentID(p.DocumentID), p.ExitRate
 		}
 	}
-	return 0, 0
+	return 0, "", 0
 }
 
 // attachFocusMetadata writes typed deep-link metadata.
 // hot_signal → engagement focus page; bounce risk → high-exit page (+ exit_rate).
 func attachFocusMetadata(typ, subtype string, md map[string]string, focus suggestionFocusPages) map[string]string {
 	page := 0
+	docID := ""
 	exitRate := 0.0
 	switch {
 	case typ == "hot_signal":
 		page = focus.hot
+		docID = focus.hotDocumentID
 	case typ == "risk_alert" && subtype == SubtypeBounce:
 		page = focus.bounce
+		docID = focus.bounceDocumentID
 		exitRate = focus.bounceExitRate
 	default:
 		return md
@@ -1021,11 +1059,14 @@ func attachFocusMetadata(typ, subtype string, md map[string]string, focus sugges
 	if page <= 0 {
 		return md
 	}
-	out := make(map[string]string, len(md)+2)
+	out := make(map[string]string, len(md)+3)
 	for k, v := range md {
 		out[k] = v
 	}
 	out["page_number"] = strconv.Itoa(page)
+	if docID != "" {
+		out["document_id"] = docID
+	}
 	if exitRate > 0 {
 		out["exit_rate"] = formatExitRatePercent(exitRate)
 	}

@@ -40,7 +40,7 @@ func (s *Service) UpsertTurnFeedback(
 	roomID, workspaceID, userID, turnID string,
 	req FeedbackRequest,
 ) (QAFeedback, error) {
-	if err := s.access.RequireActiveRoomMember(ctx, roomID, workspaceID, userID); err != nil {
+	if err := s.access.RequireRoomContribute(ctx, roomID, workspaceID, userID); err != nil {
 		return QAFeedback{}, err
 	}
 	kind, note, err := normalizeFeedbackRequest(req)

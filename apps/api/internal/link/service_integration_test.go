@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
@@ -26,11 +27,32 @@ import (
 
 var testPool *pgxpool.Pool
 
-func TestMain(m *testing.M) {
-	dsn := os.Getenv("INTEGRATION_TEST_DATABASE_URL")
-	if dsn == "" {
-		dsn = "postgres://test:test@localhost:5435/postgres?sslmode=disable"
+func integrationAdminDSN() string {
+	if dsn := os.Getenv("INTEGRATION_TEST_DATABASE_URL"); dsn != "" {
+		return dsn
 	}
+	candidates := []string{
+		"postgres://dealsignal:dealsignal@127.0.0.1:5435/postgres?sslmode=disable",
+		"postgres://dealsignal:dealsignal@127.0.0.1:5436/postgres?sslmode=disable",
+		"postgres://test:test@127.0.0.1:5435/postgres?sslmode=disable",
+	}
+	for _, dsn := range candidates {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		pool, err := pgxpool.New(ctx, dsn)
+		if err == nil {
+			err = pool.Ping(ctx)
+			pool.Close()
+		}
+		cancel()
+		if err == nil {
+			return dsn
+		}
+	}
+	return candidates[0]
+}
+
+func TestMain(m *testing.M) {
+	dsn := integrationAdminDSN()
 
 	ctx := context.Background()
 	adminPool, err := pgxpool.New(ctx, dsn)
@@ -234,8 +256,9 @@ func newFixture(t *testing.T) *testFixture {
 	}
 
 	user, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("user-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("user-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create user: %v", err)
@@ -249,6 +272,13 @@ func newFixture(t *testing.T) *testFixture {
 	})
 	if err != nil {
 		t.Fatalf("create workspace: %v", err)
+	}
+	if _, err := q.AddWorkspaceMember(ctx, db.AddWorkspaceMemberParams{
+		WorkspaceID: workspace.ID,
+		UserID:      user.ID,
+		Role:        "owner",
+	}); err != nil {
+		t.Fatalf("add workspace owner: %v", err)
 	}
 
 	docID := uuid.New()
@@ -1219,8 +1249,9 @@ func TestApproveAccessRequest(t *testing.T) {
 		defer f.cleanup()
 
 		other, err := f.q.CreateUser(f.ctx, db.CreateUserParams{
-			Email:        fmt.Sprintf("other-%s@example.com", uuid.NewString()),
-			PasswordHash: "hash",
+			Email:         fmt.Sprintf("other-%s@example.com", uuid.NewString()),
+			PasswordHash:  "hash",
+			EmailVerified: true,
 		})
 		if err != nil {
 			t.Fatalf("create other user: %v", err)
@@ -1395,8 +1426,9 @@ func TestApproveAccessRequest(t *testing.T) {
 		}
 
 		other, err := f.q.CreateUser(f.ctx, db.CreateUserParams{
-			Email:        fmt.Sprintf("member-%s@example.com", uuid.NewString()),
-			PasswordHash: "hash",
+			Email:         fmt.Sprintf("member-%s@example.com", uuid.NewString()),
+			PasswordHash:  "hash",
+			EmailVerified: true,
 		})
 		if err != nil {
 			t.Fatalf("create other user: %v", err)

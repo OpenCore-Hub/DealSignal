@@ -80,12 +80,16 @@ type Config struct {
 	HubSpotClientID           string
 	HubSpotClientSecret       string
 
-	RateLimitPublicRPM     int
-	RateLimitAuthRPM       int
-	RateLimitUploadRPM     int
-	RateLimitWorkspaceRPM  int
-	IdempotencyTTLHours    int
-	IdempotencyMaxBodySize int
+	RateLimitPublicRPM      int
+	RateLimitAuthRPM        int
+	RateLimitRegisterLimit  int
+	RateLimitRegisterWindow time.Duration
+	RateLimitResendLimit    int
+	RateLimitResendWindow   time.Duration
+	RateLimitUploadRPM      int
+	RateLimitWorkspaceRPM   int
+	IdempotencyTTLHours     int
+	IdempotencyMaxBodySize  int
 
 	LinkOpenDedupWindow time.Duration
 	PageViewDedupWindow time.Duration
@@ -177,6 +181,14 @@ type Config struct {
 	EventsStreamName    string
 	EventsConsumerGroup string
 
+	// TurnstileSiteKey is the public widget key. Empty disables the widget
+	// (local / e2e). Must be set together with TurnstileSecret.
+	TurnstileSiteKey string
+	// TurnstileSecret is the siteverify secret. Never expose to clients.
+	TurnstileSecret string
+	// TurnstileTimeout is the siteverify HTTP timeout (default 5s).
+	TurnstileTimeout time.Duration
+
 	CORSAllowedOrigins string
 	MetricsEnabled     bool
 	PprofEnabled       bool
@@ -266,6 +278,12 @@ func Load() (*Config, error) {
 
 		RateLimitPublicRPM: getEnvInt("RATE_LIMIT_PUBLIC_RPM", 100),
 		RateLimitAuthRPM:   getEnvInt("RATE_LIMIT_AUTH_RPM", 20),
+		// Register is tighter than login/refresh so one IP cannot mint Trial accounts
+		// in a burst. Window is minutes; 0/negative falls back to 15.
+		RateLimitRegisterLimit:  getEnvInt("RATE_LIMIT_REGISTER_LIMIT", 5),
+		RateLimitRegisterWindow: time.Duration(getEnvInt("RATE_LIMIT_REGISTER_WINDOW_MINUTES", 15)) * time.Minute,
+		RateLimitResendLimit:    getEnvInt("RATE_LIMIT_RESEND_LIMIT", 3),
+		RateLimitResendWindow:   time.Duration(getEnvInt("RATE_LIMIT_RESEND_WINDOW_MINUTES", 15)) * time.Minute,
 		// Batch deal-room folder uploads issue one create per file; 10/min is too
 		// low for normal diligence packs (dozens of xlsx/pdf). Default 60/min.
 		RateLimitUploadRPM:     getEnvInt("RATE_LIMIT_UPLOAD_RPM", 60),
@@ -324,6 +342,10 @@ func Load() (*Config, error) {
 		VisitorAskAIRPM:                getEnvInt("VISITOR_ASK_AI_RPM", 10),
 		VisitorAskAIDailyLimit:         getEnvInt("VISITOR_ASK_AI_DAILY_LIMIT", 50),
 		VisitorAskFormalDailyLimit:     getEnvInt("VISITOR_ASK_FORMAL_DAILY_LIMIT", 20),
+
+		TurnstileSiteKey: strings.TrimSpace(os.Getenv("TURNSTILE_SITE_KEY")),
+		TurnstileSecret:  strings.TrimSpace(os.Getenv("TURNSTILE_SECRET")),
+		TurnstileTimeout: time.Duration(getEnvInt("TURNSTILE_TIMEOUT_SECONDS", 5)) * time.Second,
 
 		CORSAllowedOrigins: getEnv("CORS_ALLOWED_ORIGINS", "http://localhost:5173"),
 		MetricsEnabled:     strings.ToLower(getEnv("METRICS_ENABLED", "true")) == "true",
@@ -449,6 +471,18 @@ func Load() (*Config, error) {
 		if strings.ToLower(cfg.AppEnv) == "production" && cfg.ResendWebhookSecret == "" {
 			return nil, fmt.Errorf("RESEND_WEBHOOK_SECRET is required in production when RESEND_API_KEY is set")
 		}
+	}
+
+	if cfg.TurnstileTimeout <= 0 {
+		cfg.TurnstileTimeout = 5 * time.Second
+	}
+	siteSet := cfg.TurnstileSiteKey != ""
+	secretSet := cfg.TurnstileSecret != ""
+	if siteSet != secretSet {
+		return nil, fmt.Errorf("TURNSTILE_SITE_KEY and TURNSTILE_SECRET must both be set or both empty")
+	}
+	if strings.EqualFold(cfg.AppEnv, "production") && !secretSet {
+		return nil, fmt.Errorf("TURNSTILE_SITE_KEY and TURNSTILE_SECRET are required in production")
 	}
 
 	return cfg, nil

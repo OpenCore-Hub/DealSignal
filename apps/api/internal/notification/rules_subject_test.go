@@ -10,6 +10,16 @@ func TestNotificationSubjectKeyPage(t *testing.T) {
 	if got != "[key_page] Sensitive page viewed: 财务模型" {
 		t.Fatalf("got %q", got)
 	}
+	got = notificationSubject(Event{
+		EventType: "key_page",
+		Metadata: map[string]string{
+			"page_title":     "财务模型",
+			"document_title": "Memo.pdf",
+		},
+	})
+	if got != "[key_page] Sensitive page viewed: 财务模型 · Memo.pdf" {
+		t.Fatalf("bundle subject got %q", got)
+	}
 	got = notificationSubject(Event{EventType: "repeat_key_page"})
 	if got != "[repeat_key_page] Sensitive page revisited" {
 		t.Fatalf("got %q", got)

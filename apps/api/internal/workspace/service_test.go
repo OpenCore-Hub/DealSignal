@@ -55,6 +55,20 @@ func TestCreateWorkspace(t *testing.T) {
 	}
 }
 
+func TestCreateUnverifiedFirstWorkspaceIsFree(t *testing.T) {
+	fake := &fakeDB{t: t, unverifiedEmail: true}
+	svc := NewService(db.New(fake))
+	if _, err := svc.Create(context.Background(), uuid.NewString(), "Pending Verify", "pending-verify", ""); err != nil {
+		t.Fatalf("unverified first workspace: %v", err)
+	}
+	if fake.billing.PlanCode != plan.CodeFree {
+		t.Fatalf("unverified first workspace must be free, got %+v", fake.billing)
+	}
+	if fake.billing.TrialEndsAt.Valid || fake.trialGrantedAt.Valid {
+		t.Fatal("unverified first workspace must not receive a trial")
+	}
+}
+
 func TestCreateSecondWorkspaceHitsFreeCap(t *testing.T) {
 	fake := &fakeDB{t: t, ownedCount: 1}
 	svc := NewService(db.New(fake))
@@ -314,29 +328,58 @@ type fakeDB struct {
 	targetRole      string
 	listRows        []db.ListWorkspacesByUserRow
 
-	tenant           db.Tenant
-	workspace        db.Workspace
-	member           db.WorkspaceMember
-	invitation       db.WorkspaceInvitation
-	viewerDomain     db.WorkspaceViewerDomain
-	billing          db.WorkspaceBilling
-	billingLookupErr error
-	storageUsage     int64
-	linksCount       int
-	roomsCount       int
-	seatsCount       int
-	docsCount        int64
-	askTurns         int32
-	knowledgeAnswers int64
-	ownedCount       int64
-	ownedBilling     []db.WorkspaceBilling
-	unverifiedEmail  bool
-	trialGrantedAt   pgtype.Timestamptz
-	inviteeEmail     string
+	tenant            db.Tenant
+	workspace         db.Workspace
+	member            db.WorkspaceMember
+	invitation        db.WorkspaceInvitation
+	viewerDomain      db.WorkspaceViewerDomain
+	billing           db.WorkspaceBilling
+	billingLookupErr  error
+	storageUsage      int64
+	linksCount        int
+	roomsCount        int
+	seatsCount        int
+	docsCount         int64
+	askTurns          int32
+	knowledgeAnswers  int64
+	ownedCount        int64
+	soleOperableCount int64
+	ownedBilling      []db.WorkspaceBilling
+	unverifiedEmail   bool
+	trialGrantedAt    pgtype.Timestamptz
+	inviteeEmail      string
+	claimRows         []roomMemberClaim
+}
+
+type roomMemberClaim struct {
+	WorkspaceID pgtype.UUID
+	RoomID      pgtype.UUID
+	Email       string
+	Status      string
+	UserID      pgtype.UUID
+	RoomDeleted bool
 }
 
 func (f *fakeDB) Exec(ctx context.Context, sql string, arguments ...interface{}) (pgconn.CommandTag, error) {
 	sqlLower := strings.ToLower(sql)
+	if strings.Contains(sqlLower, "update room_members") && strings.Contains(sqlLower, "set user_id") {
+		userID := argUUID(arguments, 0)
+		wsID := argUUID(arguments, 1)
+		email := strings.ToLower(argString(arguments, 2))
+		var n int64
+		for i := range f.claimRows {
+			row := &f.claimRows[i]
+			if row.WorkspaceID != wsID || strings.ToLower(row.Email) != email || row.UserID.Valid {
+				continue
+			}
+			if row.Status != "active" && row.Status != "pending" {
+				continue
+			}
+			row.UserID = userID
+			n++
+		}
+		return pgconn.NewCommandTag(fmt.Sprintf("UPDATE %d", n)), nil
+	}
 	if strings.Contains(sqlLower, "delete from workspace_invitations") {
 		f.invitation = db.WorkspaceInvitation{}
 	}
@@ -350,11 +393,71 @@ func (f *fakeDB) Exec(ctx context.Context, sql string, arguments ...interface{})
 	if strings.Contains(sqlLower, "update workspace_invitations") && strings.Contains(sqlLower, "used_at") {
 		f.invitation.UsedAt = pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true}
 	}
+	if strings.Contains(sqlLower, "update users") && strings.Contains(sqlLower, "email_verified") {
+		f.unverifiedEmail = false
+	}
 	return pgconn.CommandTag{}, nil
 }
 
 func (f *fakeDB) Query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error) {
 	sqlLower := strings.ToLower(sql)
+
+	if strings.Contains(sqlLower, "from room_members") && strings.Contains(sqlLower, "user_id is null") {
+		wsID := argUUID(args, 0)
+		roomID := argUUID(args, 1)
+		now := pgtype.Timestamptz{Time: time.Now(), Valid: true}
+		var rows [][]interface{}
+		for _, row := range f.claimRows {
+			if row.WorkspaceID != wsID || row.UserID.Valid || row.RoomDeleted {
+				continue
+			}
+			if roomID.Valid && row.RoomID.Valid && row.RoomID != roomID {
+				continue
+			}
+			if row.Status != "active" && row.Status != "pending" {
+				continue
+			}
+			rid := row.RoomID
+			if !rid.Valid {
+				rid = roomID
+			}
+			rows = append(rows, []interface{}{
+				newPGUUID(),
+				newPGUUID(),
+				row.WorkspaceID,
+				rid,
+				row.Email,
+				row.UserID,
+				"guest",
+				"not_required",
+				pgtype.Timestamptz{},
+				row.Status,
+				now,
+				now,
+			})
+		}
+		return &fakeRows{rows: rows}, nil
+	}
+
+	if strings.Contains(sqlLower, "from room_members") && strings.Contains(sqlLower, "distinct") {
+		email := strings.ToLower(argString(args, 0))
+		seen := map[[16]byte]struct{}{}
+		var rows [][]interface{}
+		for _, row := range f.claimRows {
+			if strings.ToLower(row.Email) != email || row.RoomDeleted {
+				continue
+			}
+			if row.Status != "active" && row.Status != "pending" {
+				continue
+			}
+			if _, ok := seen[row.WorkspaceID.Bytes]; ok {
+				continue
+			}
+			seen[row.WorkspaceID.Bytes] = struct{}{}
+			rows = append(rows, []interface{}{row.WorkspaceID})
+		}
+		return &fakeRows{rows: rows}, nil
+	}
 
 	if strings.Contains(sqlLower, "from links") {
 		row := make([]interface{}, 22)
@@ -496,6 +599,9 @@ func (f *fakeDB) QueryRow(ctx context.Context, sql string, args ...interface{}) 
 		}
 		return fakeRow{values: billingScanValues(f.billing)}
 
+	case strings.Contains(sqlLower, "from room_members rm") && strings.Contains(sqlLower, "count("):
+		return fakeRow{values: []interface{}{f.soleOperableCount}}
+
 	case strings.Contains(sqlLower, "from workspace_members") && strings.Contains(sqlLower, "role = 'owner'") && strings.Contains(sqlLower, "count(") && !strings.Contains(sqlLower, "workspace_invitations"):
 		return fakeRow{values: []interface{}{f.ownedCount}}
 
@@ -553,7 +659,7 @@ func (f *fakeDB) QueryRow(ctx context.Context, sql string, args ...interface{}) 
 		return fakeRow{values: []interface{}{f.invitation.Token, f.invitation.WorkspaceID, f.invitation.Email, f.invitation.Role, f.invitation.ExpiresAt, f.invitation.UsedAt, f.invitation.CreatedAt}}
 
 	case strings.Contains(sqlLower, "from workspace_invitations"):
-		if !f.invitation.Token.Valid {
+		if !f.invitation.Token.Valid || !bytesEqual(f.invitation.Token.Bytes, argUUID(args, 0).Bytes) {
 			return fakeRow{err: pgx.ErrNoRows}
 		}
 		return fakeRow{values: []interface{}{f.invitation.Token, f.invitation.WorkspaceID, f.invitation.Email, f.invitation.Role, f.invitation.ExpiresAt, f.invitation.UsedAt, f.invitation.CreatedAt}}
@@ -597,6 +703,12 @@ func (f *fakeDB) QueryRow(ctx context.Context, sql string, args ...interface{}) 
 
 	case strings.Contains(sqlLower, "from workspace_members") && strings.Contains(sqlLower, "where workspace_id"):
 		userArg := argUUID(args, 1)
+		wsArg := argUUID(args, 0)
+		if f.member.UserID.Valid && f.member.WorkspaceID.Valid &&
+			bytesEqual(userArg.Bytes, f.member.UserID.Bytes) &&
+			bytesEqual(wsArg.Bytes, f.member.WorkspaceID.Bytes) {
+			return fakeRow{values: []interface{}{f.member.WorkspaceID, f.member.UserID, f.member.Role, f.member.JoinedAt}}
+		}
 		if f.memberRole != "" && bytesEqual(userArg.Bytes, pgUUIDFromString(f.actorUserID).Bytes) {
 			f.member = db.WorkspaceMember{
 				WorkspaceID: argUUID(args, 0),
@@ -893,6 +1005,14 @@ func TestCreateInvitationSuccessNormalizesEmail(t *testing.T) {
 	if inv.Email != "guest@example.test" {
 		t.Fatalf("expected normalized email, got %q", inv.Email)
 	}
+
+	gmailInv, err := svc.CreateInvitation(context.Background(), actorID, uuid.NewString(), "", "  Jane.Doe+vdr@Gmail.COM ", RoleGuest, 7)
+	if err != nil {
+		t.Fatalf("create gmail invitation: %v", err)
+	}
+	if gmailInv.Email != "janedoe@gmail.com" {
+		t.Fatalf("expected canonical gmail mailbox, got %q", gmailInv.Email)
+	}
 	if inv.Role != RoleMember {
 		t.Fatalf("expected role member, got %s", inv.Role)
 	}
@@ -1130,6 +1250,28 @@ func TestAdminCannotInviteAdmin(t *testing.T) {
 	}
 }
 
+func TestAdminCannotAddAdmin(t *testing.T) {
+	actorID := uuid.NewString()
+	fake := &fakeDB{t: t, memberRole: RoleAdmin, actorUserID: actorID}
+	svc := NewService(db.New(fake))
+
+	_, err := svc.AddMember(context.Background(), actorID, uuid.NewString(), "", uuid.NewString(), RoleAdmin)
+	if !errors.Is(err, ErrCannotManageMember) {
+		t.Fatalf("expected ErrCannotManageMember, got %v", err)
+	}
+}
+
+func TestRemoveMemberRejectsSoleRoomOperator(t *testing.T) {
+	actorID := uuid.NewString()
+	targetID := uuid.NewString()
+	fake := &fakeDB{t: t, memberRole: RoleOwner, actorUserID: actorID, targetUserID: targetID, targetRole: RoleMember, soleOperableCount: 1}
+	svc := NewService(db.New(fake))
+
+	if err := svc.RemoveMember(context.Background(), actorID, uuid.NewString(), "", targetID); !errors.Is(err, ErrCannotRemoveSoleRoomOperator) {
+		t.Fatalf("expected ErrCannotRemoveSoleRoomOperator, got %v", err)
+	}
+}
+
 func TestAdminCannotRevokeAdminInvite(t *testing.T) {
 	actorID := uuid.NewString()
 	wsID := uuid.NewString()
@@ -1187,6 +1329,37 @@ func TestAcceptInvitationSuccess(t *testing.T) {
 	}
 	if result.WorkspaceSlug != "demo-capital" {
 		t.Fatalf("expected workspace slug demo-capital, got %s", result.WorkspaceSlug)
+	}
+}
+
+func TestAcceptInvitationSameMailboxPlusTag(t *testing.T) {
+	actorID := uuid.NewString()
+	userID := uuid.NewString()
+	fake := &fakeDB{t: t, memberRole: RoleOwner, actorUserID: actorID}
+	svc := NewService(db.New(fake), WithDBPool(fake))
+
+	inv, err := svc.CreateInvitation(context.Background(), actorID, uuid.NewString(), "", "guest+vdr@gmail.com", RoleGuest, 7)
+	if err != nil {
+		t.Fatalf("create invitation: %v", err)
+	}
+	if inv.Email != "guest@gmail.com" {
+		t.Fatalf("invite must store canonical mailbox, got %q", inv.Email)
+	}
+	fake.workspace.Slug = "demo-capital"
+	fake.lookupUserEmail = "guest@gmail.com"
+
+	if _, err := svc.AcceptInvitation(context.Background(), inv.Token, userID); err != nil {
+		t.Fatalf("canonical invitee must accept: %v", err)
+	}
+
+	legacy, err := svc.CreateInvitation(context.Background(), actorID, uuid.NewString(), "", "alumni@example.test", RoleGuest, 7)
+	if err != nil {
+		t.Fatalf("create legacy invitation: %v", err)
+	}
+	fake.invitation.Email = "alumni+old@gmail.com"
+	fake.lookupUserEmail = "alumni@gmail.com"
+	if _, err := svc.AcceptInvitation(context.Background(), legacy.Token, uuid.NewString()); err != nil {
+		t.Fatalf("legacy plus-tag invite must match canonical account: %v", err)
 	}
 }
 
@@ -1340,6 +1513,64 @@ func TestAcceptInvitationIdempotentWhenAlreadyMember(t *testing.T) {
 	}
 }
 
+func TestAcceptInvitationMarksSameMailboxVerified(t *testing.T) {
+	actorID := uuid.NewString()
+	userID := uuid.NewString()
+	fake := &fakeDB{t: t, memberRole: RoleOwner, actorUserID: actorID, unverifiedEmail: true}
+	svc := NewService(db.New(fake), WithDBPool(fake))
+
+	inv, err := svc.CreateInvitation(context.Background(), actorID, uuid.NewString(), "", "guest@example.test", RoleGuest, 7)
+	if err != nil {
+		t.Fatalf("create invitation: %v", err)
+	}
+	fake.workspace.Slug = "demo-capital"
+	fake.lookupUserEmail = "guest@example.test"
+
+	if _, err := svc.AcceptInvitation(context.Background(), inv.Token, userID); err != nil {
+		t.Fatalf("accept: %v", err)
+	}
+	if fake.unverifiedEmail {
+		t.Fatal("workspace invite token must mark the matching mailbox verified")
+	}
+}
+
+func TestValidInviteMailbox(t *testing.T) {
+	actorID := uuid.NewString()
+	fake := &fakeDB{t: t, memberRole: RoleOwner, actorUserID: actorID}
+	svc := NewService(db.New(fake))
+
+	inv, err := svc.CreateInvitation(context.Background(), actorID, uuid.NewString(), "", "guest@example.test", RoleGuest, 7)
+	if err != nil {
+		t.Fatalf("create invitation: %v", err)
+	}
+	if !svc.ValidInviteMailbox(context.Background(), "guest@example.test", inv.Token) {
+		t.Fatal("matching mailbox must prove")
+	}
+	if !svc.ValidInviteMailbox(context.Background(), "guest+tag@example.test", inv.Token) {
+		t.Fatal("same mailbox plus-tag must prove")
+	}
+	if svc.ValidInviteMailbox(context.Background(), "other@example.test", inv.Token) {
+		t.Fatal("other mailbox must not prove")
+	}
+	if svc.ValidInviteMailbox(context.Background(), "guest@example.test", uuid.NewString()) {
+		t.Fatal("unknown token must not prove")
+	}
+
+	fake.invitation.ExpiresAt = pgtype.Timestamptz{Time: time.Now().UTC().Add(-time.Hour), Valid: true}
+	if svc.ValidInviteMailbox(context.Background(), "guest@example.test", inv.Token) {
+		t.Fatal("expired token must not prove")
+	}
+}
+
+func TestClaimRoomInvitesDoesNotVerifyEmail(t *testing.T) {
+	fake := &fakeDB{t: t, memberRole: RoleOwner, actorUserID: uuid.NewString(), unverifiedEmail: true}
+	svc := NewService(db.New(fake))
+	svc.ClaimRoomInvites(context.Background(), uuid.NewString(), "guest@example.test")
+	if !fake.unverifiedEmail {
+		t.Fatal("room invite claim must not mark the account verified")
+	}
+}
+
 func TestGetBillingUsesRealStorageUsage(t *testing.T) {
 	actorID := uuid.NewString()
 	fake := &fakeDB{
@@ -1454,5 +1685,168 @@ func TestGetBillingUsesPersistedFreePlan(t *testing.T) {
 	}
 	if billing.StorageUsed != 1024 || billing.LinksUsed != 4 || billing.RoomsUsed != 1 || billing.SeatsUsed != 1 {
 		t.Fatalf("unexpected usage %+v", billing)
+	}
+}
+
+func TestClaimRoomInvitesSkipsDeletedAndSuspended(t *testing.T) {
+	liveWS := newPGUUID()
+	deletedWS := newPGUUID()
+	suspendedWS := newPGUUID()
+	userID := uuid.NewString()
+	email := "invitee@example.com"
+	fake := &fakeDB{
+		t: t,
+		claimRows: []roomMemberClaim{
+			{WorkspaceID: liveWS, Email: email, Status: "pending"},
+			{WorkspaceID: liveWS, Email: email, Status: "suspended"},
+			{WorkspaceID: deletedWS, Email: email, Status: "pending", RoomDeleted: true},
+			{WorkspaceID: suspendedWS, Email: email, Status: "suspended"},
+		},
+	}
+	NewService(db.New(fake)).ClaimRoomInvites(context.Background(), userID, email)
+
+	if !fake.member.UserID.Valid || fake.member.Role != RoleGuest {
+		t.Fatalf("live pending must add workspace guest, got %+v", fake.member)
+	}
+	if fake.member.WorkspaceID != liveWS {
+		t.Fatalf("guest workspace=%v want live %v", fake.member.WorkspaceID, liveWS)
+	}
+
+	var boundPending, boundSuspended bool
+	for _, row := range fake.claimRows {
+		if row.WorkspaceID == liveWS && row.Status == "pending" && row.UserID.Valid {
+			boundPending = true
+		}
+		if row.Status == "suspended" && row.UserID.Valid {
+			boundSuspended = true
+		}
+		if row.RoomDeleted && row.UserID.Valid {
+			t.Fatal("deleted-room invite must not bind")
+		}
+	}
+	if !boundPending {
+		t.Fatal("live pending row must bind user_id")
+	}
+	if boundSuspended {
+		t.Fatal("suspended row must stay unbound")
+	}
+}
+
+func TestClaimRoomInvitesMatchesGmailKeys(t *testing.T) {
+	liveWS := newPGUUID()
+	userID := uuid.NewString()
+	fake := &fakeDB{
+		t: t,
+		claimRows: []roomMemberClaim{
+			{WorkspaceID: liveWS, Email: "janedoe@gmail.com", Status: "pending"},
+		},
+	}
+	NewService(db.New(fake)).ClaimRoomInvites(context.Background(), userID, "Jane.Doe+vdr@Gmail.COM")
+	if !fake.member.UserID.Valid || fake.member.Role != RoleGuest || fake.member.WorkspaceID != liveWS {
+		t.Fatalf("canonical gmail invite must add guest, got %+v", fake.member)
+	}
+	if !fake.claimRows[0].UserID.Valid {
+		t.Fatal("canonical row must bind")
+	}
+}
+
+func TestGetBySlugDoesNotClaimMailboxInvite(t *testing.T) {
+	wsID := newPGUUID()
+	userID := uuid.NewString()
+	fake := &fakeDB{
+		t:           t,
+		actorUserID: userID,
+		actorEmail:  "janedoe@gmail.com",
+		workspace: db.Workspace{
+			ID:        wsID,
+			TenantID:  newPGUUID(),
+			Name:      "Acme",
+			Slug:      "acme",
+			CreatedAt: pgtype.Timestamptz{Time: time.Now(), Valid: true},
+		},
+		claimRows: []roomMemberClaim{
+			{WorkspaceID: wsID, Email: "jane.doe+vdr@gmail.com", Status: "pending"},
+		},
+	}
+	if _, err := NewService(db.New(fake)).GetBySlug(context.Background(), userID, "acme", ""); !errors.Is(err, ErrNotMember) {
+		t.Fatalf("workspace root must not claim, got %v", err)
+	}
+	if fake.claimRows[0].UserID.Valid {
+		t.Fatal("workspace root must not bind invite")
+	}
+}
+
+func TestClaimMailboxInvitesForSlugRoom(t *testing.T) {
+	wsID := newPGUUID()
+	roomID := newPGUUID()
+	otherRoom := newPGUUID()
+	userID := uuid.NewString()
+	other := newPGUUID()
+	fake := &fakeDB{
+		t:           t,
+		actorUserID: userID,
+		actorEmail:  "janedoe@gmail.com",
+		workspace: db.Workspace{
+			ID:        wsID,
+			TenantID:  newPGUUID(),
+			Name:      "Acme",
+			Slug:      "acme",
+			CreatedAt: pgtype.Timestamptz{Time: time.Now(), Valid: true},
+		},
+		claimRows: []roomMemberClaim{
+			{WorkspaceID: wsID, RoomID: roomID, Email: "jane.doe+vdr@gmail.com", Status: "pending"},
+			{WorkspaceID: wsID, RoomID: roomID, Email: "jane.doe+old@gmail.com", Status: "suspended"},
+			{WorkspaceID: wsID, RoomID: roomID, Email: "jane.doe+taken@gmail.com", Status: "pending", UserID: other},
+			{WorkspaceID: wsID, RoomID: otherRoom, Email: "jane.doe+other@gmail.com", Status: "pending"},
+		},
+	}
+	svc := NewService(db.New(fake))
+	if !svc.claimMailboxInvitesForSlugRoom(context.Background(), userID, "", "acme", uuid.UUID(roomID.Bytes).String()) {
+		t.Fatal("room deep-link must claim")
+	}
+	got, err := svc.GetBySlug(context.Background(), userID, "acme", "")
+	if err != nil {
+		t.Fatalf("after room claim: %v", err)
+	}
+	if got.Role != RoleGuest {
+		t.Fatalf("role=%q want guest", got.Role)
+	}
+	if !fake.claimRows[0].UserID.Valid {
+		t.Fatal("plus-tag pending must bind")
+	}
+	if fake.claimRows[1].UserID.Valid {
+		t.Fatal("suspended must stay unbound")
+	}
+	if fake.claimRows[2].UserID != other {
+		t.Fatal("already-bound invite must not be stolen")
+	}
+	if fake.claimRows[3].UserID.Valid {
+		t.Fatal("other room invite must stay unbound")
+	}
+}
+
+func TestGetBySlugDoesNotClaimWithoutMailboxInvite(t *testing.T) {
+	wsID := newPGUUID()
+	userID := uuid.NewString()
+	fake := &fakeDB{
+		t:           t,
+		actorUserID: userID,
+		actorEmail:  "other@example.com",
+		workspace: db.Workspace{
+			ID:        wsID,
+			TenantID:  newPGUUID(),
+			Name:      "Acme",
+			Slug:      "acme",
+			CreatedAt: pgtype.Timestamptz{Time: time.Now(), Valid: true},
+		},
+		claimRows: []roomMemberClaim{
+			{WorkspaceID: wsID, Email: "jane.doe+vdr@gmail.com", Status: "pending"},
+		},
+	}
+	if _, err := NewService(db.New(fake)).GetBySlug(context.Background(), userID, "acme", ""); !errors.Is(err, ErrNotMember) {
+		t.Fatalf("want ErrNotMember, got %v", err)
+	}
+	if fake.claimRows[0].UserID.Valid {
+		t.Fatal("unrelated mailbox must not bind")
 	}
 }

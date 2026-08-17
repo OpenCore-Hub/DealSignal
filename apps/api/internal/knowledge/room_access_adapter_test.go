@@ -62,6 +62,8 @@ func (f *roomAccessFakeDB) QueryRow(_ context.Context, sql string, args ...any) 
 			}
 		}
 		return raFakeRow{err: pgx.ErrNoRows}
+	case strings.Contains(sqlLower, "from users") && strings.Contains(sqlLower, "where id = $1"):
+		return raFakeRow{err: pgx.ErrNoRows}
 	default:
 		f.t.Fatalf("unexpected query: %s", sqlLower)
 		return raFakeRow{err: pgx.ErrNoRows}
@@ -82,6 +84,9 @@ func TestRoomAccessAdapterRequireActiveRoomMember_AllowsWorkspaceManager(t *test
 	err := adapter.RequireActiveRoomMember(t.Context(), uuid.UUID(roomID.Bytes).String(), uuid.UUID(wsID.Bytes).String(), uuid.UUID(ownerID.Bytes).String())
 	if err != nil {
 		t.Fatalf("expected owner to pass room access, got %v", err)
+	}
+	if err := adapter.RequireRoomContribute(t.Context(), uuid.UUID(roomID.Bytes).String(), uuid.UUID(wsID.Bytes).String(), uuid.UUID(ownerID.Bytes).String()); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("workspace owner without a room role must not contribute, got %v", err)
 	}
 }
 

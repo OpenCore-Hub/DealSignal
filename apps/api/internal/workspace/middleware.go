@@ -2,9 +2,12 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/httpx"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/middleware"
@@ -25,8 +28,14 @@ func AuthMiddleware(svc *Service) gin.HandlerFunc {
 		userID := middleware.UserIDFrom(c)
 		tenantID := middleware.TenantIDFrom(c)
 		ws, err := svc.GetByTenantAndSlug(c.Request.Context(), userID, tenantID, slug)
+		if errors.Is(err, ErrNotMember) {
+			if roomID := dealRoomIDParam(c); roomID != "" &&
+				svc.claimMailboxInvitesForSlugRoom(c.Request.Context(), userID, tenantID, slug, roomID) {
+				ws, err = svc.GetByTenantAndSlug(c.Request.Context(), userID, tenantID, slug)
+			}
+		}
 		if err != nil {
-			if err == ErrNotMember {
+			if errors.Is(err, ErrNotMember) {
 				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": "not a member of this workspace"})
 				return
 			}
@@ -57,6 +66,14 @@ func AuthMiddleware(svc *Service) gin.HandlerFunc {
 		c.Set(middleware.WorkspaceRoleKey, ws.Role)
 		authz(c)
 	}
+}
+
+func dealRoomIDParam(c *gin.Context) string {
+	raw := strings.TrimSpace(c.Param("roomId"))
+	if _, err := uuid.Parse(raw); err != nil {
+		return ""
+	}
+	return raw
 }
 
 // IsUserEmailVerified reports whether the given user has verified their email.

@@ -28,7 +28,11 @@ func (m *recordingMailer) SendLinkAccessCodeEmail(ctx context.Context, to, code,
 
 func (m *recordingMailer) SendEmail(ctx context.Context, job mailer.EmailJob) (string, error) {
 	m.lastTo = job.Recipient
-	if job.VerificationLink != "" {
+	if job.ResetLink != "" {
+		m.lastLink = job.ResetLink
+	} else if job.TemplateVariables != nil && job.TemplateVariables["ResetLink"] != "" {
+		m.lastLink = job.TemplateVariables["ResetLink"]
+	} else if job.VerificationLink != "" {
 		m.lastLink = job.VerificationLink
 	}
 	return "", nil
@@ -38,7 +42,7 @@ func TestVerifyEmailByTokenInvalid(t *testing.T) {
 	svc := NewService(nil, NewMemoryTokenStore())
 	ctx := context.Background()
 
-	if err := svc.VerifyEmailByToken(ctx, "missing-token"); err != ErrTokenInvalid {
+	if _, _, err := svc.VerifyEmailByToken(ctx, "missing-token"); err != ErrTokenInvalid {
 		t.Fatalf("expected ErrTokenInvalid, got %v", err)
 	}
 }

@@ -6,13 +6,15 @@ import "maps"
 type EmailType string
 
 const (
-	EmailTypeVerification EmailType = "verification"
-	EmailTypeAccessCode   EmailType = "access_code"
-	EmailTypeMarketing    EmailType = "marketing"
-	EmailTypeCustom       EmailType = "custom"
-	EmailTypeInvitation   EmailType = "invitation"
-	EmailTypeLinkInvite   EmailType = "link_invite"
-	EmailTypeLinkAccess   EmailType = "link_access"
+	EmailTypeVerification  EmailType = "verification"
+	EmailTypeAccessCode    EmailType = "access_code"
+	EmailTypeMarketing     EmailType = "marketing"
+	EmailTypeCustom        EmailType = "custom"
+	EmailTypeInvitation    EmailType = "invitation"
+	EmailTypeRoomInvite    EmailType = "room_invite"
+	EmailTypeLinkInvite    EmailType = "link_invite"
+	EmailTypeLinkAccess    EmailType = "link_access"
+	EmailTypePasswordReset EmailType = "password_reset"
 )
 
 // Attachment is an email attachment carried inside an EmailJob.
@@ -36,6 +38,7 @@ type EmailJob struct {
 	LinkURL           string            `json:"link_url,omitempty"`
 	Code              string            `json:"code,omitempty"`
 	VerificationLink  string            `json:"verification_link,omitempty"`
+	ResetLink         string            `json:"reset_link,omitempty"`
 	TemplateName      string            `json:"template_name,omitempty"`
 	TemplateVariables map[string]string `json:"template_variables,omitempty"`
 	Attachments       []Attachment      `json:"attachments,omitempty"`
@@ -54,6 +57,9 @@ func (j EmailJob) TemplateVars() map[string]string {
 	maps.Copy(vars, j.TemplateVariables)
 	if j.VerificationLink != "" {
 		vars["VerificationLink"] = j.VerificationLink
+	}
+	if j.ResetLink != "" {
+		vars["ResetLink"] = j.ResetLink
 	}
 	if j.Code != "" {
 		vars["Code"] = j.Code
@@ -88,10 +94,14 @@ func (j EmailJob) templateName() string {
 		return "marketing"
 	case EmailTypeInvitation:
 		return "invitation"
+	case EmailTypeRoomInvite:
+		return "room_invite"
 	case EmailTypeLinkInvite:
 		return "link_invite"
 	case EmailTypeLinkAccess:
 		return "link_access"
+	case EmailTypePasswordReset:
+		return "password_reset"
 	default:
 		return "custom"
 	}

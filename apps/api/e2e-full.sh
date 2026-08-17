@@ -11,6 +11,10 @@
 # =============================================================================
 set -euo pipefail
 
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck source=scripts/e2e-turnstile.sh
+source "$SCRIPT_DIR/scripts/e2e-turnstile.sh"
+
 BASE_URL="${BASE_URL:-http://localhost:8086}"
 PDF="${PDF:-e2e-test.pdf}"
 PASS=0
@@ -151,7 +155,8 @@ assert_json_not_empty "version" '.version' "$BODY"
 section "2. Auth — Register"
 EMAIL="e2e-full-$(ts)@example.com"
 PASSWORD="Password123!"
-api_call BODY STATUS POST "$BASE_URL/api/auth/register" "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\"}"
+TS_FIELD=$(e2e_turnstile_field "$BASE_URL")
+api_call BODY STATUS POST "$BASE_URL/api/auth/register" "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\"$TS_FIELD}"
 assert_status "POST /auth/register" 201 "$STATUS"
 assert_json_field "register email" '.user.email' "$EMAIL" "$BODY"
 assert_json_not_empty "access_token" '.access_token' "$BODY"
@@ -161,15 +166,15 @@ REFRESH_TOKEN=$(echo "$BODY" | jq -r '.refresh_token')
 USER_ID=$(echo "$BODY" | jq -r '.user.id')
 
 # 2a. Register — duplicate email (conflict)
-api_call BODY2 STATUS2 POST "$BASE_URL/api/auth/register" "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\"}"
+api_call BODY2 STATUS2 POST "$BASE_URL/api/auth/register" "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\"$TS_FIELD}"
 assert_status "register duplicate (409)" 409 "$STATUS2"
 
 # 2b. Register — weak password
-api_call BODY2 STATUS2 POST "$BASE_URL/api/auth/register" '{"email":"weak@example.com","password":"short"}'
+api_call BODY2 STATUS2 POST "$BASE_URL/api/auth/register" "{\"email\":\"weak@example.com\",\"password\":\"short\"$TS_FIELD}"
 assert_status "register weak password (400)" 400 "$STATUS2"
 
 # 2c. Register — invalid email
-api_call BODY2 STATUS2 POST "$BASE_URL/api/auth/register" '{"email":"not-an-email","password":"Password123!"}'
+api_call BODY2 STATUS2 POST "$BASE_URL/api/auth/register" "{\"email\":\"not-an-email\",\"password\":\"Password123!\"$TS_FIELD}"
 assert_status "register invalid email (400)" 400 "$STATUS2"
 
 # =============================================================================
@@ -279,7 +284,7 @@ INVITE_TOKEN=$(echo "$BODY" | jq -r '.token // .data.token // empty')
 # 7c. Invitation — accept (register invitee first)
 INVITEE_PASS="Invitee123!"
 api_call BODY2 STATUS2 POST "$BASE_URL/api/auth/register" \
-  "{\"email\":\"$INVITE_EMAIL\",\"password\":\"$INVITEE_PASS\"}"
+  "{\"email\":\"$INVITE_EMAIL\",\"password\":\"$INVITEE_PASS\"$TS_FIELD}"
 if [[ "$STATUS2" == "201" ]]; then
   INVITEE_TOKEN=$(echo "$BODY2" | jq -r '.access_token')
   if [[ -n "$INVITE_TOKEN" && "$INVITE_TOKEN" != "null" ]]; then

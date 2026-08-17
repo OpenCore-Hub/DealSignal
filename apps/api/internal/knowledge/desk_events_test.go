@@ -21,6 +21,10 @@ func (s stubRoomAccess) RequireActiveRoomMember(context.Context, string, string,
 	return s.err
 }
 
+func (s stubRoomAccess) RequireRoomContribute(context.Context, string, string, string) error {
+	return s.err
+}
+
 func TestRecordDeskEventCiteOpen(t *testing.T) {
 	svc := &Service{access: stubRoomAccess{}}
 	before := testutil.ToFloat64(knowledgeQACiteOpensTotal.WithLabelValues("grounded"))

@@ -10,21 +10,26 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/auth/emailid"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/logger"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/mailer"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"golang.org/x/crypto/bcrypt"
 )
 
 const (
-	bcryptCost                  = 12
-	accessTokenDuration         = 15 * time.Minute
-	refreshTokenDuration        = 7 * 24 * time.Hour
-	defaultVerificationTokenTTL = 24 * time.Hour
+	bcryptCost                   = 12
+	accessTokenDuration          = 15 * time.Minute
+	refreshTokenDuration         = 7 * 24 * time.Hour
+	defaultVerificationTokenTTL  = 24 * time.Hour
+	defaultPasswordResetTokenTTL = 30 * time.Minute
 	// Background send budget (covers provider retries). Does not block Register.
 	defaultVerificationSendTimeout = 30 * time.Second
+	// Unverified rows older than this may be deleted so the same mailbox can re-register.
+	unverifiedReclaimAfter = 48 * time.Hour
 )
 
 var (
@@ -35,6 +40,7 @@ var (
 	ErrTokenRevoked     = errors.New("token has been revoked")
 	ErrWeakPassword     = errors.New("password does not meet complexity requirements")
 	ErrEmailNotVerified = errors.New("email not verified")
+	ErrDisposableEmail  = errors.New("disposable email addresses are not allowed")
 	emailRegex          = regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
 )
 
@@ -55,6 +61,12 @@ type verificationTokenStore interface {
 	DeleteVerificationToken(ctx context.Context, token string) error
 }
 
+// passwordResetTokenStore creates and consumes hashed, single-use reset tokens.
+type passwordResetTokenStore interface {
+	CreatePasswordResetToken(ctx context.Context, userID string, ttl time.Duration) (string, error)
+	ConsumePasswordResetToken(ctx context.Context, token string) (string, error)
+}
+
 // User is the public view of a db.User.
 type User struct {
 	ID            string `json:"id"`
@@ -63,15 +75,48 @@ type User struct {
 	CreatedAt     string `json:"created_at"`
 }
 
+// RegisterResult is returned after creating (or re-touching) an account.
+// Session tokens are only present when the mailbox is already verified
+// (non-production auto-verify). Production register never issues a session.
+type RegisterResult struct {
+	User                 User
+	Pair                 TokenPair
+	VerificationRequired bool
+}
+
+// accountStore is the user-row surface Register/Login/Verify need.
+// *db.Queries implements it; tests inject a memory store.
+type accountStore interface {
+	CreateUser(ctx context.Context, arg db.CreateUserParams) (db.User, error)
+	GetUserByEmail(ctx context.Context, email string) (db.User, error)
+	GetUserByID(ctx context.Context, id pgtype.UUID) (db.User, error)
+	VerifyUserEmail(ctx context.Context, id pgtype.UUID) error
+	DeleteUnverifiedUser(ctx context.Context, id pgtype.UUID) error
+	UpdateUserPassword(ctx context.Context, arg db.UpdateUserPasswordParams) error
+}
+
 // Service handles user authentication.
 type Service struct {
-	queries              *db.Queries
-	tokenStore           TokenStore
-	verifyStore          verificationTokenStore
-	mailer               mailer.Mailer
-	appBaseURL           string
-	verificationTokenTTL time.Duration
-	sendTimeout          time.Duration
+	queries               *db.Queries
+	accounts              accountStore
+	tokenStore            TokenStore
+	verifyStore           verificationTokenStore
+	resetStore            passwordResetTokenStore
+	mailer                mailer.Mailer
+	appBaseURL            string
+	verificationTokenTTL  time.Duration
+	passwordResetTokenTTL time.Duration
+	sendTimeout           time.Duration
+	autoVerifyEmail       bool
+	trialActivator        TrialActivator
+	roomInviteClaimer     RoomInviteClaimer
+	inviteMailbox         InviteMailboxProver
+}
+
+// TrialActivator starts the 14-day trial on the user's first owned Free
+// workspace after email verification. Wired from workspace.Service.
+type TrialActivator interface {
+	ActivateEligibleTrial(ctx context.Context, userID string) error
 }
 
 // ServiceOption configures the auth service.
@@ -98,18 +143,80 @@ func WithSendTimeout(timeout time.Duration) ServiceOption {
 	return func(s *Service) { s.sendTimeout = timeout }
 }
 
+// WithAutoVerifyEmail marks new accounts verified at register. Production
+// must leave this off so a mailbox click is required before Trial.
+func WithAutoVerifyEmail(enabled bool) ServiceOption {
+	return func(s *Service) { s.autoVerifyEmail = enabled }
+}
+
+// SetTrialActivator is assigned after workspace.Service is constructed.
+func (s *Service) SetTrialActivator(a TrialActivator) {
+	if s != nil {
+		s.trialActivator = a
+	}
+}
+
+// RoomInviteClaimer binds pending room invites after login/register.
+type RoomInviteClaimer interface {
+	ClaimRoomInvites(ctx context.Context, userID, email string)
+}
+
+// SetRoomInviteClaimer is assigned after workspace.Service is constructed.
+func (s *Service) SetRoomInviteClaimer(c RoomInviteClaimer) {
+	if s != nil {
+		s.roomInviteClaimer = c
+	}
+}
+
+// InviteMailboxProver reports whether a workspace invitation token proves
+// this mailbox (mail already reached the address). Same token plane as AcceptInvitation.
+type InviteMailboxProver interface {
+	ValidInviteMailbox(ctx context.Context, email, token string) bool
+}
+
+// SetInviteMailboxProver is assigned after workspace.Service is constructed.
+func (s *Service) SetInviteMailboxProver(p InviteMailboxProver) {
+	if s != nil {
+		s.inviteMailbox = p
+	}
+}
+
+func (s *Service) claimRoomInvites(ctx context.Context, userID, email string) {
+	if s == nil || s.roomInviteClaimer == nil {
+		return
+	}
+	s.roomInviteClaimer.ClaimRoomInvites(ctx, userID, email)
+}
+
+func (s *Service) accountStore() accountStore {
+	if s == nil {
+		return nil
+	}
+	if s.accounts != nil {
+		return s.accounts
+	}
+	if s.queries != nil {
+		return s.queries
+	}
+	return nil
+}
+
 // NewService creates an auth service.
 func NewService(q *db.Queries, store TokenStore, opts ...ServiceOption) *Service {
 	s := &Service{
-		queries:              q,
-		tokenStore:           store,
-		mailer:               &noopMailer{},
-		appBaseURL:           "http://localhost:8080",
-		verificationTokenTTL: defaultVerificationTokenTTL,
-		sendTimeout:          defaultVerificationSendTimeout,
+		queries:               q,
+		tokenStore:            store,
+		mailer:                &noopMailer{},
+		appBaseURL:            "http://localhost:8080",
+		verificationTokenTTL:  defaultVerificationTokenTTL,
+		passwordResetTokenTTL: defaultPasswordResetTokenTTL,
+		sendTimeout:           defaultVerificationSendTimeout,
 	}
 	if vs, ok := store.(verificationTokenStore); ok {
 		s.verifyStore = vs
+	}
+	if rs, ok := store.(passwordResetTokenStore); ok {
+		s.resetStore = rs
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -174,64 +281,167 @@ func validatePassword(password string) error {
 	return nil
 }
 
-// Register creates a new user and returns a token pair.
-func (s *Service) Register(ctx context.Context, email, password string) (User, TokenPair, error) {
-	if !emailRegex.MatchString(email) {
-		return User{}, TokenPair{}, ErrInvalidEmail
+// Register creates a new user. Production does not issue a session until the
+// mailbox is verified. Non-production auto-verify still returns tokens so E2E
+// can complete without a real inbox.
+func (s *Service) Register(ctx context.Context, email, password string) (RegisterResult, error) {
+	canonical := emailid.Canonical(email)
+	if !emailRegex.MatchString(canonical) {
+		return RegisterResult{}, ErrInvalidEmail
+	}
+	if emailid.IsDisposable(canonical) {
+		return RegisterResult{}, ErrDisposableEmail
 	}
 	if err := validatePassword(password); err != nil {
-		return User{}, TokenPair{}, err
+		return RegisterResult{}, err
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcryptCost)
 	if err != nil {
-		return User{}, TokenPair{}, fmt.Errorf("bcrypt hash: %w", err)
+		return RegisterResult{}, fmt.Errorf("bcrypt hash: %w", err)
 	}
 
-	u, err := s.queries.CreateUser(ctx, db.CreateUserParams{
-		Email:        email,
-		PasswordHash: string(hash),
+	store := s.accountStore()
+	if store == nil {
+		return RegisterResult{}, fmt.Errorf("create user: account store is not configured")
+	}
+
+	u, err := store.CreateUser(ctx, db.CreateUserParams{
+		Email:         canonical,
+		PasswordHash:  string(hash),
+		EmailVerified: s.autoVerifyEmail,
 	})
 	if err != nil {
 		if isUniqueViolation(err) {
-			return User{}, TokenPair{}, ErrEmailExists
+			existing, resolved, resolveErr := s.resolveRegisterConflict(ctx, store, canonical, string(hash))
+			if resolveErr != nil {
+				return RegisterResult{}, resolveErr
+			}
+			u = existing
+			if !resolved {
+				if !u.EmailVerified {
+					s.enqueueVerificationEmail(ctx, uuidToString(u.ID), u.Email)
+				}
+				return RegisterResult{User: userFromDB(u), VerificationRequired: !u.EmailVerified}, nil
+			}
+		} else {
+			return RegisterResult{}, fmt.Errorf("create user: %w", err)
 		}
-		return User{}, TokenPair{}, fmt.Errorf("create user: %w", err)
 	}
 
-	pair, err := GenerateTokenPair(uuidToString(u.ID), accessTokenDuration, refreshTokenDuration)
+	if !u.EmailVerified {
+		s.enqueueVerificationEmail(ctx, uuidToString(u.ID), u.Email)
+		return RegisterResult{User: userFromDB(u), VerificationRequired: true}, nil
+	}
+
+	pair, err := s.issueSession(ctx, uuidToString(u.ID))
 	if err != nil {
-		return User{}, TokenPair{}, fmt.Errorf("generate token pair: %w", err)
+		return RegisterResult{}, err
 	}
-	if err := s.tokenStore.StoreRefreshToken(ctx, uuidToString(u.ID), pair.RefreshToken, refreshTokenDuration); err != nil {
-		return User{}, TokenPair{}, fmt.Errorf("store refresh token: %w", err)
+	s.claimRoomInvites(ctx, uuidToString(u.ID), u.Email)
+	return RegisterResult{User: userFromDB(u), Pair: pair}, nil
+}
+
+// resolveRegisterConflict handles a unique email clash.
+// verified → ErrEmailExists.
+// unverified older than 48h → delete and recreate (resolved=true).
+// unverified still fresh → return the existing row (resolved=false) so the
+// caller can resend without leaking "already registered".
+func (s *Service) resolveRegisterConflict(ctx context.Context, store accountStore, canonical, passwordHash string) (db.User, bool, error) {
+	existing, err := s.lookupUserByEmail(ctx, canonical)
+	if err != nil {
+		return db.User{}, false, ErrEmailExists
 	}
-
-	// Never block signup on SMTP/Resend latency — user + tokens are already durable.
-	// Failures are logged; the user can request a new verification email later.
-	s.enqueueVerificationEmail(ctx, uuidToString(u.ID), u.Email)
-
-	return userFromDB(u), pair, nil
+	if existing.EmailVerified {
+		return db.User{}, false, ErrEmailExists
+	}
+	created := existing.CreatedAt.Time
+	if !existing.CreatedAt.Valid || time.Since(created) <= unverifiedReclaimAfter {
+		return existing, false, nil
+	}
+	if delErr := store.DeleteUnverifiedUser(ctx, existing.ID); delErr != nil {
+		return db.User{}, false, ErrEmailExists
+	}
+	u, err := store.CreateUser(ctx, db.CreateUserParams{
+		Email:         canonical,
+		PasswordHash:  passwordHash,
+		EmailVerified: s.autoVerifyEmail,
+	})
+	if err != nil {
+		if isUniqueViolation(err) {
+			return db.User{}, false, ErrEmailExists
+		}
+		return db.User{}, false, fmt.Errorf("create user: %w", err)
+	}
+	return u, true, nil
 }
 
 // Login validates credentials and returns a token pair.
-func (s *Service) Login(ctx context.Context, email, password string) (User, TokenPair, error) {
-	u, err := s.queries.GetUserByEmail(ctx, email)
+// inviteToken is optional. When the password matches an unverified account,
+// a valid workspace invitation for the same mailbox is mailbox proof and
+// completes verification (no third token plane).
+func (s *Service) Login(ctx context.Context, email, password, inviteToken string) (User, TokenPair, error) {
+	u, err := s.lookupUserByEmail(ctx, email)
 	if err != nil {
 		return User{}, TokenPair{}, ErrUnauthorized
 	}
 	if err := bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(password)); err != nil {
 		return User{}, TokenPair{}, ErrUnauthorized
 	}
+	if !u.EmailVerified {
+		if !s.proveInviteMailbox(ctx, u.Email, inviteToken) {
+			return User{}, TokenPair{}, ErrEmailNotVerified
+		}
+		if err := s.VerifyEmail(ctx, uuidToString(u.ID)); err != nil {
+			return User{}, TokenPair{}, err
+		}
+		u.EmailVerified = true
+	}
 
-	pair, err := GenerateTokenPair(uuidToString(u.ID), accessTokenDuration, refreshTokenDuration)
+	pair, err := s.issueSession(ctx, uuidToString(u.ID))
 	if err != nil {
-		return User{}, TokenPair{}, fmt.Errorf("generate token pair: %w", err)
+		return User{}, TokenPair{}, err
 	}
-	if err := s.tokenStore.StoreRefreshToken(ctx, uuidToString(u.ID), pair.RefreshToken, refreshTokenDuration); err != nil {
-		return User{}, TokenPair{}, fmt.Errorf("store refresh token: %w", err)
-	}
+	s.claimRoomInvites(ctx, uuidToString(u.ID), u.Email)
 	return userFromDB(u), pair, nil
+}
+
+func (s *Service) lookupUserByEmail(ctx context.Context, raw string) (db.User, error) {
+	store := s.accountStore()
+	if store == nil {
+		return db.User{}, pgx.ErrNoRows
+	}
+	canonical := emailid.Canonical(raw)
+	u, err := store.GetUserByEmail(ctx, canonical)
+	if err == nil {
+		return u, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return db.User{}, err
+	}
+	fallback := strings.ToLower(strings.TrimSpace(raw))
+	if fallback == "" || fallback == canonical {
+		return db.User{}, err
+	}
+	return store.GetUserByEmail(ctx, fallback)
+}
+
+func (s *Service) proveInviteMailbox(ctx context.Context, email, token string) bool {
+	if s == nil || s.inviteMailbox == nil || strings.TrimSpace(token) == "" {
+		return false
+	}
+	return s.inviteMailbox.ValidInviteMailbox(ctx, email, token)
+}
+
+func (s *Service) issueSession(ctx context.Context, userID string) (TokenPair, error) {
+	pair, err := GenerateTokenPair(userID, accessTokenDuration, refreshTokenDuration)
+	if err != nil {
+		return TokenPair{}, fmt.Errorf("generate token pair: %w", err)
+	}
+	if err := s.tokenStore.StoreRefreshToken(ctx, userID, pair.RefreshToken, refreshTokenDuration); err != nil {
+		return TokenPair{}, fmt.Errorf("store refresh token: %w", err)
+	}
+	return pair, nil
 }
 
 // Logout revokes the current access token and its refresh token.
@@ -266,6 +476,14 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (TokenPair, 
 	}
 	if !valid {
 		return TokenPair{}, ErrTokenInvalid
+	}
+	user, err := s.GetUser(ctx, claims.Subject)
+	if err != nil {
+		return TokenPair{}, ErrTokenInvalid
+	}
+	if !user.EmailVerified {
+		_ = s.tokenStore.RevokeRefreshToken(ctx, claims.Subject, refreshToken)
+		return TokenPair{}, ErrEmailNotVerified
 	}
 	pair, err := GenerateTokenPair(claims.Subject, accessTokenDuration, refreshTokenDuration)
 	if err != nil {
@@ -302,7 +520,11 @@ func (s *Service) GetUser(ctx context.Context, userID string) (User, error) {
 	if err != nil {
 		return User{}, ErrUnauthorized
 	}
-	u, err := s.queries.GetUserByID(ctx, pgtype.UUID{Bytes: uid, Valid: true})
+	store := s.accountStore()
+	if store == nil {
+		return User{}, ErrUnauthorized
+	}
+	u, err := store.GetUserByID(ctx, pgtype.UUID{Bytes: uid, Valid: true})
 	if err != nil {
 		return User{}, ErrUnauthorized
 	}
@@ -315,20 +537,60 @@ func (s *Service) VerifyEmail(ctx context.Context, userID string) error {
 	if err != nil {
 		return ErrTokenInvalid
 	}
-	return s.queries.VerifyUserEmail(ctx, pgtype.UUID{Bytes: uid, Valid: true})
+	store := s.accountStore()
+	if store == nil {
+		return ErrTokenInvalid
+	}
+	return store.VerifyUserEmail(ctx, pgtype.UUID{Bytes: uid, Valid: true})
 }
 
-// VerifyEmailByToken verifies a user via a single-use token.
-func (s *Service) VerifyEmailByToken(ctx context.Context, token string) error {
+// VerifyEmailByToken verifies a user via a single-use token, claims room
+// invites, activates Trial, and issues a session (clicking the link completes
+// registration).
+func (s *Service) VerifyEmailByToken(ctx context.Context, token string) (User, TokenPair, error) {
 	if s.verifyStore == nil {
-		return ErrTokenInvalid
+		return User{}, TokenPair{}, ErrTokenInvalid
 	}
 	userID, err := s.verifyStore.UserIDByVerificationToken(ctx, token)
 	if err != nil {
-		return ErrTokenInvalid
+		return User{}, TokenPair{}, ErrTokenInvalid
 	}
 	defer func() { _ = s.verifyStore.DeleteVerificationToken(ctx, token) }()
-	return s.VerifyEmail(ctx, userID)
+	if err := s.VerifyEmail(ctx, userID); err != nil {
+		return User{}, TokenPair{}, err
+	}
+	user, err := s.GetUser(ctx, userID)
+	if err != nil {
+		return User{}, TokenPair{}, err
+	}
+	user.EmailVerified = true
+	s.claimRoomInvites(ctx, userID, user.Email)
+	if s.trialActivator != nil {
+		if actErr := s.trialActivator.ActivateEligibleTrial(ctx, userID); actErr != nil {
+			logger.ErrorCtx(ctx, "auth: activate trial after verify failed", actErr,
+				slog.String("user_id", userID),
+			)
+		}
+	}
+	pair, err := s.issueSession(ctx, userID)
+	if err != nil {
+		return User{}, TokenPair{}, err
+	}
+	return user, pair, nil
+}
+
+// ResendVerification sends a new activation email when an unverified account
+// exists. Always returns nil to the caller so handlers can 200 (anti-enum).
+func (s *Service) ResendVerification(ctx context.Context, email string) {
+	canonical := emailid.Canonical(email)
+	if !emailRegex.MatchString(canonical) {
+		return
+	}
+	u, err := s.lookupUserByEmail(ctx, email)
+	if err != nil || u.EmailVerified {
+		return
+	}
+	s.enqueueVerificationEmail(ctx, uuidToString(u.ID), u.Email)
 }
 
 // enqueueVerificationEmail starts a detached send so HTTP Register can return

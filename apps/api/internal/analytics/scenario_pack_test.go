@@ -81,10 +81,10 @@ func TestBuildScenarioPackInsightsScopesKPIsToDominantRooms(t *testing.T) {
 				reLink.String(): "hot",
 				pmLink.String(): "hot",
 			},
-			Signals: []db.Signal{
-				{LinkID: pgtype.UUID{Bytes: reLink, Valid: true}},
-				{LinkID: pgtype.UUID{Bytes: pmLink, Valid: true}},
-				{LinkID: pgtype.UUID{Bytes: pmLink, Valid: true}},
+			PendingActionLinkIDs: []string{
+				reLink.String(),
+				pmLink.String(),
+				pmLink.String(),
 			},
 			ForwardSignalsByLink: map[string]int64{
 				reLink.String(): 3,
@@ -179,5 +179,52 @@ func TestBuildScenarioPackInsightsForwardPressureFromAccessLogsScoped(t *testing
 	}
 	if byID["forward_pressure"] != 5 {
 		t.Fatalf("forward_pressure=%v want 5 (fundraising 99 excluded)", byID["forward_pressure"])
+	}
+}
+
+func TestBuildScenarioPackInsightsHotLinksUsesFullHeatMap(t *testing.T) {
+	ws := uuid.New()
+	salesRoom := uuid.New()
+	hot1 := uuid.New()
+	hot2 := uuid.New()
+	hot3 := uuid.New()
+	warm := uuid.New()
+	q := &mockAnalyticsQuerier{
+		dealRooms: []db.DealRoom{
+			{
+				ID:           pgtype.UUID{Bytes: salesRoom, Valid: true},
+				TemplateType: pgtype.Text{String: "sales-dataroom", Valid: true},
+			},
+		},
+	}
+	svc := NewService(q, nil, testCfg())
+	got := svc.buildScenarioPackInsights(
+		context.Background(),
+		pgtype.UUID{Bytes: ws, Valid: true},
+		heat.NewRuleSet(heat.CircleFounder, nil),
+		scenarioPackKPIInput{
+			Links: []db.Link{
+				{ID: pgtype.UUID{Bytes: hot1, Valid: true}, DealRoomID: pgtype.UUID{Bytes: salesRoom, Valid: true}},
+				{ID: pgtype.UUID{Bytes: hot2, Valid: true}, DealRoomID: pgtype.UUID{Bytes: salesRoom, Valid: true}},
+				{ID: pgtype.UUID{Bytes: hot3, Valid: true}, DealRoomID: pgtype.UUID{Bytes: salesRoom, Valid: true}},
+				{ID: pgtype.UUID{Bytes: warm, Valid: true}, DealRoomID: pgtype.UUID{Bytes: salesRoom, Valid: true}},
+			},
+			LinkHeatLevel: map[string]string{
+				hot1.String(): "hot",
+				hot2.String(): "hot",
+				hot3.String(): "hot",
+				warm.String(): "warm",
+			},
+		},
+	)
+	if got == nil {
+		t.Fatal("expected scenario pack insights")
+	}
+	byID := map[string]float64{}
+	for _, kpi := range got.KPIs {
+		byID[kpi.ID] = kpi.Value
+	}
+	if byID["hot_links"] != 3 {
+		t.Fatalf("hot_links=%v want 3 (all dominant hot links, not a top-5 slice)", byID["hot_links"])
 	}
 }

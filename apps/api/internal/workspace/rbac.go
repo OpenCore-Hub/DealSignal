@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/httpx"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/middleware"
@@ -55,6 +56,31 @@ func isSafeHTTPMethod(method string) bool {
 	}
 }
 
+func isDealRoomScopedMutate(path string) bool {
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	// api / workspaces / :slug / deal-rooms / :roomId / ...
+	if len(parts) < 5 || parts[0] != "api" || parts[1] != "workspaces" || parts[3] != "deal-rooms" {
+		return false
+	}
+	_, err := uuid.Parse(parts[4])
+	return err == nil
+}
+
+// isWorkspaceLinkItemMutate is PATCH/PUT/DELETE /links/:linkId and nested item routes.
+// Collection POST /links stays write_content so guests cannot create document shares.
+func isWorkspaceLinkItemMutate(path string) bool {
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) < 5 || parts[0] != "api" || parts[1] != "workspaces" || parts[3] != "links" {
+		return false
+	}
+	_, err := uuid.Parse(parts[4])
+	return err == nil
+}
+
+func isGuestPassThroughMutate(path string) bool {
+	return isDealRoomScopedMutate(path) || isWorkspaceLinkItemMutate(path)
+}
+
 func workspaceResource(c *gin.Context) (string, bool) {
 	path := c.Request.URL.Path
 	parts := strings.Split(strings.Trim(path, "/"), "/")
@@ -70,15 +96,15 @@ func workspaceResource(c *gin.Context) (string, bool) {
 
 // manageMutateResources require CapabilityManageWorkspace for POST/PUT/PATCH/DELETE.
 var manageMutateResources = map[string]struct{}{
-	"settings":       {},
-	"security":       {},
-	"billing":        {},
-	"members":        {},
-	"invitations":    {},
-	"logo":           {},
-	"viewer-domain":  {},
-	"integrations":   {},
-	"compliance":     {},
+	"settings":      {},
+	"security":      {},
+	"billing":       {},
+	"members":       {},
+	"invitations":   {},
+	"logo":          {},
+	"viewer-domain": {},
+	"integrations":  {},
+	"compliance":    {},
 }
 
 // sensitiveAdminReadResources are blocked on GET for non-managers.
@@ -156,11 +182,15 @@ func RBACMiddleware() gin.HandlerFunc {
 		}
 
 		if _, content := contentWriteResources[resource]; content {
-			if !HasCapability(role, CapabilityWriteContent) {
-				abortInsufficientRole(c)
+			if HasCapability(role, CapabilityWriteContent) {
+				c.Next()
 				return
 			}
-			c.Next()
+			if role == RoleGuest && isGuestPassThroughMutate(c.Request.URL.Path) {
+				c.Next()
+				return
+			}
+			abortInsufficientRole(c)
 			return
 		}
 

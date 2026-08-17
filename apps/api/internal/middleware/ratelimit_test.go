@@ -77,6 +77,87 @@ func TestRateLimitMiddleware_BlocksRequest(t *testing.T) {
 	}
 }
 
+func TestRateLimitMiddleware_RegisterUsesDedicatedBucket(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cfg := &config.Config{
+		RateLimitAuthRPM:        20,
+		RateLimitRegisterLimit:  5,
+		RateLimitRegisterWindow: 15 * time.Minute,
+	}
+	store := &mockRateLimiter{allowed: false, remaining: 0}
+	r := gin.New()
+	r.Use(RateLimitMiddleware(store, cfg))
+	r.POST("/api/auth/register", func(c *gin.Context) {
+		c.Status(http.StatusCreated)
+	})
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodPost, "/api/auth/register", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429, got %d", w.Code)
+	}
+	if w.Header().Get("X-RateLimit-Limit") != "5" {
+		t.Fatalf("unexpected limit header: %s", w.Header().Get("X-RateLimit-Limit"))
+	}
+	if w.Header().Get("Retry-After") != "900" {
+		t.Fatalf("unexpected retry-after header: %s", w.Header().Get("Retry-After"))
+	}
+}
+
+func TestRateLimitMiddleware_ResendUsesDedicatedBucket(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cfg := &config.Config{
+		RateLimitAuthRPM:      20,
+		RateLimitResendLimit:  3,
+		RateLimitResendWindow: 15 * time.Minute,
+	}
+	store := &mockRateLimiter{allowed: false, remaining: 0}
+	r := gin.New()
+	r.Use(RateLimitMiddleware(store, cfg))
+	r.POST("/api/auth/resend-verification", func(c *gin.Context) {
+		c.Status(http.StatusOK)
+	})
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodPost, "/api/auth/resend-verification", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429, got %d", w.Code)
+	}
+	if w.Header().Get("X-RateLimit-Limit") != "3" {
+		t.Fatalf("unexpected limit header: %s", w.Header().Get("X-RateLimit-Limit"))
+	}
+}
+
+func TestRateLimitMiddleware_ForgotUsesDedicatedBucket(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cfg := &config.Config{
+		RateLimitAuthRPM:      20,
+		RateLimitResendLimit:  3,
+		RateLimitResendWindow: 15 * time.Minute,
+	}
+	store := &mockRateLimiter{allowed: false, remaining: 0}
+	r := gin.New()
+	r.Use(RateLimitMiddleware(store, cfg))
+	r.POST("/api/auth/forgot-password", func(c *gin.Context) {
+		c.Status(http.StatusOK)
+	})
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodPost, "/api/auth/forgot-password", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429, got %d", w.Code)
+	}
+	if w.Header().Get("X-RateLimit-Limit") != "3" {
+		t.Fatalf("unexpected limit header: %s", w.Header().Get("X-RateLimit-Limit"))
+	}
+}
+
 func TestRateLimitMiddleware_SkipsKnowledgeGatedPaths(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	cfg := &config.Config{RateLimitWorkspaceRPM: 200}

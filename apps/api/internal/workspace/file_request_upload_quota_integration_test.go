@@ -164,8 +164,9 @@ func TestBillingFileRequestUploadPendingStorageLock_Integration(t *testing.T) {
 	ctx := context.Background()
 	q := db.New(testPool)
 	user, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("fr-lock-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("fr-lock-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create user: %v", err)

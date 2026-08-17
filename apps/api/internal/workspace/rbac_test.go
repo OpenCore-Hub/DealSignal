@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 func TestHasCapabilityMatrix(t *testing.T) {
@@ -114,6 +115,41 @@ func TestRBACMiddlewareGuestCannotWriteDealRooms(t *testing.T) {
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("POST deal-rooms expected 403 for guest, got %d", w.Code)
+	}
+}
+
+func TestRBACMiddlewareGuestCanMutateScopedDealRoom(t *testing.T) {
+	roomID := uuid.NewString()
+	r := withRole(RoleGuest, func(r *gin.Engine) {
+		r.POST("/api/workspaces/demo/deal-rooms/:roomId/folders", func(c *gin.Context) { c.Status(http.StatusCreated) })
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/demo/deal-rooms/"+roomID+"/folders", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("guest scoped room mutate expected 201 from middleware, got %d", w.Code)
+	}
+}
+
+func TestRBACMiddlewareGuestCanMutateLinkItemNotCollection(t *testing.T) {
+	linkID := uuid.NewString()
+	r := withRole(RoleGuest, func(r *gin.Engine) {
+		r.PATCH("/api/workspaces/demo/links/:id", func(c *gin.Context) { c.Status(http.StatusOK) })
+		r.POST("/api/workspaces/demo/links", func(c *gin.Context) { c.Status(http.StatusCreated) })
+	})
+
+	item := httptest.NewRequest(http.MethodPatch, "/api/workspaces/demo/links/"+linkID, nil)
+	itemW := httptest.NewRecorder()
+	r.ServeHTTP(itemW, item)
+	if itemW.Code != http.StatusOK {
+		t.Fatalf("guest link item mutate expected 200 from middleware, got %d", itemW.Code)
+	}
+
+	coll := httptest.NewRequest(http.MethodPost, "/api/workspaces/demo/links", nil)
+	collW := httptest.NewRecorder()
+	r.ServeHTTP(collW, coll)
+	if collW.Code != http.StatusForbidden {
+		t.Fatalf("guest POST /links expected 403, got %d", collW.Code)
 	}
 }
 

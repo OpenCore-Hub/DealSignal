@@ -57,7 +57,7 @@ func (s *Service) SuggestFollowUps(
 	ctx context.Context,
 	roomID, workspaceID, userID, turnID string,
 ) (FollowUpsResponse, error) {
-	if err := s.access.RequireActiveRoomMember(ctx, roomID, workspaceID, userID); err != nil {
+	if err := s.access.RequireRoomContribute(ctx, roomID, workspaceID, userID); err != nil {
 		return FollowUpsResponse{}, err
 	}
 	row, err := s.queries.GetKnowledgeQATurnForRoom(ctx, db.GetKnowledgeQATurnForRoomParams{

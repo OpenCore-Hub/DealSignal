@@ -165,8 +165,9 @@ func newDeleteRoomFixture(t *testing.T) *deleteRoomFixture {
 		t.Fatalf("create tenant: %v", err)
 	}
 	user, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("owner-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("owner-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create user: %v", err)
@@ -499,8 +500,9 @@ func TestDeleteRoomRejectsWorkspaceAdmin_Integration(t *testing.T) {
 	roomID := uuid.UUID(room.ID.Bytes).String()
 
 	admin, err := f.q.CreateUser(f.ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("admin-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("admin-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create admin user: %v", err)

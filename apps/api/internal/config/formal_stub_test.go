@@ -33,6 +33,8 @@ func TestUnpaidPlanChangeRejectedInProductionLoad(t *testing.T) {
 	t.Setenv("S3_ACCESS_KEY", "key")
 	t.Setenv("S3_SECRET_KEY", "secret")
 	t.Setenv("APP_ENV", "production")
+	t.Setenv("TURNSTILE_SITE_KEY", "1x00000000000000000000AA")
+	t.Setenv("TURNSTILE_SECRET", "1x0000000000000000000000000000000AA")
 	t.Setenv("BILLING_ALLOW_UNPAID_PLAN_CHANGE", "true")
 	_, err := Load()
 	if err == nil || !strings.Contains(err.Error(), "BILLING_ALLOW_UNPAID_PLAN_CHANGE") {
@@ -49,6 +51,8 @@ func TestUnpaidPlanChangeOffByDefaultInProduction(t *testing.T) {
 	t.Setenv("S3_ACCESS_KEY", "key")
 	t.Setenv("S3_SECRET_KEY", "secret")
 	t.Setenv("APP_ENV", "production")
+	t.Setenv("TURNSTILE_SITE_KEY", "1x00000000000000000000AA")
+	t.Setenv("TURNSTILE_SECRET", "1x0000000000000000000000000000000AA")
 	t.Setenv("BILLING_ALLOW_UNPAID_PLAN_CHANGE", "")
 	cfg, err := Load()
 	if err != nil {
@@ -68,6 +72,8 @@ func TestStripeWebhookSecretRequiredInProductionLoad(t *testing.T) {
 	t.Setenv("S3_ACCESS_KEY", "key")
 	t.Setenv("S3_SECRET_KEY", "secret")
 	t.Setenv("APP_ENV", "production")
+	t.Setenv("TURNSTILE_SITE_KEY", "1x00000000000000000000AA")
+	t.Setenv("TURNSTILE_SECRET", "1x0000000000000000000000000000000AA")
 	t.Setenv("STRIPE_SECRET_KEY", "sk_test_x")
 	t.Setenv("STRIPE_WEBHOOK_SECRET", "")
 	_, err := Load()
@@ -85,6 +91,8 @@ func TestFormalAskEntitlementStubRejectedInProductionLoad(t *testing.T) {
 	t.Setenv("S3_ACCESS_KEY", "key")
 	t.Setenv("S3_SECRET_KEY", "secret")
 	t.Setenv("APP_ENV", "production")
+	t.Setenv("TURNSTILE_SITE_KEY", "1x00000000000000000000AA")
+	t.Setenv("TURNSTILE_SECRET", "1x0000000000000000000000000000000AA")
 	t.Setenv("FORMAL_ASK_ENTITLEMENT_STUB_PLAN", "trial")
 	_, err := Load()
 	if err == nil || !strings.Contains(err.Error(), "FORMAL_ASK_ENTITLEMENT_STUB_PLAN") {

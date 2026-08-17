@@ -19,20 +19,20 @@ var ErrItemNotFound = errors.New("radar item not found")
 
 // EvidencePack is the right-rail payload for a selected work item.
 type EvidencePack struct {
-	ItemID         string            `json:"itemId"`
-	Product        Product           `json:"product"`
-	Headline       string            `json:"headline"`
-	HeadlineCode   string            `json:"headlineCode,omitempty"`
-	WhyNow         string            `json:"whyNow,omitempty"` // deprecated free-text; prefer WhyNowCode
-	WhyNowCode     string            `json:"whyNowCode,omitempty"`
-	WhyNowHours    int               `json:"whyNowHours,omitempty"`
-	Actor          string            `json:"actor,omitempty"`
-	DealName       string            `json:"dealName,omitempty"`
-	LinkID         string            `json:"linkId,omitempty"`
-	DocumentID     string            `json:"documentId,omitempty"`
-	NavigatePath   string            `json:"navigatePath,omitempty"`
-	EvidencePath   string            `json:"evidencePath,omitempty"`
-	InsightsPath   string            `json:"insightsPath,omitempty"`
+	ItemID         string                 `json:"itemId"`
+	Product        Product                `json:"product"`
+	Headline       string                 `json:"headline"`
+	HeadlineCode   string                 `json:"headlineCode,omitempty"`
+	WhyNow         string                 `json:"whyNow,omitempty"` // deprecated free-text; prefer WhyNowCode
+	WhyNowCode     string                 `json:"whyNowCode,omitempty"`
+	WhyNowHours    int                    `json:"whyNowHours,omitempty"`
+	Actor          string                 `json:"actor,omitempty"`
+	DealName       string                 `json:"dealName,omitempty"`
+	LinkID         string                 `json:"linkId,omitempty"`
+	DocumentID     string                 `json:"documentId,omitempty"`
+	NavigatePath   string                 `json:"navigatePath,omitempty"`
+	EvidencePath   string                 `json:"evidencePath,omitempty"`
+	InsightsPath   string                 `json:"insightsPath,omitempty"`
 	Metrics        *EvidenceMetrics       `json:"metrics,omitempty"`
 	AccessRequest  *EvidenceAccessRequest `json:"accessRequest,omitempty"`
 	KeyPageTitles  []string               `json:"keyPageTitles,omitempty"`
@@ -70,15 +70,17 @@ func (p *EvidencePack) noteDegraded(section string) {
 
 // EvidenceMetrics are rolling engagement counters for the linked share.
 type EvidenceMetrics struct {
-	Opens24h             int `json:"opens24h"`
-	UniqueVisitors24h    int `json:"uniqueVisitors24h"`
-	ForwardSignals24h    int `json:"forwardSignals24h"`
-	Downloads24h         int `json:"downloads24h"`
-	CaptureAttempts24h   int `json:"captureAttempts24h,omitempty"`
+	Opens24h           int `json:"opens24h"`
+	UniqueVisitors24h  int `json:"uniqueVisitors24h"`
+	ForwardSignals24h  int `json:"forwardSignals24h"`
+	Downloads24h       int `json:"downloads24h"`
+	CaptureAttempts24h int `json:"captureAttempts24h,omitempty"`
 }
 
 // EvidencePage is a top page-view row.
 type EvidencePage struct {
+	DocumentID         string  `json:"documentId,omitempty"`
+	DocumentTitle      string  `json:"documentTitle,omitempty"`
 	PageNumber         int32   `json:"pageNumber"`
 	Views              int64   `json:"views"`
 	AvgDurationSeconds float64 `json:"avgDurationSeconds"`
@@ -86,10 +88,10 @@ type EvidencePage struct {
 
 // EvidenceVisitor is a recent visitor chip.
 type EvidenceVisitor struct {
-	VisitorID     string `json:"visitorId"`
-	Email         string `json:"email,omitempty"`
-	TotalViews    int64  `json:"totalViews"`
-	LastAccessAt  string `json:"lastAccessAt,omitempty"`
+	VisitorID    string `json:"visitorId"`
+	Email        string `json:"email,omitempty"`
+	TotalViews   int64  `json:"totalViews"`
+	LastAccessAt string `json:"lastAccessAt,omitempty"`
 }
 
 // EvidenceEvent is a recent security_events row.
@@ -230,11 +232,18 @@ func (s *Service) GetEvidence(ctx context.Context, workspaceID, itemID, workspac
 			limit = len(pages)
 		}
 		for i := 0; i < limit; i++ {
-			pack.TopPages = append(pack.TopPages, EvidencePage{
+			page := EvidencePage{
 				PageNumber:         pages[i].PageNumber,
 				Views:              pages[i].Views,
 				AvgDurationSeconds: pages[i].AvgDurationSeconds,
-			})
+			}
+			if pages[i].DocumentID.Valid {
+				page.DocumentID = uuidString(pages[i].DocumentID)
+			}
+			if title := strings.TrimSpace(pages[i].DocumentTitle); title != "" {
+				page.DocumentTitle = title
+			}
+			pack.TopPages = append(pack.TopPages, page)
 		}
 	}
 
@@ -333,8 +342,8 @@ func (s *Service) enrichAccessRequestEvidence(
 			return
 		}
 		row, err := s.queries.GetLatestPendingLinkAccessRequestByLink(ctx, db.GetLatestPendingLinkAccessRequestByLinkParams{
-			LinkID:          linkUUID,
-			ApplicantEmail:  applicantEmailArg(applicant),
+			LinkID:         linkUUID,
+			ApplicantEmail: applicantEmailArg(applicant),
 		})
 		if err != nil {
 			if !errors.Is(err, pgx.ErrNoRows) {

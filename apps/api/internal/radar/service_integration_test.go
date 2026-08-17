@@ -183,8 +183,9 @@ func newRadarFixture(t *testing.T) *radarFixture {
 		t.Fatalf("tenant: %v", err)
 	}
 	user, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("radar-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("radar-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("user: %v", err)

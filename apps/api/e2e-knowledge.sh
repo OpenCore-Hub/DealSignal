@@ -15,6 +15,9 @@ PDF="${PDF:-e2e-test.pdf}"
 SYNC_TIMEOUT_S="${SYNC_TIMEOUT_S:-180}"
 COOKIE_JAR="$(mktemp)"
 trap 'rm -f "$COOKIE_JAR"' EXIT
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck source=scripts/e2e-turnstile.sh
+source "$SCRIPT_DIR/scripts/e2e-turnstile.sh"
 
 echo "=== DealSignal knowledge Q&A smoke ==="
 echo "BASE_URL=$BASE_URL"
@@ -47,8 +50,8 @@ SLUG="kqa-smoke-${TS}"
 
 echo -n "[register] "
 REGISTER=$(curl -fsS -c "$COOKIE_JAR" -b "$COOKIE_JAR" -X POST "$BASE_URL/api/auth/register" \
-  -H "Content-Type: application/json" \
-  -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\"}")
+    -H "Content-Type: application/json" \
+    -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\"$(e2e_turnstile_field "$BASE_URL")}")
 echo "$REGISTER" | jq -c '{user_id: .user.id, email: .user.email}'
 
 echo -n "[workspace] "

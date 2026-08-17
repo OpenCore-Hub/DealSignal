@@ -41,6 +41,7 @@ type KeyPageCompliancePage struct {
 	PageTitle          string
 	Category           string
 	Views              int64
+	EngagedViews       int64
 	UniqueVisitors     int64
 	AvgDurationSeconds float64
 	LastViewedAt       time.Time
@@ -193,6 +194,7 @@ func (s *Service) KeyPageCompliance(ctx context.Context, workspaceID string, q K
 			PageTitle:          r.PageTitle,
 			Category:           rs.MatchCategory(r.PageTitle),
 			Views:              r.Views,
+			EngagedViews:       r.EngagedViews,
 			UniqueVisitors:     r.UniqueVisitors,
 			AvgDurationSeconds: r.AvgDurationSeconds,
 		}

@@ -5,6 +5,8 @@ import (
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/heat"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 func newTestRuleEngine(t *testing.T) *RuleEngine {
@@ -294,8 +296,18 @@ func TestAttachFocusMetadata(t *testing.T) {
 	if md["page_number"] != "7" || md["score"] != "80" {
 		t.Fatalf("expected hot page_number=7 with score preserved, got %v", md)
 	}
+	if _, ok := md["document_id"]; ok {
+		t.Fatalf("empty focus document must not write document_id, got %v", md)
+	}
 	if _, ok := md["exit_rate"]; ok {
 		t.Fatalf("hot_signal must not get exit_rate, got %v", md)
+	}
+
+	withDoc := attachFocusMetadata("hot_signal", "hot", nil, suggestionFocusPages{
+		hot: 8, hotDocumentID: "doc-pdf",
+	})
+	if withDoc["page_number"] != "8" || withDoc["document_id"] != "doc-pdf" {
+		t.Fatalf("expected hot page 8 on doc-pdf, got %v", withDoc)
 	}
 
 	bounce := attachFocusMetadata("risk_alert", SubtypeBounce, nil, focus)
@@ -317,33 +329,60 @@ func TestAttachFocusMetadata(t *testing.T) {
 func TestFocusPageHelpers(t *testing.T) {
 	t.Parallel()
 
-	if got := focusPageFromKeyPages(nil); got != 0 {
-		t.Fatalf("empty key pages => 0, got %d", got)
+	if page, doc := focusPageFromKeyPages(nil); page != 0 || doc != "" {
+		t.Fatalf("empty key pages => 0, got %d %q", page, doc)
 	}
-	if got := focusPageFromKeyPages([]db.GetLinkKeyPageViewDetailsRow{
+	if page, doc := focusPageFromKeyPages([]db.GetLinkKeyPageViewDetailsRow{
 		{PageNumber: 0},
 		{PageNumber: 12},
-	}); got != 12 {
-		t.Fatalf("expected first positive key page 12, got %d", got)
+	}); page != 12 || doc != "" {
+		t.Fatalf("expected first positive key page 12, got %d %q", page, doc)
 	}
-	if got := focusPageFromTopPages([]db.ListTopPagesByLinkRow{
+	if page, doc := focusPageFromTopPages([]db.ListTopPagesByLinkRow{
 		{PageNumber: 5, Views: 10},
-	}); got != 5 {
-		t.Fatalf("expected top page 5, got %d", got)
+	}); page != 5 || doc != "" {
+		t.Fatalf("expected top page 5, got %d %q", page, doc)
 	}
 
-	page, rate := focusPageFromHighExit([]db.ListHighExitPagesByLinkRow{
+	page, doc, rate := focusPageFromHighExit([]db.ListHighExitPagesByLinkRow{
 		{PageNumber: 0, ExitRate: 0.9},
 		{PageNumber: 8, ExitRate: 0.55, ViewCount: 4, ExitCount: 2},
 	})
-	if page != 8 || rate != 0.55 {
-		t.Fatalf("expected high-exit page 8 @ 0.55, got %d @ %v", page, rate)
+	if page != 8 || rate != 0.55 || doc != "" {
+		t.Fatalf("expected high-exit page 8 @ 0.55, got %d @ %v %q", page, rate, doc)
 	}
 	if got := formatExitRatePercent(0.424); got != "42%" {
 		t.Fatalf("expected 42%%, got %s", got)
 	}
 	if got := formatExitRatePercent(1.5); got != "100%" {
 		t.Fatalf("expected clamp to 100%%, got %s", got)
+	}
+}
+
+func TestKeyPageDisplayTitles(t *testing.T) {
+	t.Parallel()
+
+	xlsx := pgtype.UUID{Bytes: uuid.MustParse("11111111-1111-1111-1111-111111111111"), Valid: true}
+	pdf := pgtype.UUID{Bytes: uuid.MustParse("22222222-2222-2222-2222-222222222222"), Valid: true}
+
+	if got := keyPageDisplayTitles(nil); len(got) != 0 {
+		t.Fatalf("empty => nil/empty, got %v", got)
+	}
+
+	solo := keyPageDisplayTitles([]db.GetLinkKeyPageViewDetailsRow{
+		{DocumentID: xlsx, DocumentTitle: "Model.xlsx", Title: "Financials"},
+		{DocumentID: xlsx, DocumentTitle: "Model.xlsx", Title: "Team"},
+	})
+	if len(solo) != 2 || solo[0] != "Financials" || solo[1] != "Team" {
+		t.Fatalf("solo titles must stay bare, got %v", solo)
+	}
+
+	bundle := keyPageDisplayTitles([]db.GetLinkKeyPageViewDetailsRow{
+		{DocumentID: xlsx, DocumentTitle: "Model.xlsx", Title: "Financials"},
+		{DocumentID: pdf, DocumentTitle: "Memo.pdf", Title: "Financials"},
+	})
+	if len(bundle) != 2 || bundle[0] != "Model.xlsx · Financials" || bundle[1] != "Memo.pdf · Financials" {
+		t.Fatalf("bundle titles must include file name, got %v", bundle)
 	}
 }
 

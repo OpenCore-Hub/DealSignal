@@ -14,16 +14,19 @@ import (
 )
 
 type mockContactQuerier struct {
-	unsyncedEmails   []pgtype.Text
-	upserted         []db.UpsertContactByEmailParams
-	contacts         []db.Contact
-	contactByID      db.Contact
-	contactByIDErr   error
-	aggregate        db.GetContactAggregateByEmailRow
-	aggregates       []db.GetContactAggregatesByWorkspaceRow
-	activities       []db.ListContactActivitiesByEmailRow
-	viewedDocs       []string
-	viewedDocRows    []db.ListContactViewedDocumentsRow
+	unsyncedEmails    []pgtype.Text
+	upserted          []db.UpsertContactByEmailParams
+	contacts          []db.Contact
+	contactByID       db.Contact
+	contactByIDErr    error
+	aggregate         db.GetContactAggregateByEmailRow
+	aggregates        []db.GetContactAggregatesByWorkspaceRow
+	activities        []db.ListContactActivitiesByEmailRow
+	viewedDocs        []string
+	viewedDocRows     []db.ListContactViewedDocumentsRow
+	keyPageDetails    []db.GetContactKeyPageViewDetailsRow
+	keyPageDetailsN   int
+	keyPageDetailsErr error
 }
 
 func (m *mockContactQuerier) CreateContact(_ context.Context, arg db.CreateContactParams) (db.Contact, error) {
@@ -78,6 +81,14 @@ func (m *mockContactQuerier) GetContactAggregateByEmail(_ context.Context, _ db.
 
 func (m *mockContactQuerier) GetContactAggregatesByWorkspace(_ context.Context, _ db.GetContactAggregatesByWorkspaceParams) ([]db.GetContactAggregatesByWorkspaceRow, error) {
 	return m.aggregates, nil
+}
+
+func (m *mockContactQuerier) GetContactKeyPageViewDetails(_ context.Context, _ db.GetContactKeyPageViewDetailsParams) ([]db.GetContactKeyPageViewDetailsRow, error) {
+	m.keyPageDetailsN++
+	if m.keyPageDetailsErr != nil {
+		return nil, m.keyPageDetailsErr
+	}
+	return m.keyPageDetails, nil
 }
 
 func (m *mockContactQuerier) ListContactActivitiesByEmail(_ context.Context, _ db.ListContactActivitiesByEmailParams) ([]db.ListContactActivitiesByEmailRow, error) {
@@ -408,6 +419,76 @@ func TestListContactsSortsByScore(t *testing.T) {
 	}
 	if contacts[0].Email != "b@example.com" {
 		t.Fatalf("expected highest-score contact first, got %s", contacts[0].Email)
+	}
+	if q.keyPageDetailsN != 0 {
+		t.Fatalf("list must not load key-page explain details, calls=%d", q.keyPageDetailsN)
+	}
+	if contacts[0].KeyPages != nil || contacts[1].KeyPages != nil {
+		t.Fatal("list must omit keyPages")
+	}
+}
+
+func TestGetContactAttachesKeyPageEvidence(t *testing.T) {
+	ws := uuid.New()
+	contactID := uuid.New()
+	q := &mockContactQuerier{
+		contactByID: db.Contact{
+			ID:          pgtype.UUID{Bytes: contactID, Valid: true},
+			WorkspaceID: pgtype.UUID{Bytes: ws, Valid: true},
+			Email:       pgtype.Text{String: "a@example.com", Valid: true},
+			Name:        pgtype.Text{String: "A User", Valid: true},
+		},
+		aggregate: db.GetContactAggregateByEmailRow{
+			Opens:             2,
+			UniqueVisitors:    1,
+			KeyPageViews:      0,
+			TotalKeyPageViews: 1,
+		},
+		keyPageDetails: []db.GetContactKeyPageViewDetailsRow{
+			{PageNumber: 1, Title: "Financials", EngagedViews: 0, TotalViews: 1},
+		},
+	}
+	svc := NewService(q)
+	got, err := svc.GetContact(context.Background(), ws.String(), contactID.String())
+	if err != nil {
+		t.Fatalf("GetContact: %v", err)
+	}
+	if got.KeyPages == nil || got.KeyPages.Total != 1 || got.KeyPages.Engaged != 0 {
+		t.Fatalf("keyPages=%#v", got.KeyPages)
+	}
+	if got.KeyPages.MinSeconds != contactKeyPageMinSeconds {
+		t.Fatalf("minSeconds=%d", got.KeyPages.MinSeconds)
+	}
+	if len(got.KeyPages.Pages) != 1 || got.KeyPages.Pages[0].Title != "Financials" {
+		t.Fatalf("pages=%#v", got.KeyPages.Pages)
+	}
+}
+
+func TestGetContactKeyPageEvidenceFailOpen(t *testing.T) {
+	ws := uuid.New()
+	contactID := uuid.New()
+	q := &mockContactQuerier{
+		contactByID: db.Contact{
+			ID:          pgtype.UUID{Bytes: contactID, Valid: true},
+			WorkspaceID: pgtype.UUID{Bytes: ws, Valid: true},
+			Email:       pgtype.Text{String: "a@example.com", Valid: true},
+		},
+		aggregate: db.GetContactAggregateByEmailRow{
+			KeyPageViews:      1,
+			TotalKeyPageViews: 2,
+		},
+		keyPageDetailsErr: errors.New("details unavailable"),
+	}
+	svc := NewService(q)
+	got, err := svc.GetContact(context.Background(), ws.String(), contactID.String())
+	if err != nil {
+		t.Fatalf("GetContact must fail-open: %v", err)
+	}
+	if got.KeyPages == nil || got.KeyPages.Engaged != 1 || got.KeyPages.Total != 2 {
+		t.Fatalf("fail-open totals=%#v", got.KeyPages)
+	}
+	if len(got.KeyPages.Pages) != 0 {
+		t.Fatalf("fail-open pages=%#v", got.KeyPages.Pages)
 	}
 }
 

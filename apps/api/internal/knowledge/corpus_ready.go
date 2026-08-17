@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/dealroom"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -115,7 +116,7 @@ func (s *Service) loadRoomCorpusSnapshot(ctx context.Context, workspaceID, roomI
 	for _, d := range roomDocs {
 		docID := uuid.UUID(d.DocumentID.Bytes).String()
 		titleByDoc[docID] = d.DocumentTitle
-		if knowledgeExcluded(d.Locked, d.FolderPath, lockedFolders) {
+		if dealroom.IsArchivedDocumentStatus(d.Status) || knowledgeExcluded(d.Locked, d.FolderPath, lockedFolders) {
 			excludedDocs[docID] = true
 		}
 	}

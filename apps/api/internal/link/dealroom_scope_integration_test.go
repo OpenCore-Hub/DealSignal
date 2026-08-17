@@ -538,7 +538,13 @@ func TestDealRoomScope_CreateWithEmptyScopeMeansDenyAll(t *testing.T) {
 	drf.addDocumentToFolder(t, d1, "/general", 0)
 	drf.addDocumentToFolder(t, d2, legal, 0)
 
-	link := drf.createLink(t, "Empty allowlist means deny-all", []string{})
+	link, err := drf.f.svc.CreateDealRoomLink(drf.ctx(), drf.userID, drf.wsID, drf.roomID, DealRoomLinkRequest{
+		Name:            "Empty allowlist means deny-all",
+		FolderScopeMode: FolderScopeModeAllowlist,
+	})
+	if err != nil {
+		t.Fatalf("create empty allowlist link: %v", err)
+	}
 	if link.FolderScopeMode != FolderScopeModeAllowlist {
 		t.Fatalf("expected allowlist mode, got %q", link.FolderScopeMode)
 	}

@@ -2,6 +2,7 @@ package upload
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"mime/multipart"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 )
@@ -136,6 +138,67 @@ func TestReplacedSnapshotTitle(t *testing.T) {
 	withNonce := replacedSnapshotTitle("Pitch Deck.pdf", at, "ab12cd34")
 	if withNonce != "Pitch Deck (20260813-083200-ab12cd34).pdf" {
 		t.Fatalf("nonce title %q", withNonce)
+	}
+}
+
+func TestRestoredDocumentTitle(t *testing.T) {
+	at := time.Date(2026, 8, 16, 14, 30, 0, 0, time.UTC)
+	got := restoredDocumentTitle("Pitch Deck.pdf", at, "")
+	want := "Pitch Deck (restored 20260816-143000).pdf"
+	if got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+	withNonce := restoredDocumentTitle("Pitch Deck.pdf", at, "ab12cd34")
+	if withNonce != "Pitch Deck (restored 20260816-143000-ab12cd34).pdf" {
+		t.Fatalf("nonce title %q", withNonce)
+	}
+}
+
+type stubTitleAnyLookup struct {
+	taken map[string]struct{}
+	err   error
+}
+
+func (s stubTitleAnyLookup) GetDocumentByTitleInWorkspaceAny(_ context.Context, arg db.GetDocumentByTitleInWorkspaceAnyParams) (db.GetDocumentByTitleInWorkspaceAnyRow, error) {
+	if s.err != nil {
+		return db.GetDocumentByTitleInWorkspaceAnyRow{}, s.err
+	}
+	if _, ok := s.taken[arg.Title]; ok {
+		return db.GetDocumentByTitleInWorkspaceAnyRow{Title: arg.Title}, nil
+	}
+	return db.GetDocumentByTitleInWorkspaceAnyRow{}, pgx.ErrNoRows
+}
+
+func TestFirstUnusedDocumentTitle_SkipsTakenIncludingArchived(t *testing.T) {
+	q := stubTitleAnyLookup{taken: map[string]struct{}{
+		"Pitch Deck (20260816-143000).pdf": struct{}{},
+	}}
+	got, err := firstUnusedDocumentTitle(
+		t.Context(),
+		q,
+		pgtype.UUID{},
+		[]string{"Pitch Deck (20260816-143000).pdf", "Pitch Deck (20260816-143000-ab12cd34).pdf"},
+		"fallback.pdf",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "Pitch Deck (20260816-143000-ab12cd34).pdf" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestFirstUnusedDocumentTitle_FallbackWhenAllTaken(t *testing.T) {
+	q := stubTitleAnyLookup{taken: map[string]struct{}{
+		"a.pdf": struct{}{},
+		"b.pdf": struct{}{},
+	}}
+	got, err := firstUnusedDocumentTitle(t.Context(), q, pgtype.UUID{}, []string{"a.pdf", "b.pdf"}, "c.pdf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "c.pdf" {
+		t.Fatalf("got %q", got)
 	}
 }
 

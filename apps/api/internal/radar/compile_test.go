@@ -310,8 +310,8 @@ func TestCompileSalesLensPrefersBuyingWindow(t *testing.T) {
 	sigRisk := uuid.New()
 	sigHot := uuid.New()
 	feed := Compile(CompileInput{
-		WorkspaceSlug: "acme",
-		Now:           now,
+		WorkspaceSlug:  "acme",
+		Now:            now,
 		Circle:         heat.CircleSales,
 		CircleExplicit: true,
 		Signals: []db.Signal{
@@ -582,7 +582,7 @@ func TestCompileDealNameHasNoEnglishFallback(t *testing.T) {
 		Actions: []db.ActionItem{{
 			ID: mustUUID(uuid.New()), Title: "Approve", Impact: "high", Status: "pending",
 			ActionType: "approve", SourceType: pgText(action.SourceTypeLinkAccessRequest),
-			SourceID: pgText(uuid.New().String()),
+			SourceID:  pgText(uuid.New().String()),
 			CreatedAt: pgTime(now), DueAt: pgTime(now.Add(time.Hour)), UpdatedAt: pgTime(now),
 		}},
 	})
@@ -600,11 +600,11 @@ func TestCompileAccessRequestActorFromTitle(t *testing.T) {
 		WorkspaceSlug: "acme",
 		Now:           now,
 		Actions: []db.ActionItem{{
-			ID: mustUUID(uuid.New()),
-			Title: "Approve access request from buyer@acme.test for Pitch",
+			ID:     mustUUID(uuid.New()),
+			Title:  "Approve access request from buyer@acme.test for Pitch",
 			Impact: "high", Status: "pending",
 			ActionType: "approve", SourceType: pgText(action.SourceTypeLinkAccessRequest),
-			SourceID: pgText(uuid.New().String()),
+			SourceID:  pgText(uuid.New().String()),
 			CreatedAt: pgTime(now), DueAt: pgTime(now.Add(time.Hour)), UpdatedAt: pgTime(now),
 		}},
 	})
@@ -720,6 +720,69 @@ func TestCompileCircleQueryOverridesInferredLens(t *testing.T) {
 	// Scenario rank still primary: sales pack ranks buying_window above diligence even under founder lens.
 	if feed.NextUp == nil || feed.NextUp.Product != ProductBuyingWindow {
 		t.Fatalf("scenario pack rank should still prefer buying_window, got %+v", feed.NextUp)
+	}
+}
+
+func TestCompileHotSignalPrefersMetadataDocument(t *testing.T) {
+	now := time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC)
+	sigID := uuid.New()
+	actID := uuid.New()
+	primary := uuid.New()
+	focus := uuid.New()
+	md, err := json.Marshal(map[string]string{
+		"page_number": "8",
+		"document_id": focus.String(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	feed := Compile(CompileInput{
+		WorkspaceSlug: "acme",
+		Now:           now,
+		Signals: []db.Signal{{
+			ID:         mustUUID(sigID),
+			Type:       "hot_signal",
+			Subtype:    pgText(suggestions.SubtypeHot),
+			Title:      "Hot",
+			Priority:   "high",
+			DocumentID: mustUUID(primary),
+			Metadata:   md,
+			CreatedAt:  pgTime(now.Add(-time.Hour)),
+		}},
+		Actions: []db.ActionItem{{
+			ID:         mustUUID(actID),
+			SignalID:   mustUUID(sigID),
+			Title:      "Email",
+			Impact:     "high",
+			Status:     "pending",
+			ActionType: "email",
+			CreatedAt:  pgTime(now.Add(-time.Hour)),
+			DueAt:      pgTime(now.Add(time.Hour)),
+			UpdatedAt:  pgTime(now),
+		}},
+	})
+	if len(feed.Items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(feed.Items))
+	}
+	item := feed.Items[0]
+	if item.DocumentID != focus.String() {
+		t.Fatalf("documentId=%s want focus %s", item.DocumentID, focus.String())
+	}
+	want := "/acme/documents/" + focus.String() + "?tab=content&page=8"
+	if item.EvidencePath != want {
+		t.Fatalf("evidencePath=%s want %s", item.EvidencePath, want)
+	}
+}
+
+func TestMetadataDocumentID(t *testing.T) {
+	if got := metadataDocumentID(nil); got != "" {
+		t.Fatalf("empty => %q", got)
+	}
+	if got := metadataDocumentID([]byte(`{"document_id":"doc-pdf"}`)); got != "doc-pdf" {
+		t.Fatalf("document_id => %q", got)
+	}
+	if got := metadataDocumentID([]byte(`{"documentId":"doc-xlsx"}`)); got != "doc-xlsx" {
+		t.Fatalf("documentId => %q", got)
 	}
 }
 

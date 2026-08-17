@@ -1,6 +1,10 @@
 package knowledge
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/dealroom"
+)
 
 func TestFolderPathExcludedIncludesDescendants(t *testing.T) {
 	locked := map[string]bool{"/legal": true}
@@ -25,6 +29,12 @@ func TestKnowledgeExcludedDocumentOrFolder(t *testing.T) {
 	}
 	if knowledgeExcluded(false, "/general", lockedFolders) {
 		t.Fatal("unlocked doc in unlocked folder should remain eligible")
+	}
+}
+
+func TestArchivedStatusIsKnowledgeInactive(t *testing.T) {
+	if !dealroom.IsArchivedDocumentStatus("archived") {
+		t.Fatal("archived library rows must be treated as knowledge-inactive")
 	}
 }
 

@@ -2,6 +2,7 @@ package redis
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -164,6 +165,38 @@ func (c *Client) UserIDByVerificationToken(ctx context.Context, token string) (s
 // DeleteVerificationToken removes a verification token after use.
 func (c *Client) DeleteVerificationToken(ctx context.Context, token string) error {
 	return c.rdb.Del(ctx, "verify:"+token).Err()
+}
+
+// CreatePasswordResetToken mints a high-entropy token, stores only its hash,
+// and invalidates any previous unused reset token for the same user.
+func (c *Client) CreatePasswordResetToken(ctx context.Context, userID string, ttl time.Duration) (string, error) {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	raw := hex.EncodeToString(buf)
+	hash := hashToken(raw)
+	userKey := "reset:user:" + userID
+	if old, err := c.rdb.Get(ctx, userKey).Result(); err == nil && old != "" {
+		_ = c.rdb.Del(ctx, "reset:tok:"+old).Err()
+	}
+	pipe := c.rdb.Pipeline()
+	pipe.Set(ctx, "reset:tok:"+hash, userID, ttl)
+	pipe.Set(ctx, userKey, hash, ttl)
+	if _, err := pipe.Exec(ctx); err != nil {
+		return "", err
+	}
+	return raw, nil
+}
+
+// ConsumePasswordResetToken resolves and deletes a one-time reset token.
+func (c *Client) ConsumePasswordResetToken(ctx context.Context, token string) (string, error) {
+	userID, err := c.rdb.GetDel(ctx, "reset:tok:"+hashToken(token)).Result()
+	if err != nil {
+		return "", err
+	}
+	_ = c.rdb.Del(ctx, "reset:user:"+userID).Err()
+	return userID, nil
 }
 
 // GetIdempotencyResponse retrieves a cached idempotent response if it exists.

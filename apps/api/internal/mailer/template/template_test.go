@@ -7,10 +7,31 @@ import (
 
 func TestEngineRegistersDefaults(t *testing.T) {
 	e := NewEngine()
-	for _, name := range []string{TemplateVerification, TemplateAccessCode, TemplateMarketing} {
+	for _, name := range []string{TemplateVerification, TemplateAccessCode, TemplateMarketing, TemplatePasswordReset} {
 		if !e.HasTemplate(name) {
 			t.Fatalf("expected default template %q to be registered", name)
 		}
+	}
+}
+
+func TestRenderPasswordReset(t *testing.T) {
+	e := NewEngine()
+	html, text, subject, err := e.Render(TemplatePasswordReset, map[string]string{
+		"BrandName":     "Acme",
+		"ResetLink":     "https://acme.example.com/reset-password/abc",
+		"ExpiryMinutes": "30",
+	})
+	if err != nil {
+		t.Fatalf("unexpected render error: %v", err)
+	}
+	if !strings.Contains(subject, "Reset") {
+		t.Fatalf("unexpected subject: %s", subject)
+	}
+	if !strings.Contains(html, "https://acme.example.com/reset-password/abc") {
+		t.Fatalf("html missing reset link")
+	}
+	if !strings.Contains(text, "30") {
+		t.Fatalf("text missing expiry")
 	}
 }
 

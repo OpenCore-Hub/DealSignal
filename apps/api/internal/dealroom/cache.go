@@ -84,11 +84,11 @@ func (c *RedisListCache) TryAcquireDebounce(ctx context.Context, key string, win
 }
 
 func listCacheKey(workspaceID string) string {
-	return fmt.Sprintf("dealrooms:list:v2:%s", workspaceID)
+	return fmt.Sprintf("dealrooms:list:v8:%s", workspaceID)
 }
 
 func roomAnalyticsCacheKey(workspaceID, roomID string) string {
-	return fmt.Sprintf("dealrooms:analytics:v1:%s:%s", workspaceID, roomID)
+	return fmt.Sprintf("dealrooms:analytics:v5:%s:%s", workspaceID, roomID)
 }
 
 // cachedRoomListItem is the slim Redis payload for list cards (no settings JSON).
@@ -107,6 +107,8 @@ type cachedRoomListItem struct {
 	MemberCount      int64      `json:"member_count"`
 	PendingApprovals int64      `json:"pending_approvals"`
 	VisitorCount     int64      `json:"visitor_count"`
+	ViewCount        int64      `json:"view_count"`
+	ActiveLinkCount  int64      `json:"active_link_count"`
 	UnreadQuestions  int64      `json:"unread_questions"`
 	HeatScore        int32      `json:"heat_score"`
 	LastAccessedAt   *time.Time `json:"last_accessed_at,omitempty"`
@@ -126,6 +128,8 @@ func roomSummariesToCached(items []RoomSummary) []cachedRoomListItem {
 			MemberCount:      item.MemberCount,
 			PendingApprovals: item.PendingApprovals,
 			VisitorCount:     item.VisitorCount,
+			ViewCount:        item.ViewCount,
+			ActiveLinkCount:  item.ActiveLinkCount,
 			UnreadQuestions:  item.UnreadQuestions,
 			HeatScore:        item.HeatScore,
 		}
@@ -169,6 +173,8 @@ func cachedToRoomSummaries(items []cachedRoomListItem) []RoomSummary {
 			MemberCount:      item.MemberCount,
 			PendingApprovals: item.PendingApprovals,
 			VisitorCount:     item.VisitorCount,
+			ViewCount:        item.ViewCount,
+			ActiveLinkCount:  item.ActiveLinkCount,
 			UnreadQuestions:  item.UnreadQuestions,
 			HeatScore:        item.HeatScore,
 		}

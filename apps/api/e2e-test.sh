@@ -5,6 +5,8 @@ BASE_URL="${BASE_URL:-http://localhost:8080}"
 PDF="${PDF:-e2e-test.pdf}"
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck source=scripts/e2e-turnstile.sh
+source "$SCRIPT_DIR/scripts/e2e-turnstile.sh"
 # shellcheck source=scripts/e2e-category-tristate.sh
 source "$SCRIPT_DIR/scripts/e2e-category-tristate.sh"
 # shellcheck source=scripts/e2e-visitor-ask.sh
@@ -45,7 +47,7 @@ PASSWORD="Password123!"
 COOKIE_JAR=$(mktemp)
 REGISTER=$(curl -fsS -c "$COOKIE_JAR" -b "$COOKIE_JAR" -X POST "$BASE_URL/api/auth/register" \
   -H "Content-Type: application/json" \
-  -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\"}")
+  -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\"$(e2e_turnstile_field "$BASE_URL")}")
 echo "$REGISTER" | jq -c '{user_id: .user.id, email: .user.email}'
 
 # 3. Create workspace

@@ -2,12 +2,14 @@ package template
 
 // Built-in template names.
 const (
-	TemplateVerification = "verification"
-	TemplateAccessCode   = "access_code"
-	TemplateMarketing    = "marketing"
-	TemplateInvitation   = "invitation"
-	TemplateLinkInvite   = "link_invite"
-	TemplateLinkAccess   = "link_access"
+	TemplateVerification  = "verification"
+	TemplateAccessCode    = "access_code"
+	TemplateMarketing     = "marketing"
+	TemplateInvitation    = "invitation"
+	TemplateRoomInvite    = "room_invite"
+	TemplateLinkInvite    = "link_invite"
+	TemplateLinkAccess    = "link_access"
+	TemplatePasswordReset = "password_reset"
 )
 
 // RegisterDefaults registers the built-in DealSignal templates.
@@ -282,6 +284,110 @@ If you were not expecting this invitation, you can safely ignore this email.
 - {{.BrandName}}`,
 	})
 
+	_ = e.Register(TemplateRoomInvite, Template{
+		Subject: "You've been added to {{.RoomName}} on {{.BrandName}}",
+		HTML: `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Data room invitation</title>
+  <style>
+    body { margin: 0; padding: 0; background-color: #f4f6f8; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+    .container { max-width: 600px; margin: 40px auto; background: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+    .header { background: #111827; padding: 32px 24px; text-align: center; }
+    .header h1 { color: #ffffff; margin: 0; font-size: 24px; font-weight: 600; }
+    .body { padding: 32px 24px; color: #374151; font-size: 16px; line-height: 1.6; }
+    .body p { margin: 0 0 16px; }
+    .button { display: inline-block; margin: 16px 0; padding: 14px 28px; background: #2563eb; color: #ffffff; text-decoration: none; border-radius: 8px; font-weight: 600; }
+    .footer { padding: 24px; text-align: center; font-size: 13px; color: #9ca3af; background: #f9fafb; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>{{.BrandName}}</h1>
+    </div>
+    <div class="body">
+      <p>Hello,</p>
+      <p>{{if .InviterEmail}}<strong>{{.InviterEmail}}</strong> added you{{else}}You have been added{{end}} to the <strong>{{.RoomName}}</strong> data room{{if .WorkspaceName}} in <strong>{{.WorkspaceName}}</strong>{{end}}.</p>
+      <p>Open the data room to continue. If an NDA is required, you will be asked to sign it there.</p>
+      <p style="text-align:center;"><a class="button" href="{{.InvitationLink}}">Open data room</a></p>
+      <p>Or copy and paste this link into your browser:</p>
+      <p style="word-break:break-all;"><a href="{{.InvitationLink}}">{{.InvitationLink}}</a></p>
+      <p>If you were not expecting this, you can safely ignore this email.</p>
+    </div>
+    <div class="footer">
+      &copy; {{.BrandName}}. All rights reserved.
+    </div>
+  </div>
+</body>
+</html>`,
+		Text: `Hello,
+
+{{if .InviterEmail}}{{.InviterEmail}} added you{{else}}You have been added{{end}} to the {{.RoomName}} data room{{if .WorkspaceName}} in {{.WorkspaceName}}{{end}}.
+
+Open the data room to continue. If an NDA is required, you will be asked to sign it there.
+
+{{.InvitationLink}}
+
+If you were not expecting this, you can safely ignore this email.
+
+- {{.BrandName}}`,
+	})
+
+	_ = e.Register(TemplateRoomInvite+".zh-CN", Template{
+		Subject: "{{.InviterEmail}} 已将你加入 {{.RoomName}}",
+		HTML: `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>数据室邀请</title>
+  <style>
+    body { margin: 0; padding: 0; background-color: #f4f6f8; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+    .container { max-width: 600px; margin: 40px auto; background: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+    .header { background: #111827; padding: 32px 24px; text-align: center; }
+    .header h1 { color: #ffffff; margin: 0; font-size: 24px; font-weight: 600; }
+    .body { padding: 32px 24px; color: #374151; font-size: 16px; line-height: 1.6; }
+    .body p { margin: 0 0 16px; }
+    .button { display: inline-block; margin: 16px 0; padding: 14px 28px; background: #2563eb; color: #ffffff; text-decoration: none; border-radius: 8px; font-weight: 600; }
+    .footer { padding: 24px; text-align: center; font-size: 13px; color: #9ca3af; background: #f9fafb; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>{{.BrandName}}</h1>
+    </div>
+    <div class="body">
+      <p>你好，</p>
+      <p>{{if .InviterEmail}}<strong>{{.InviterEmail}}</strong> 已将你加入{{else}}你已被加入{{end}}数据室 <strong>{{.RoomName}}</strong>{{if .WorkspaceName}}（工作区 <strong>{{.WorkspaceName}}</strong>）{{end}}。</p>
+      <p>打开数据室即可继续。如需签署 NDA，会在进入后提示。</p>
+      <p style="text-align:center;"><a class="button" href="{{.InvitationLink}}">打开数据室</a></p>
+      <p>或复制以下链接到浏览器：</p>
+      <p style="word-break:break-all;"><a href="{{.InvitationLink}}">{{.InvitationLink}}</a></p>
+      <p>如非本人操作，请忽略此邮件。</p>
+    </div>
+    <div class="footer">
+      &copy; {{.BrandName}}
+    </div>
+  </div>
+</body>
+</html>`,
+		Text: `你好，
+
+{{if .InviterEmail}}{{.InviterEmail}} 已将你加入{{else}}你已被加入{{end}}数据室 {{.RoomName}}{{if .WorkspaceName}}（工作区 {{.WorkspaceName}}）{{end}}。
+
+打开数据室即可继续。如需签署 NDA，会在进入后提示。
+
+{{.InvitationLink}}
+
+如非本人操作，请忽略此邮件。
+
+- {{.BrandName}}`,
+	})
+
 	_ = e.Register(TemplateLinkInvite, Template{
 		Subject: "You've been invited to view {{.LinkName}} on {{.BrandName}}",
 		HTML: `<!DOCTYPE html>
@@ -510,6 +616,113 @@ If you do not want to receive these notifications, disable "Notify on access" in
 {{if .Body}}{{.Body}}{{end}}
 
 {{if .CTAUrl}}{{if .CTAText}}{{.CTAText}}{{else}}Learn more{{end}}: {{.CTAUrl}}{{end}}
+
+- {{.BrandName}}`,
+	})
+
+	_ = e.Register(TemplatePasswordReset, Template{
+		Subject: "Reset your {{.BrandName}} password",
+		HTML: `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Reset your password</title>
+  <style>
+    body { margin: 0; padding: 0; background-color: #f4f6f8; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+    .container { max-width: 600px; margin: 40px auto; background: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+    .header { background: #111827; padding: 32px 24px; text-align: center; }
+    .header h1 { color: #ffffff; margin: 0; font-size: 24px; font-weight: 600; }
+    .body { padding: 32px 24px; color: #374151; font-size: 16px; line-height: 1.6; }
+    .body p { margin: 0 0 16px; }
+    .button { display: inline-block; margin: 16px 0; padding: 14px 28px; background: #2563eb; color: #ffffff; text-decoration: none; border-radius: 8px; font-weight: 600; }
+    .button:hover { background: #1d4ed8; }
+    .link { word-break: break-all; color: #2563eb; }
+    .footer { padding: 24px; text-align: center; font-size: 13px; color: #9ca3af; background: #f9fafb; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>{{.BrandName}}</h1>
+    </div>
+    <div class="body">
+      <p>Hello,</p>
+      <p>We received a request to reset the password for this account. Click the button below to choose a new password:</p>
+      <p style="text-align:center;">
+        <a class="button" href="{{.ResetLink}}">Reset password</a>
+      </p>
+      <p>Or copy and paste this link into your browser:</p>
+      <p><a class="link" href="{{.ResetLink}}">{{.ResetLink}}</a></p>
+      <p>This link expires in {{.ExpiryMinutes}} minutes and can be used only once.</p>
+      <p>If you did not request a password reset, you can ignore this email. Your password will not change.</p>
+    </div>
+    <div class="footer">
+      &copy; {{.BrandName}}. All rights reserved.
+    </div>
+  </div>
+</body>
+</html>`,
+		Text: `Hello,
+
+We received a request to reset the password for this account. Open the link below to choose a new password:
+
+{{.ResetLink}}
+
+This link expires in {{.ExpiryMinutes}} minutes and can be used only once.
+
+If you did not request a password reset, you can ignore this email. Your password will not change.
+
+- {{.BrandName}}`,
+	})
+
+	_ = e.Register(TemplatePasswordReset+".zh-CN", Template{
+		Subject: "重置您的 {{.BrandName}} 密码",
+		HTML: `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>重置密码</title>
+  <style>
+    body { margin: 0; padding: 0; background-color: #f4f6f8; font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif; }
+    .container { max-width: 600px; margin: 40px auto; background: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+    .header { background: #111827; padding: 32px 24px; text-align: center; }
+    .header h1 { color: #ffffff; margin: 0; font-size: 24px; font-weight: 600; }
+    .body { padding: 32px 24px; color: #374151; font-size: 16px; line-height: 1.6; }
+    .body p { margin: 0 0 16px; }
+    .button { display: inline-block; margin: 16px 0; padding: 14px 28px; background: #2563eb; color: #ffffff; text-decoration: none; border-radius: 8px; font-weight: 600; }
+    .link { word-break: break-all; color: #2563eb; }
+    .footer { padding: 24px; text-align: center; font-size: 13px; color: #9ca3af; background: #f9fafb; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header"><h1>{{.BrandName}}</h1></div>
+    <div class="body">
+      <p>您好，</p>
+      <p>我们收到了重置此账号密码的请求。请点击下方按钮设置新密码：</p>
+      <p style="text-align:center;">
+        <a class="button" href="{{.ResetLink}}">重置密码</a>
+      </p>
+      <p>或将此链接复制到浏览器打开：</p>
+      <p><a class="link" href="{{.ResetLink}}">{{.ResetLink}}</a></p>
+      <p>此链接 {{.ExpiryMinutes}} 分钟后失效，且只能使用一次。</p>
+      <p>如果这不是您本人的操作，请忽略此邮件。您的密码不会被更改。</p>
+    </div>
+    <div class="footer">&copy; {{.BrandName}}. 保留所有权利。</div>
+  </div>
+</body>
+</html>`,
+		Text: `您好，
+
+我们收到了重置此账号密码的请求。请打开以下链接设置新密码：
+
+{{.ResetLink}}
+
+此链接 {{.ExpiryMinutes}} 分钟后失效，且只能使用一次。
+
+如果这不是您本人的操作，请忽略此邮件。您的密码不会被更改。
 
 - {{.BrandName}}`,
 	})

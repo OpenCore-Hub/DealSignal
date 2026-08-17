@@ -66,6 +66,13 @@ type mockAnalyticsQuerier struct {
 	pendingLinkAccess      []db.ListPendingDealRoomLinkAccessRequestsByWorkspaceRow
 	pendingRoomAccess      []db.ListPendingRoomAccessRequestsByWorkspaceRow
 	forwardSignalsByLink   []db.CountWorkspaceForwardSignalsByLinkInRangeRow
+	listHeatMetrics        []db.ListDocumentHeatMetricsByWorkspaceRow
+	heatMetrics            db.GetDocumentHeatMetricsRow
+	heatMetricsErr         error
+	heatMetricsSet         bool
+	extrasErr              error
+	keyPageBatchErr        error
+	contribLinksErr        error
 }
 
 func (m *mockAnalyticsQuerier) RecordLinkOpened(_ context.Context, _ db.RecordLinkOpenedParams) (int64, error) {
@@ -102,7 +109,11 @@ func (m *mockAnalyticsQuerier) GetLinkPageViewMetrics(_ context.Context, _ pgtyp
 }
 
 func (m *mockAnalyticsQuerier) GetLinkKeyPageViewMetrics(_ context.Context, _ db.GetLinkKeyPageViewMetricsParams) (db.GetLinkKeyPageViewMetricsRow, error) {
-	return db.GetLinkKeyPageViewMetricsRow{TotalKeyPageViews: 0}, nil
+	return db.GetLinkKeyPageViewMetricsRow{TotalKeyPageViews: 0, EngagedKeyPageViews: 0}, nil
+}
+
+func (m *mockAnalyticsQuerier) GetLinkKeyPageViewDetails(_ context.Context, _ db.GetLinkKeyPageViewDetailsParams) ([]db.GetLinkKeyPageViewDetailsRow, error) {
+	return nil, nil
 }
 
 func (m *mockAnalyticsQuerier) GetLinkBounceCount(_ context.Context, _ pgtype.UUID) (int64, error) {
@@ -122,6 +133,42 @@ func (m *mockAnalyticsQuerier) ListLinksByWorkspace(_ context.Context, _ pgtype.
 }
 
 func (m *mockAnalyticsQuerier) GetDocumentViewMetrics(_ context.Context, _ db.GetDocumentViewMetricsParams) ([]db.GetDocumentViewMetricsRow, error) {
+	return nil, nil
+}
+
+func (m *mockAnalyticsQuerier) ListDocumentHeatMetricsByWorkspace(_ context.Context, _ pgtype.UUID) ([]db.ListDocumentHeatMetricsByWorkspaceRow, error) {
+	return m.listHeatMetrics, nil
+}
+
+func (m *mockAnalyticsQuerier) GetDocumentHeatMetrics(_ context.Context, _ db.GetDocumentHeatMetricsParams) (db.GetDocumentHeatMetricsRow, error) {
+	if m.heatMetricsSet {
+		return m.heatMetrics, m.heatMetricsErr
+	}
+	return db.GetDocumentHeatMetricsRow{}, pgx.ErrNoRows
+}
+
+func (m *mockAnalyticsQuerier) GetDocumentKeyPageViewMetricsBatch(_ context.Context, _ db.GetDocumentKeyPageViewMetricsBatchParams) ([]db.GetDocumentKeyPageViewMetricsBatchRow, error) {
+	if m.keyPageBatchErr != nil {
+		return nil, m.keyPageBatchErr
+	}
+	return nil, nil
+}
+
+func (m *mockAnalyticsQuerier) GetDocumentKeyPageViewDetails(_ context.Context, _ db.GetDocumentKeyPageViewDetailsParams) ([]db.GetDocumentKeyPageViewDetailsRow, error) {
+	return nil, nil
+}
+
+func (m *mockAnalyticsQuerier) GetDocumentHeatExtrasBatch(_ context.Context, _ db.GetDocumentHeatExtrasBatchParams) ([]db.GetDocumentHeatExtrasBatchRow, error) {
+	if m.extrasErr != nil {
+		return nil, m.extrasErr
+	}
+	return nil, nil
+}
+
+func (m *mockAnalyticsQuerier) ListDocumentHeatContributingLinks(_ context.Context, _ db.ListDocumentHeatContributingLinksParams) ([]db.ListDocumentHeatContributingLinksRow, error) {
+	if m.contribLinksErr != nil {
+		return nil, m.contribLinksErr
+	}
 	return nil, nil
 }
 
@@ -431,6 +478,18 @@ func (m *mockAnalyticsQuerier) ListPendingDealRoomLinkAccessRequestsByWorkspace(
 
 func (m *mockAnalyticsQuerier) ListPendingRoomAccessRequestsByWorkspace(_ context.Context, _ pgtype.UUID) ([]db.ListPendingRoomAccessRequestsByWorkspaceRow, error) {
 	return m.pendingRoomAccess, nil
+}
+
+func (m *mockAnalyticsQuerier) ListLinkDocumentIDsByWorkspace(_ context.Context, _ pgtype.UUID) ([]db.ListLinkDocumentIDsByWorkspaceRow, error) {
+	return nil, nil
+}
+
+func (m *mockAnalyticsQuerier) CountPendingActionItemsByWorkspace(_ context.Context, _ pgtype.UUID) (int64, error) {
+	return 0, nil
+}
+
+func (m *mockAnalyticsQuerier) ListPendingActionLinkIDsByWorkspace(_ context.Context, _ pgtype.UUID) ([]pgtype.UUID, error) {
+	return nil, nil
 }
 
 type mockDedupChecker struct {

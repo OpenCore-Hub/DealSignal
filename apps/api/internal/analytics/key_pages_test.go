@@ -3,6 +3,10 @@ package analytics
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -76,6 +80,7 @@ func TestServiceKeyPageCompliance(t *testing.T) {
 				PageNumber:         4,
 				PageTitle:          "Financial Projections",
 				Views:              3,
+				EngagedViews:       2,
 				UniqueVisitors:     2,
 				AvgDurationSeconds: 12,
 				LastViewedAt:       pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
@@ -108,6 +113,9 @@ func TestServiceKeyPageCompliance(t *testing.T) {
 	if len(out.Pages) != 1 || out.Pages[0].Category != "financials" {
 		t.Fatalf("pages=%+v", out.Pages)
 	}
+	if out.Pages[0].Views != 3 || out.Pages[0].EngagedViews != 2 {
+		t.Fatalf("page views=%d engaged=%d", out.Pages[0].Views, out.Pages[0].EngagedViews)
+	}
 	if len(out.ByCategory) == 0 || out.ByCategory[0].Category != "financials" || out.ByCategory[0].Count != 3 {
 		t.Fatalf("byCategory=%+v", out.ByCategory)
 	}
@@ -138,5 +146,26 @@ func TestServiceKeyPageCompliance(t *testing.T) {
 	}
 	if !foundFinancials {
 		t.Fatalf("matchRules missing financials: %+v", out.MatchRules)
+	}
+}
+
+func TestKeyPageComplianceByPageSQLExposesEngaged(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
+	raw, err := os.ReadFile(filepath.Clean(filepath.Join(filepath.Dir(file), "..", "db", "queries.sql")))
+	if err != nil {
+		t.Fatalf("read queries.sql: %v", err)
+	}
+	block := queryNamedSQL(string(raw), "ListWorkspaceKeyPageComplianceByPage")
+	if block == "" {
+		t.Fatal("missing ListWorkspaceKeyPageComplianceByPage")
+	}
+	if !strings.Contains(block, "AS engaged_views") || !strings.Contains(block, "duration_seconds >= 3") {
+		t.Fatal("compliance by-page must expose the 3s engage gate without dropping skim views")
+	}
+	if !strings.Contains(block, "AS views") {
+		t.Fatal("compliance by-page must keep total title-match views")
 	}
 }

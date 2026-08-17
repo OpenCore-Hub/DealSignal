@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
@@ -8,6 +9,7 @@ import (
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/httpx"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/turnstile"
 )
 
 const (
@@ -17,28 +19,62 @@ const (
 )
 
 type registerRequest struct {
-	Email    string `json:"email" binding:"required,email"`
-	Password string `json:"password" binding:"required,min=8"`
+	Email          string `json:"email" binding:"required,email"`
+	Password       string `json:"password" binding:"required,min=8"`
+	TurnstileToken string `json:"turnstile_token"`
 }
 
 type loginRequest struct {
-	Email    string `json:"email" binding:"omitempty,email"`
-	Password string `json:"password"`
+	Email       string `json:"email" binding:"omitempty,email"`
+	Password    string `json:"password"`
+	InviteToken string `json:"invite_token"`
 }
 
 type refreshRequest struct {
 	RefreshToken string `json:"refresh_token"`
 }
 
+type verifyEmailRequest struct {
+	Token string `json:"token" binding:"required"`
+}
+
+type resendVerificationRequest struct {
+	Email          string `json:"email" binding:"required,email"`
+	TurnstileToken string `json:"turnstile_token"`
+}
+
+type forgotPasswordRequest struct {
+	Email          string `json:"email" binding:"required,email"`
+	TurnstileToken string `json:"turnstile_token"`
+}
+
+type resetPasswordRequest struct {
+	Token    string `json:"token" binding:"required"`
+	Password string `json:"password"`
+}
+
 // Handler exposes auth HTTP endpoints.
 type Handler struct {
 	service *Service
 	cfg     *config.Config
+	captcha turnstile.Verifier
 }
 
 // NewHandler creates an auth handler.
 func NewHandler(s *Service, cfg *config.Config) *Handler {
-	return &Handler{service: s, cfg: cfg}
+	return &Handler{service: s, cfg: cfg, captcha: turnstile.New("", "")}
+}
+
+// SetTurnstile attaches the register CAPTCHA verifier.
+func (h *Handler) SetTurnstile(v turnstile.Verifier) {
+	if h == nil {
+		return
+	}
+	if v == nil {
+		h.captcha = turnstile.New("", "")
+		return
+	}
+	h.captcha = v
 }
 
 // RegisterRoutes mounts auth routes.
@@ -48,7 +84,11 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup) {
 	g.POST("/login", h.Login)
 	g.POST("/refresh", h.Refresh)
 	g.POST("/logout", h.Logout)
-	g.GET("/verify-email/:token", h.VerifyEmail)
+	g.POST("/verify-email", h.VerifyEmail)
+	g.POST("/resend-verification", h.ResendVerification)
+	g.POST("/forgot-password", h.ForgotPassword)
+	g.POST("/reset-password", h.ResetPassword)
+	g.GET("/captcha", h.Captcha)
 	g.GET("/me", h.Me)
 }
 
@@ -111,14 +151,20 @@ func (h *Handler) Register(c *gin.Context) {
 		return
 	}
 
-	user, pair, err := h.service.Register(c.Request.Context(), req.Email, req.Password)
+	if !h.verifyTurnstile(c, req.TurnstileToken) {
+		return
+	}
+
+	result, err := h.service.Register(c.Request.Context(), req.Email, req.Password)
 	if err != nil {
-		switch err {
-		case ErrEmailExists:
+		switch {
+		case errors.Is(err, ErrEmailExists):
 			c.JSON(http.StatusConflict, gin.H{"code": "email_conflict", "message": "email already registered"})
-		case ErrInvalidEmail:
+		case errors.Is(err, ErrInvalidEmail):
 			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_email", "message": "invalid email address"})
-		case ErrWeakPassword:
+		case errors.Is(err, ErrDisposableEmail):
+			c.JSON(http.StatusBadRequest, gin.H{"code": "disposable_email", "message": httpx.SafeMessage("disposable_email", err)})
+		case errors.Is(err, ErrWeakPassword):
 			c.JSON(http.StatusBadRequest, gin.H{"code": "weak_password", "message": "password must be at least 8 characters and include uppercase, lowercase, digit and special character"})
 		default:
 			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "registration failed"})
@@ -126,8 +172,31 @@ func (h *Handler) Register(c *gin.Context) {
 		return
 	}
 
-	h.setAuthCookies(c, pair)
-	c.JSON(http.StatusCreated, gin.H{"user": user, "expires_in": pair.ExpiresIn})
+	if result.VerificationRequired || result.Pair.AccessToken == "" {
+		c.JSON(http.StatusCreated, gin.H{"user": result.User, "verification_required": true})
+		return
+	}
+
+	h.setAuthCookies(c, result.Pair)
+	c.JSON(http.StatusCreated, gin.H{"user": result.User, "expires_in": result.Pair.ExpiresIn})
+}
+
+func (h *Handler) verifyTurnstile(c *gin.Context, token string) bool {
+	if h.captcha == nil || !h.captcha.Enabled() {
+		return true
+	}
+	switch err := h.captcha.Verify(c.Request.Context(), token, c.ClientIP()); {
+	case errors.Is(err, turnstile.ErrMissing):
+		c.JSON(http.StatusBadRequest, gin.H{"code": "captcha_required", "message": httpx.SafeMessage("captcha_required", err)})
+		return false
+	case errors.Is(err, turnstile.ErrUnavailable):
+		c.JSON(http.StatusServiceUnavailable, gin.H{"code": "captcha_unavailable", "message": httpx.SafeMessage("captcha_unavailable", err)})
+		return false
+	case err != nil:
+		c.JSON(http.StatusBadRequest, gin.H{"code": "captcha_failed", "message": httpx.SafeMessage("captcha_failed", err)})
+		return false
+	}
+	return true
 }
 
 // Login handles user login.
@@ -142,8 +211,12 @@ func (h *Handler) Login(c *gin.Context) {
 		return
 	}
 
-	user, pair, err := h.service.Login(c.Request.Context(), req.Email, req.Password)
+	user, pair, err := h.service.Login(c.Request.Context(), req.Email, req.Password, strings.TrimSpace(req.InviteToken))
 	if err != nil {
+		if errors.Is(err, ErrEmailNotVerified) {
+			c.JSON(http.StatusForbidden, gin.H{"code": "email_not_verified", "message": "email not verified"})
+			return
+		}
 		c.JSON(http.StatusUnauthorized, gin.H{"code": "unauthorized", "message": "invalid email or password"})
 		return
 	}
@@ -182,6 +255,11 @@ func (h *Handler) Refresh(c *gin.Context) {
 
 	pair, err := h.service.Refresh(c.Request.Context(), refreshToken)
 	if err != nil {
+		if errors.Is(err, ErrEmailNotVerified) {
+			h.clearAuthCookies(c)
+			c.JSON(http.StatusForbidden, gin.H{"code": "email_not_verified", "message": "email not verified"})
+			return
+		}
 		c.JSON(http.StatusUnauthorized, gin.H{"code": "unauthorized", "message": "invalid or expired refresh token"})
 		return
 	}
@@ -190,20 +268,76 @@ func (h *Handler) Refresh(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"expires_in": pair.ExpiresIn})
 }
 
-// VerifyEmail verifies a user's email address using a single-use token.
+// VerifyEmail verifies a user's email address using a single-use token and
+// completes registration by issuing a session.
 func (h *Handler) VerifyEmail(c *gin.Context) {
-	token := c.Param("token")
-	if token == "" {
+	var req verifyEmailRequest
+	if err := c.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.Token) == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_token", "message": "verification token is required"})
 		return
 	}
 
-	if err := h.service.VerifyEmailByToken(c.Request.Context(), token); err != nil {
+	user, pair, err := h.service.VerifyEmailByToken(c.Request.Context(), strings.TrimSpace(req.Token))
+	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_or_expired_token", "message": "verification link is invalid or has expired"})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"code": "verified", "message": "email verified successfully"})
+	h.setAuthCookies(c, pair)
+	c.JSON(http.StatusOK, gin.H{
+		"code":       "verified",
+		"message":    "email verified successfully",
+		"user":       user,
+		"expires_in": pair.ExpiresIn,
+	})
+}
+
+// ResendVerification always returns 200 to avoid mailbox enumeration.
+func (h *Handler) ResendVerification(c *gin.Context) {
+	var req resendVerificationRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
+		return
+	}
+	if !h.verifyTurnstile(c, req.TurnstileToken) {
+		return
+	}
+	h.service.ResendVerification(c.Request.Context(), req.Email)
+	c.JSON(http.StatusOK, gin.H{"code": "ok"})
+}
+
+// ForgotPassword always returns 200 to avoid mailbox enumeration.
+func (h *Handler) ForgotPassword(c *gin.Context) {
+	var req forgotPasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
+		return
+	}
+	if !h.verifyTurnstile(c, req.TurnstileToken) {
+		return
+	}
+	h.service.ForgotPassword(c.Request.Context(), req.Email)
+	c.JSON(http.StatusOK, gin.H{"code": "ok"})
+}
+
+// ResetPassword updates the password from a one-time email token.
+// It never sets session cookies: a reset URL can leak via Referer or history.
+func (h *Handler) ResetPassword(c *gin.Context) {
+	var req resetPasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.Token) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_or_expired_token", "message": "reset link is invalid or has expired"})
+		return
+	}
+	if err := h.service.ResetPassword(c.Request.Context(), strings.TrimSpace(req.Token), req.Password); err != nil {
+		switch {
+		case errors.Is(err, ErrWeakPassword):
+			c.JSON(http.StatusBadRequest, gin.H{"code": "weak_password", "message": "password must be at least 8 characters and include uppercase, lowercase, digit and special character"})
+		default:
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_or_expired_token", "message": "reset link is invalid or has expired"})
+		}
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"code": "ok"})
 }
 
 // Logout revokes the current access and refresh tokens and clears cookies.
@@ -223,4 +357,14 @@ func (h *Handler) Logout(c *gin.Context) {
 
 	h.clearAuthCookies(c)
 	c.JSON(http.StatusOK, gin.H{"code": "ok", "message": "logged out"})
+}
+
+// Captcha returns the public Turnstile site key. Empty key means the widget is off.
+func (h *Handler) Captcha(c *gin.Context) {
+	siteKey := ""
+	if h.captcha != nil {
+		siteKey = h.captcha.SiteKey()
+	}
+	c.Header("Cache-Control", "public, max-age=60")
+	c.JSON(http.StatusOK, gin.H{"turnstile_site_key": siteKey})
 }

@@ -32,6 +32,7 @@ type Querier interface {
 	ListContactsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]db.Contact, error)
 	GetContactAggregateByEmail(ctx context.Context, arg db.GetContactAggregateByEmailParams) (db.GetContactAggregateByEmailRow, error)
 	GetContactAggregatesByWorkspace(ctx context.Context, arg db.GetContactAggregatesByWorkspaceParams) ([]db.GetContactAggregatesByWorkspaceRow, error)
+	GetContactKeyPageViewDetails(ctx context.Context, arg db.GetContactKeyPageViewDetailsParams) ([]db.GetContactKeyPageViewDetailsRow, error)
 	ListContactActivitiesByEmail(ctx context.Context, arg db.ListContactActivitiesByEmailParams) ([]db.ListContactActivitiesByEmailRow, error)
 	ListContactViewedDocumentIDs(ctx context.Context, arg db.ListContactViewedDocumentIDsParams) ([]string, error)
 	ListContactViewedDocuments(ctx context.Context, arg db.ListContactViewedDocumentsParams) ([]db.ListContactViewedDocumentsRow, error)
@@ -49,8 +50,8 @@ type Cache interface {
 const contactListCacheTTL = 20 * time.Second
 
 func contactListCacheKey(workspaceID string) string {
-	// v4: heat also applies DecayDays from LastSeenAt (same contract as link heat).
-	return fmt.Sprintf("contacts:list:v4:%s", workspaceID)
+	// v6: viewed docs include bundle members (align ListRecentlyAccessedDocumentsByWorkspace).
+	return fmt.Sprintf("contacts:list:v6:%s", workspaceID)
 }
 
 // Service aggregates visitor activity into contact records.
@@ -91,6 +92,26 @@ type Contact struct {
 	LastSeenAt           string           `json:"lastSeenAt,omitempty"`
 	ViewedDocuments      []string         `json:"viewedDocuments"`
 	ViewedDocumentItems  []ViewedDocument `json:"viewedDocumentItems,omitempty"`
+	// KeyPages is explain-only on GET. List/create leave this nil.
+	KeyPages *ContactKeyPages `json:"keyPages,omitempty"`
+}
+
+const contactKeyPageMinSeconds = 3
+
+// ContactKeyPages is title-match evidence. Compute uses Engaged only.
+type ContactKeyPages struct {
+	Engaged    int64            `json:"engaged"`
+	Total      int64            `json:"total"`
+	MinSeconds int              `json:"minSeconds"`
+	Pages      []ContactKeyPage `json:"pages"`
+}
+
+// ContactKeyPage is one title-matched page this visitor viewed.
+type ContactKeyPage struct {
+	PageNumber   int32  `json:"pageNumber"`
+	Title        string `json:"title"`
+	EngagedViews int64  `json:"engagedViews"`
+	TotalViews   int64  `json:"totalViews"`
 }
 
 // ScorePoint is one day of engagement intensity for trend charts.
@@ -322,8 +343,10 @@ func (s *Service) GetContact(ctx context.Context, workspaceID, contactID string)
 		viewedItems = append(viewedItems, ViewedDocument{ID: row.DocumentID, Title: title})
 	}
 
-	contact := s.buildContact(c, toWorkspaceAggregate(agg), viewedIDs, rs.Circle)
+	wsAgg := toWorkspaceAggregate(agg)
+	contact := s.buildContact(c, wsAgg, viewedIDs, rs.Circle)
 	contact.ViewedDocumentItems = viewedItems
+	contact.KeyPages = s.contactKeyPageEvidence(ctx, wsUUID, visitorEmail, rs.Patterns(), wsAgg)
 
 	// Detail trend: real daily engagement from recent events (not a stub empty array).
 	actRows, err := s.queries.ListContactActivitiesByEmail(ctx, db.ListContactActivitiesByEmailParams{
@@ -503,6 +526,40 @@ func activityDocumentTitle(documentTitle string) string {
 	return strings.TrimSpace(documentTitle)
 }
 
+// contactKeyPageEvidence is GET-only. Fail-open: totals from the aggregate still return.
+func (s *Service) contactKeyPageEvidence(ctx context.Context, workspaceID pgtype.UUID, visitorEmail string, patterns []string, agg db.GetContactAggregatesByWorkspaceRow) *ContactKeyPages {
+	if agg.KeyPageViews <= 0 && agg.TotalKeyPageViews <= 0 {
+		return nil
+	}
+	out := &ContactKeyPages{
+		Engaged:    agg.KeyPageViews,
+		Total:      agg.TotalKeyPageViews,
+		MinSeconds: contactKeyPageMinSeconds,
+		Pages:      []ContactKeyPage{},
+	}
+	if visitorEmail == "" || len(patterns) == 0 {
+		return out
+	}
+	rows, err := s.queries.GetContactKeyPageViewDetails(ctx, db.GetContactKeyPageViewDetailsParams{
+		WorkspaceID:  workspaceID,
+		VisitorEmail: visitorEmail,
+		Patterns:     patterns,
+	})
+	if err != nil {
+		return out
+	}
+	out.Pages = make([]ContactKeyPage, 0, len(rows))
+	for _, row := range rows {
+		out.Pages = append(out.Pages, ContactKeyPage{
+			PageNumber:   row.PageNumber,
+			Title:        row.Title,
+			EngagedViews: row.EngagedViews,
+			TotalViews:   row.TotalViews,
+		})
+	}
+	return out
+}
+
 func toWorkspaceAggregate(r db.GetContactAggregateByEmailRow) db.GetContactAggregatesByWorkspaceRow {
 	return db.GetContactAggregatesByWorkspaceRow{
 		Email:                "",
@@ -512,6 +569,7 @@ func toWorkspaceAggregate(r db.GetContactAggregateByEmailRow) db.GetContactAggre
 		TotalDurationSeconds: r.TotalDurationSeconds,
 		TotalPageViews:       r.TotalPageViews,
 		KeyPageViews:         r.KeyPageViews,
+		TotalKeyPageViews:    r.TotalKeyPageViews,
 		ForwardSignals:       r.ForwardSignals,
 		Downloads:            r.Downloads,
 		Bounces:              r.Bounces,

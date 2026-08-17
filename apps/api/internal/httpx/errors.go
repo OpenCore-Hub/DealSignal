@@ -159,6 +159,10 @@ var clientFallbacks = map[string]string{
 	"invalid_slug":                       "invalid slug",
 	"invalid_name":                       "invalid data room name",
 	"invalid_email":                      "invalid email",
+	"disposable_email":                   "use a permanent work email, not a disposable inbox",
+	"captcha_required":                   "complete the verification challenge",
+	"captcha_failed":                     "verification failed, please try again",
+	"captcha_unavailable":                "verification is temporarily unavailable",
 	"invalid_file":                       "invalid file",
 	"empty_file":                         "file is empty",
 	"file_empty":                         "file is empty",
@@ -232,9 +236,11 @@ var clientFallbacks = map[string]string{
 	"invitation_expired":                 "invitation expired",
 	"invitation_used":                    "invitation already used",
 	"insufficient_role":                  "your role does not allow this action",
+	"not_room_admin":                     "your room role does not allow this action",
 	"cannot_modify_owner":                "cannot modify the workspace owner",
 	"cannot_modify_self":                 "cannot change your own membership here",
 	"cannot_manage_member":               "cannot manage this member",
+	"cannot_remove_sole_room_operator":   "cannot remove the only operator of a data room",
 	"plan_limit_rooms":                   "data room limit reached for this plan",
 	"plan_limit_links":                   "share link limit reached for this plan",
 	"plan_limit_storage":                 "storage limit reached for this plan",
@@ -305,4 +311,11 @@ func WriteIfPlanLimit(c *gin.Context, err error) bool {
 	logger.InfoCtx(ctx, "plan quota denied", attrs...)
 	c.JSON(status, gin.H{"code": code, "message": SafeMessage(code, err)})
 	return true
+}
+
+const CodeNotRoomAdmin = "not_room_admin"
+
+// WriteNotRoomAdmin writes a 403 when the caller lacks the required room role.
+func WriteNotRoomAdmin(c *gin.Context, err error) {
+	c.JSON(http.StatusForbidden, gin.H{"code": CodeNotRoomAdmin, "message": SafeMessage(CodeNotRoomAdmin, err)})
 }

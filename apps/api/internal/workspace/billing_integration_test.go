@@ -181,8 +181,9 @@ func newBillingFixture(t *testing.T) *billingFixture {
 		t.Fatalf("create tenant: %v", err)
 	}
 	user, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("billing-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("billing-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create user: %v", err)
@@ -262,8 +263,9 @@ func TestCreateWorkspaceSeedsTrialBilling_Integration(t *testing.T) {
 
 	q := db.New(tx)
 	user, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("owner-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("owner-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create user: %v", err)
@@ -339,8 +341,9 @@ func TestBillingQuotaFreeEnforcesSeats_Integration(t *testing.T) {
 
 	q := db.New(tx)
 	user, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("seat-owner-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("seat-owner-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create user: %v", err)
@@ -380,8 +383,9 @@ func TestBillingQuotaFreeEnforcesSeats_Integration(t *testing.T) {
 	}
 
 	guestUser, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("seat-guest-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("seat-guest-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create guest user: %v", err)
@@ -390,8 +394,9 @@ func TestBillingQuotaFreeEnforcesSeats_Integration(t *testing.T) {
 		t.Fatalf("add guest member: %v", err)
 	}
 	memberUser, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("seat-member-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("seat-member-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create member user: %v", err)
@@ -608,8 +613,9 @@ func TestBillingCustomDomainFeature_Integration(t *testing.T) {
 
 	q := db.New(tx)
 	user, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("domain-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("domain-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create user: %v", err)
@@ -725,8 +731,9 @@ func TestBillingWatermarkFeature_Integration(t *testing.T) {
 
 	q := db.New(tx)
 	user, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("wm-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("wm-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create user: %v", err)
@@ -1148,8 +1155,9 @@ func TestBillingAcceptInvitationSeatReservation_Integration(t *testing.T) {
 	svc := workspace.NewService(q, workspace.WithDBPool(testPool))
 
 	owner, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("seat-accept-owner-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("seat-accept-owner-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create owner: %v", err)
@@ -1192,8 +1200,9 @@ func TestBillingAcceptInvitationSeatReservation_Integration(t *testing.T) {
 	}
 
 	invitee, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        inviteEmail,
-		PasswordHash: "hash",
+		Email:         inviteEmail,
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create invitee: %v", err)
@@ -1250,8 +1259,9 @@ func TestBillingAcceptInvitationSeatReservation_Integration(t *testing.T) {
 		t.Fatalf("downgrade to free: %v", err)
 	}
 	pendingUser, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        pendingEmail,
-		PasswordHash: "hash",
+		Email:         pendingEmail,
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create pending user: %v", err)
@@ -1267,8 +1277,9 @@ func TestBillingAcceptInvitationSeatReservation_Integration(t *testing.T) {
 		t.Fatalf("guest invite on free: %v", err)
 	}
 	guestUser, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        guestEmail,
-		PasswordHash: "hash",
+		Email:         guestEmail,
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create guest user: %v", err)
@@ -1285,8 +1296,9 @@ func TestBillingConcurrentCreateInvitationSeatCap_Integration(t *testing.T) {
 	ctx := context.Background()
 	q := db.New(testPool)
 	owner, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("seat-race-owner-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("seat-race-owner-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create owner: %v", err)
@@ -1310,8 +1322,9 @@ func TestBillingConcurrentCreateInvitationSeatCap_Integration(t *testing.T) {
 		t.Fatalf("upsert pro: %v", err)
 	}
 	member, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("seat-race-member-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("seat-race-member-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create member user: %v", err)
@@ -1370,8 +1383,9 @@ func TestBillingConcurrentCreateRoomCap_Integration(t *testing.T) {
 	ctx := context.Background()
 	q := db.New(testPool)
 	owner, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("room-race-owner-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("room-race-owner-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create owner: %v", err)
@@ -1437,8 +1451,9 @@ func TestBillingConcurrentCreateLinkCap_Integration(t *testing.T) {
 	ctx := context.Background()
 	q := db.New(testPool)
 	owner, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("link-race-owner-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("link-race-owner-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create owner: %v", err)
@@ -1550,8 +1565,9 @@ func TestBillingConcurrentAddStorageCap_Integration(t *testing.T) {
 	ctx := context.Background()
 	q := db.New(testPool)
 	owner, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("storage-race-owner-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("storage-race-owner-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create owner: %v", err)
@@ -1833,8 +1849,9 @@ func TestBillingConcurrentPromoteGuestSeatCap_Integration(t *testing.T) {
 	ctx := context.Background()
 	q := db.New(testPool)
 	owner, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("promote-race-owner-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("promote-race-owner-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create owner: %v", err)
@@ -1859,8 +1876,9 @@ func TestBillingConcurrentPromoteGuestSeatCap_Integration(t *testing.T) {
 
 	// Pro seats=3: fill owner + one member so exactly one internal seat remains.
 	existing, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("promote-race-member-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("promote-race-member-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create existing member: %v", err)
@@ -1872,8 +1890,9 @@ func TestBillingConcurrentPromoteGuestSeatCap_Integration(t *testing.T) {
 	guestIDs := make([]string, 2)
 	for i := 0; i < 2; i++ {
 		guest, err := q.CreateUser(ctx, db.CreateUserParams{
-			Email:        fmt.Sprintf("promote-race-guest-%d-%s@example.com", i, uuid.NewString()),
-			PasswordHash: "hash",
+			Email:         fmt.Sprintf("promote-race-guest-%d-%s@example.com", i, uuid.NewString()),
+			PasswordHash:  "hash",
+			EmailVerified: true,
 		})
 		if err != nil {
 			t.Fatalf("create guest %d: %v", i, err)
@@ -1926,8 +1945,9 @@ func TestBillingConcurrentUpdateInvitationRoleSeatCap_Integration(t *testing.T) 
 	ctx := context.Background()
 	q := db.New(testPool)
 	owner, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("inv-role-race-owner-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("inv-role-race-owner-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create owner: %v", err)
@@ -1950,8 +1970,9 @@ func TestBillingConcurrentUpdateInvitationRoleSeatCap_Integration(t *testing.T) 
 		t.Fatalf("upsert pro: %v", err)
 	}
 	member, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("inv-role-race-member-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("inv-role-race-member-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create member: %v", err)
@@ -2018,8 +2039,9 @@ func TestBillingConcurrentCreateInviteVsUpdateInviteRoleSeatCap_Integration(t *t
 	ctx := context.Background()
 	q := db.New(testPool)
 	owner, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("cross-seat-owner-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("cross-seat-owner-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create owner: %v", err)
@@ -2042,8 +2064,9 @@ func TestBillingConcurrentCreateInviteVsUpdateInviteRoleSeatCap_Integration(t *t
 		t.Fatalf("upsert pro: %v", err)
 	}
 	member, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("cross-seat-member-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("cross-seat-member-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create member: %v", err)
@@ -2115,8 +2138,9 @@ func TestBillingConcurrentRevokeInviteVsCreateInvite_Integration(t *testing.T) {
 	ctx := context.Background()
 	q := db.New(testPool)
 	owner, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("revoke-race-owner-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("revoke-race-owner-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create owner: %v", err)
@@ -2139,8 +2163,9 @@ func TestBillingConcurrentRevokeInviteVsCreateInvite_Integration(t *testing.T) {
 		t.Fatalf("upsert pro: %v", err)
 	}
 	member, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("revoke-race-member-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("revoke-race-member-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create member: %v", err)
@@ -2222,8 +2247,9 @@ func TestBillingConcurrentRemoveMemberVsCreateInvite_Integration(t *testing.T) {
 	ctx := context.Background()
 	q := db.New(testPool)
 	owner, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("remove-race-owner-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("remove-race-owner-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create owner: %v", err)
@@ -2249,8 +2275,9 @@ func TestBillingConcurrentRemoveMemberVsCreateInvite_Integration(t *testing.T) {
 	memberIDs := make([]string, 2)
 	for i := 0; i < 2; i++ {
 		member, err := q.CreateUser(ctx, db.CreateUserParams{
-			Email:        fmt.Sprintf("remove-race-member-%d-%s@example.com", i, uuid.NewString()),
-			PasswordHash: "hash",
+			Email:         fmt.Sprintf("remove-race-member-%d-%s@example.com", i, uuid.NewString()),
+			PasswordHash:  "hash",
+			EmailVerified: true,
 		})
 		if err != nil {
 			t.Fatalf("create member %d: %v", i, err)
@@ -2323,8 +2350,9 @@ func TestBillingConcurrentDemoteMemberVsCreateInvite_Integration(t *testing.T) {
 	ctx := context.Background()
 	q := db.New(testPool)
 	owner, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("demote-race-owner-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("demote-race-owner-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create owner: %v", err)
@@ -2350,8 +2378,9 @@ func TestBillingConcurrentDemoteMemberVsCreateInvite_Integration(t *testing.T) {
 	memberIDs := make([]string, 2)
 	for i := 0; i < 2; i++ {
 		member, err := q.CreateUser(ctx, db.CreateUserParams{
-			Email:        fmt.Sprintf("demote-race-member-%d-%s@example.com", i, uuid.NewString()),
-			PasswordHash: "hash",
+			Email:         fmt.Sprintf("demote-race-member-%d-%s@example.com", i, uuid.NewString()),
+			PasswordHash:  "hash",
+			EmailVerified: true,
 		})
 		if err != nil {
 			t.Fatalf("create member %d: %v", i, err)
@@ -2493,8 +2522,9 @@ func TestBillingConcurrentRevokeLinkVsCreateLink_Integration(t *testing.T) {
 	ctx := context.Background()
 	q := db.New(testPool)
 	owner, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("link-race-owner-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("link-race-owner-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create owner: %v", err)
@@ -2684,8 +2714,9 @@ func TestBillingConcurrentDeleteDocumentVsAddStorage_Integration(t *testing.T) {
 	ctx := context.Background()
 	q := db.New(testPool)
 	owner, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("stor-del-owner-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("stor-del-owner-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create owner: %v", err)
@@ -2971,8 +3002,9 @@ func TestBillingConcurrentArchiveLinkVsCreateLink_Integration(t *testing.T) {
 	ctx := context.Background()
 	q := db.New(testPool)
 	owner, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("archive-race-owner-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("archive-race-owner-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create owner: %v", err)
@@ -3236,8 +3268,9 @@ func TestBillingConcurrentExpirePastDueVsCreateLink_Integration(t *testing.T) {
 	ctx := context.Background()
 	q := db.New(testPool)
 	owner, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("expire-race-owner-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("expire-race-owner-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create owner: %v", err)
@@ -3383,8 +3416,9 @@ func TestBillingConcurrentStorageShrinkVsAdd_Integration(t *testing.T) {
 	ctx := context.Background()
 	q := db.New(testPool)
 	owner, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("shrink-race-owner-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("shrink-race-owner-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create owner: %v", err)
@@ -3502,8 +3536,9 @@ func TestBillingConcurrentArchiveDocumentVsCreateLink_Integration(t *testing.T) 
 	ctx := context.Background()
 	q := db.New(testPool)
 	owner, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("archdoc-race-owner-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("archdoc-race-owner-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create owner: %v", err)
@@ -5105,8 +5140,9 @@ func TestBillingHTTPCreateInvitationAtSeatCap_Integration(t *testing.T) {
 
 	q := db.New(tx)
 	user, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("http-seat-owner-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("http-seat-owner-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create user: %v", err)
@@ -5157,8 +5193,9 @@ func TestBillingHTTPCreateInvitationAtSeatCap_Integration(t *testing.T) {
 	}
 
 	memberUser, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("http-seat-add-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("http-seat-add-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create member user: %v", err)
@@ -5195,8 +5232,9 @@ func TestBillingHTTPPromoteGuestSeatCap_Integration(t *testing.T) {
 
 	q := db.New(tx)
 	user, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("http-promote-owner-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("http-promote-owner-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create owner: %v", err)
@@ -5220,8 +5258,9 @@ func TestBillingHTTPPromoteGuestSeatCap_Integration(t *testing.T) {
 	}
 
 	guest, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("http-promote-guest-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("http-promote-guest-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create guest: %v", err)
@@ -5281,8 +5320,9 @@ func TestBillingHTTPRevokeAndRemoveFreeSeats_Integration(t *testing.T) {
 
 	q := db.New(tx)
 	owner, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("http-free-seat-owner-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("http-free-seat-owner-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create owner: %v", err)
@@ -5306,8 +5346,9 @@ func TestBillingHTTPRevokeAndRemoveFreeSeats_Integration(t *testing.T) {
 	}
 	// Pro seats=3: owner + member + pending invite → full.
 	member, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("http-free-seat-member-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("http-free-seat-member-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create member: %v", err)
@@ -5404,8 +5445,9 @@ func TestBillingHTTPDemoteFreesSeats_Integration(t *testing.T) {
 
 	q := db.New(tx)
 	owner, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("http-demote-owner-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("http-demote-owner-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create owner: %v", err)
@@ -5429,8 +5471,9 @@ func TestBillingHTTPDemoteFreesSeats_Integration(t *testing.T) {
 	}
 	// Pro seats=3: owner + member + pending invite → full.
 	member, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("http-demote-member-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("http-demote-member-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create member: %v", err)
@@ -5532,8 +5575,9 @@ func TestBillingHTTPAcceptInvitationAtSeatCap_Integration(t *testing.T) {
 	svc := workspace.NewService(q, workspace.WithDBPool(testPool))
 
 	owner, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("http-accept-owner-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("http-accept-owner-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create owner: %v", err)
@@ -5560,8 +5604,9 @@ func TestBillingHTTPAcceptInvitationAtSeatCap_Integration(t *testing.T) {
 		t.Fatalf("downgrade to free: %v", err)
 	}
 	invitee, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        pendingEmail,
-		PasswordHash: "hash",
+		Email:         pendingEmail,
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create invitee: %v", err)
@@ -5594,8 +5639,9 @@ func TestBillingHTTPAcceptInvitationExpiredTrialSeatCap_Integration(t *testing.T
 	svc := workspace.NewService(q, workspace.WithDBPool(testPool))
 
 	owner, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("http-accept-trial-owner-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("http-accept-trial-owner-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create owner: %v", err)
@@ -5631,8 +5677,9 @@ func TestBillingHTTPAcceptInvitationExpiredTrialSeatCap_Integration(t *testing.T
 		t.Fatalf("expected expired trial free seats, got %+v", billing)
 	}
 	invitee, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        pendingEmail,
-		PasswordHash: "hash",
+		Email:         pendingEmail,
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create invitee: %v", err)
@@ -5665,8 +5712,9 @@ func TestBillingHTTPGuestInviteUnlimitedAtSeatCap_Integration(t *testing.T) {
 	svc := workspace.NewService(q, workspace.WithDBPool(testPool))
 
 	owner, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("http-guest-owner-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("http-guest-owner-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create owner: %v", err)
@@ -5749,8 +5797,9 @@ func TestBillingHTTPGuestInviteUnlimitedAtSeatCap_Integration(t *testing.T) {
 		}
 
 		guestUser, err := q.CreateUser(ctx, db.CreateUserParams{
-			Email:        guestEmail,
-			PasswordHash: "hash",
+			Email:         guestEmail,
+			PasswordHash:  "hash",
+			EmailVerified: true,
 		})
 		if err != nil {
 			t.Fatalf("create guest user: %v", err)
@@ -5796,8 +5845,9 @@ func TestBillingHTTPAddMemberGuestUnlimitedAtSeatCap_Integration(t *testing.T) {
 
 	q := db.New(tx)
 	owner, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("http-add-guest-owner-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("http-add-guest-owner-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create owner: %v", err)
@@ -5820,16 +5870,18 @@ func TestBillingHTTPAddMemberGuestUnlimitedAtSeatCap_Integration(t *testing.T) {
 		t.Fatalf("upsert free: %v", err)
 	}
 	guest, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("http-add-guest-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("http-add-guest-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create guest user: %v", err)
 	}
 	guestID := uuid.UUID(guest.ID.Bytes).String()
 	member, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("http-add-member-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("http-add-member-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create member user: %v", err)
@@ -5891,8 +5943,9 @@ func TestBillingHTTPFeatureGatesWatermarkAndCustomDomain_Integration(t *testing.
 
 	q := db.New(tx)
 	user, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("http-feat-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("http-feat-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create user: %v", err)
@@ -6935,8 +6988,9 @@ func TestBillingHTTPPutViewerDomainGrandfather_Integration(t *testing.T) {
 
 	q := db.New(tx)
 	user, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("http-dom-gf-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("http-dom-gf-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create user: %v", err)
@@ -7087,8 +7141,9 @@ func TestBillingHTTPUpdateSecurityWatermarkGrandfather_Integration(t *testing.T)
 
 	q := db.New(tx)
 	user, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("http-wm-gf-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("http-wm-gf-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create user: %v", err)
@@ -7200,8 +7255,9 @@ func TestBillingConcurrentRenewLinkVsCreateLink_Integration(t *testing.T) {
 	ctx := context.Background()
 	q := db.New(testPool)
 	owner, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("renew-race-owner-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("renew-race-owner-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create owner: %v", err)
@@ -7393,8 +7449,9 @@ func TestBillingConcurrentDeleteLinkVsCreateLink_Integration(t *testing.T) {
 	ctx := context.Background()
 	q := db.New(testPool)
 	owner, err := q.CreateUser(ctx, db.CreateUserParams{
-		Email:        fmt.Sprintf("dellink-race-owner-%s@example.com", uuid.NewString()),
-		PasswordHash: "hash",
+		Email:         fmt.Sprintf("dellink-race-owner-%s@example.com", uuid.NewString()),
+		PasswordHash:  "hash",
+		EmailVerified: true,
 	})
 	if err != nil {
 		t.Fatalf("create owner: %v", err)

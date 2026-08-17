@@ -13,8 +13,10 @@ import (
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/dealroom"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/docling"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/logger"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/roomacl"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -40,16 +42,12 @@ type ObjectStore interface {
 type RoomAccess interface {
 	GetRoom(ctx context.Context, roomID, workspaceID string) (db.DealRoom, error)
 	RequireActiveRoomMember(ctx context.Context, roomID, workspaceID, userID string) error
+	RequireRoomContribute(ctx context.Context, roomID, workspaceID, userID string) error
 }
 
 type roomAccessAdapter struct {
 	queries *db.Queries
 }
-
-const (
-	workspaceRoleOwner = "owner"
-	workspaceRoleAdmin = "admin"
-)
 
 func (a roomAccessAdapter) GetRoom(ctx context.Context, roomID, workspaceID string) (db.DealRoom, error) {
 	room, err := a.queries.GetDealRoomByID(ctx, db.GetDealRoomByIDParams{
@@ -65,45 +63,24 @@ func (a roomAccessAdapter) GetRoom(ctx context.Context, roomID, workspaceID stri
 	return room, nil
 }
 
-func (a roomAccessAdapter) isWorkspaceManager(ctx context.Context, workspaceID, userID string) (bool, error) {
-	member, err := a.queries.GetWorkspaceMember(ctx, db.GetWorkspaceMemberParams{
-		WorkspaceID: pgUUID(workspaceID),
-		UserID:      pgUUID(userID),
-	})
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return false, nil
-		}
-		return false, err
-	}
-	return member.Role == workspaceRoleOwner || member.Role == workspaceRoleAdmin, nil
+func (a roomAccessAdapter) RequireActiveRoomMember(ctx context.Context, roomID, workspaceID, userID string) error {
+	return a.requireNeed(ctx, roomID, workspaceID, userID, roomacl.NeedView)
 }
 
-func (a roomAccessAdapter) RequireActiveRoomMember(ctx context.Context, roomID, workspaceID, userID string) error {
-	// Always bind the room to the caller's workspace before any role short-circuit.
+func (a roomAccessAdapter) RequireRoomContribute(ctx context.Context, roomID, workspaceID, userID string) error {
+	return a.requireNeed(ctx, roomID, workspaceID, userID, roomacl.NeedContribute)
+}
+
+func (a roomAccessAdapter) requireNeed(ctx context.Context, roomID, workspaceID, userID string, need roomacl.Need) error {
 	room, err := a.GetRoom(ctx, roomID, workspaceID)
 	if err != nil {
 		return err
 	}
-	ok, err := a.isWorkspaceManager(ctx, workspaceID, userID)
-	if err != nil {
-		return err
-	}
-	if ok {
-		return nil
-	}
-	member, err := a.queries.GetRoomMemberByUserID(ctx, db.GetRoomMemberByUserIDParams{
-		RoomID: room.ID,
-		UserID: pgUUID(userID),
-	})
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+	if _, err := roomacl.Require(ctx, a.queries, room.WorkspaceID, room.ID, userID, need); err != nil {
+		if errors.Is(err, roomacl.ErrDenied) || errors.Is(err, roomacl.ErrNotAdmin) {
 			return ErrForbidden
 		}
 		return err
-	}
-	if member.Status != "active" {
-		return ErrForbidden
 	}
 	return nil
 }
@@ -385,7 +362,7 @@ func (s *Service) EnqueueRoomSync(ctx context.Context, roomID, workspaceID, user
 	if !s.Enabled() {
 		return ErrUnavailable
 	}
-	if err := s.access.RequireActiveRoomMember(ctx, roomID, workspaceID, userID); err != nil {
+	if err := s.access.RequireRoomContribute(ctx, roomID, workspaceID, userID); err != nil {
 		return err
 	}
 	room, err := s.access.GetRoom(ctx, roomID, workspaceID)
@@ -450,6 +427,9 @@ func (s *Service) EnqueueIngestDocument(ctx context.Context, roomID, workspaceID
 	})
 	if err != nil {
 		return err
+	}
+	if dealroom.IsArchivedDocumentStatus(doc.Status) {
+		return nil
 	}
 	extName := externalDocName(documentID, doc.SourceType, doc.Title, doc.StorageKey)
 	_, err = s.queries.UpsertDealRoomRagDocument(ctx, db.UpsertDealRoomRagDocumentParams{
@@ -545,7 +525,7 @@ func (s *Service) Query(ctx context.Context, roomID, workspaceID, userID string,
 	if !s.Enabled() {
 		return QueryResponse{}, ErrUnavailable
 	}
-	if err := s.access.RequireActiveRoomMember(ctx, roomID, workspaceID, userID); err != nil {
+	if err := s.access.RequireRoomContribute(ctx, roomID, workspaceID, userID); err != nil {
 		return QueryResponse{}, err
 	}
 	q := strings.TrimSpace(req.Query)
@@ -956,7 +936,7 @@ func (s *Service) alignRoomDocuments(ctx context.Context, room db.DealRoom) erro
 	// fall out of active and are marked deleted for remote purge.
 	active := make([]pgtype.UUID, 0, len(roomDocs))
 	for _, d := range roomDocs {
-		if knowledgeExcluded(d.Locked, d.FolderPath, lockedFolders) {
+		if dealroom.IsArchivedDocumentStatus(d.Status) || knowledgeExcluded(d.Locked, d.FolderPath, lockedFolders) {
 			continue
 		}
 		active = append(active, d.DocumentID)

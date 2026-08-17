@@ -29,6 +29,7 @@ import (
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/notification"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/plan"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/redis"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/roomacl"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/upload"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -653,6 +654,9 @@ func (s *Service) createLinkAfterPlanQuota(
 		}
 		if uuid.UUID(dealRoom.WorkspaceID.Bytes).String() != workspaceID {
 			return db.Link{}, ErrDealRoomNotFound
+		}
+		if _, aclErr := roomacl.Require(ctx, qtx, workspaceUUID, dealRoom.ID, userID, roomacl.NeedManage); aclErr != nil {
+			return db.Link{}, dealroom.ErrNotRoomAdmin
 		}
 		tenantID = dealRoom.TenantID
 		dealRoomID = dealRoom.ID
@@ -1542,63 +1546,66 @@ func (s *Service) resolveNdaBinding(
 			ID:          pgtype.UUID{Bytes: tid, Valid: true},
 			WorkspaceID: workspaceID,
 		})
-		if err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				return pgtype.UUID{}, pgtype.UUID{}, fmt.Errorf("%w: NDA template not found", ErrInvalidPermission)
+		if err == nil {
+			if tpl.Status != "active" {
+				return pgtype.UUID{}, pgtype.UUID{}, fmt.Errorf("%w: NDA template is archived", ErrInvalidPermission)
 			}
+			return tpl.SourceDocumentID, tpl.ID, nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
 			return pgtype.UUID{}, pgtype.UUID{}, fmt.Errorf("get NDA template: %w", err)
 		}
-		if tpl.Status != "active" {
-			return pgtype.UUID{}, pgtype.UUID{}, fmt.Errorf("%w: NDA template is archived", ErrInvalidPermission)
+		// Picker value is often the agreement-library document UUID.
+		if documentIDStr == "" {
+			documentIDStr = templateIDStr
 		}
-	} else {
-		// Compat / ensure: create-or-get template from a workspace document.
-		if s.ndaSvc == nil {
-			// Fallback without sealer: validate document exists and create template via queries.
-			docUUID, perr := uuid.Parse(documentIDStr)
-			if perr != nil {
-				return pgtype.UUID{}, pgtype.UUID{}, fmt.Errorf("%w: invalid NDA document id: %s", ErrInvalidInput, documentIDStr)
+	}
+
+	// Compat / ensure: create-or-get template from a workspace document.
+	if s.ndaSvc == nil {
+		docUUID, perr := uuid.Parse(documentIDStr)
+		if perr != nil {
+			return pgtype.UUID{}, pgtype.UUID{}, fmt.Errorf("%w: invalid NDA document id: %s", ErrInvalidInput, documentIDStr)
+		}
+		docPG := pgtype.UUID{Bytes: docUUID, Valid: true}
+		doc, derr := qtx.GetDocumentByID(ctx, db.GetDocumentByIDParams{ID: docPG, WorkspaceID: workspaceID})
+		if derr != nil {
+			if errors.Is(derr, pgx.ErrNoRows) {
+				return pgtype.UUID{}, pgtype.UUID{}, fmt.Errorf("%w: NDA document not found: %s", ErrInvalidPermission, documentIDStr)
 			}
-			docPG := pgtype.UUID{Bytes: docUUID, Valid: true}
-			doc, derr := qtx.GetDocumentByID(ctx, db.GetDocumentByIDParams{ID: docPG, WorkspaceID: workspaceID})
-			if derr != nil {
-				if errors.Is(derr, pgx.ErrNoRows) {
-					return pgtype.UUID{}, pgtype.UUID{}, fmt.Errorf("%w: NDA document not found: %s", ErrInvalidPermission, documentIDStr)
-				}
-				return pgtype.UUID{}, pgtype.UUID{}, fmt.Errorf("get NDA document: %w", derr)
+			return pgtype.UUID{}, pgtype.UUID{}, fmt.Errorf("get NDA document: %w", derr)
+		}
+		existing, gerr := qtx.GetNDATemplateBySourceDocument(ctx, db.GetNDATemplateBySourceDocumentParams{
+			WorkspaceID:      workspaceID,
+			SourceDocumentID: docPG,
+		})
+		if gerr == nil {
+			tpl = existing
+		} else if errors.Is(gerr, pgx.ErrNoRows) {
+			name := strings.TrimSpace(doc.Title)
+			if name == "" {
+				name = "NDA Agreement"
 			}
-			existing, gerr := qtx.GetNDATemplateBySourceDocument(ctx, db.GetNDATemplateBySourceDocumentParams{
-				WorkspaceID:      workspaceID,
-				SourceDocumentID: docPG,
+			tpl, err = qtx.CreateNDATemplate(ctx, db.CreateNDATemplateParams{
+				TenantID:          tenantID,
+				WorkspaceID:       workspaceID,
+				Name:              name,
+				SourceDocumentID:  docPG,
+				ContentSha256:     "",
+				RequireSignerName: true,
+				Status:            "active",
+				CreatedBy:         createdBy,
 			})
-			if gerr == nil {
-				tpl = existing
-			} else if errors.Is(gerr, pgx.ErrNoRows) {
-				name := strings.TrimSpace(doc.Title)
-				if name == "" {
-					name = "NDA Agreement"
-				}
-				tpl, err = qtx.CreateNDATemplate(ctx, db.CreateNDATemplateParams{
-					TenantID:          tenantID,
-					WorkspaceID:       workspaceID,
-					Name:              name,
-					SourceDocumentID:  docPG,
-					ContentSha256:     "",
-					RequireSignerName: true,
-					Status:            "active",
-					CreatedBy:         createdBy,
-				})
-				if err != nil {
-					return pgtype.UUID{}, pgtype.UUID{}, fmt.Errorf("create NDA template: %w", err)
-				}
-			} else {
-				return pgtype.UUID{}, pgtype.UUID{}, fmt.Errorf("get NDA template by document: %w", gerr)
+			if err != nil {
+				return pgtype.UUID{}, pgtype.UUID{}, fmt.Errorf("create NDA template: %w", err)
 			}
 		} else {
-			tpl, err = s.ndaSvc.EnsureTemplateFromDocument(ctx, tenantID, workspaceID, documentIDStr, createdBy, "")
-			if err != nil {
-				return pgtype.UUID{}, pgtype.UUID{}, fmt.Errorf("%w: %v", ErrInvalidPermission, err)
-			}
+			return pgtype.UUID{}, pgtype.UUID{}, fmt.Errorf("get NDA template by document: %w", gerr)
+		}
+	} else {
+		tpl, err = s.ndaSvc.EnsureTemplateFromDocument(ctx, tenantID, workspaceID, documentIDStr, createdBy, "")
+		if err != nil {
+			return pgtype.UUID{}, pgtype.UUID{}, fmt.Errorf("%w: %v", ErrInvalidPermission, err)
 		}
 	}
 
@@ -1607,11 +1614,14 @@ func (s *Service) resolveNdaBinding(
 
 // resolveNdaDocumentID is retained for tests; prefer resolveNdaBinding.
 // ListDealRoomLinks returns active share links for a deal room.
-func (s *Service) ListDealRoomLinks(ctx context.Context, workspaceID, dealRoomID string) ([]db.Link, error) {
+func (s *Service) ListDealRoomLinks(ctx context.Context, userID, workspaceID, dealRoomID string) ([]db.Link, error) {
+	if _, err := s.requireDealRoomView(ctx, userID, workspaceID, dealRoomID); err != nil {
+		return nil, err
+	}
 	workspaceUUID := pgUUID(workspaceID)
 	drUUID, err := uuid.Parse(dealRoomID)
 	if err != nil {
-		return nil, errors.New("invalid data room id")
+		return nil, ErrDealRoomNotFound
 	}
 	return s.queries.ListLinksByDealRoom(ctx, db.ListLinksByDealRoomParams{
 		WorkspaceID: workspaceUUID,
@@ -1692,11 +1702,14 @@ func normalizeDealRoomLinksQuery(query string) string {
 // ListDealRoomLinksPage returns a filtered/sorted page of deal-room share links.
 func (s *Service) ListDealRoomLinksPage(
 	ctx context.Context,
-	workspaceID, dealRoomID string,
+	userID, workspaceID, dealRoomID string,
 	page, pageSize int,
 	sortAsc bool,
 	query string,
 ) (DealRoomLinksPage, error) {
+	if _, err := s.requireDealRoomView(ctx, userID, workspaceID, dealRoomID); err != nil {
+		return DealRoomLinksPage{}, err
+	}
 	workspaceUUID := pgUUID(workspaceID)
 	drUUID, err := uuid.Parse(dealRoomID)
 	if err != nil {
@@ -2306,7 +2319,7 @@ func (s *Service) ResolveInviteToken(ctx context.Context, token string) (LinkInv
 
 // RevokeInvitation revokes an invitation and optionally removes the email from
 // the link's allow list.
-func (s *Service) RevokeInvitation(ctx context.Context, workspaceID, invitationID string, removeFromAllowList bool) error {
+func (s *Service) RevokeInvitation(ctx context.Context, workspaceID, linkID, invitationID string, removeFromAllowList bool) error {
 	id, err := uuid.Parse(invitationID)
 	if err != nil {
 		return errors.New("invalid invitation id")
@@ -2319,8 +2332,10 @@ func (s *Service) RevokeInvitation(ctx context.Context, workspaceID, invitationI
 		}
 		return fmt.Errorf("get invitation: %w", err)
 	}
-	// Verify link belongs to workspace.
-	if _, err := s.GetByID(ctx, uuid.UUID(inv.LinkID.Bytes).String(), workspaceID); err != nil {
+	if uuid.UUID(inv.LinkID.Bytes).String() != linkID {
+		return ErrNotFoundInWorkspace
+	}
+	if _, err := s.GetByID(ctx, linkID, workspaceID); err != nil {
 		return err
 	}
 
@@ -2683,14 +2698,15 @@ func (s *Service) notifyLinkAccessRequest(ctx context.Context, link db.Link, lin
 	}
 }
 
-// ListAccessRequests returns access requests for a link. Non-creators receive an
-// empty list (no email leakage); approve/reject remain creator-gated separately.
+// ListAccessRequests returns access requests for a link. Callers who cannot
+// review receive an empty list (no email leakage); approve/reject stay gated
+// separately. Document links are creator-only; deal-room links use NeedManage.
 func (s *Service) ListAccessRequests(ctx context.Context, workspaceID, linkID, reviewerID string) ([]LinkAccessRequest, error) {
 	link, err := s.GetByID(ctx, linkID, workspaceID)
 	if err != nil {
 		return nil, err
 	}
-	if !link.CreatedBy.Valid || uuid.UUID(link.CreatedBy.Bytes).String() != reviewerID {
+	if !canReviewLinkRequests(ctx, s.queries, link, reviewerID) {
 		return []LinkAccessRequest{}, nil
 	}
 	id, err := uuid.Parse(linkID)
@@ -2724,7 +2740,9 @@ const (
 )
 
 // ListPendingAccessRequests returns pending visitor access requests the reviewer
-// can act on (links they created), scoped to a single product surface.
+// can act on, scoped to a single product surface. Document inbox stays
+// creator-only. Deal-room inbox is NeedManage (room owner/admin see all room
+// links; oversight and other roles get an empty list, not an error).
 func (s *Service) ListPendingAccessRequests(ctx context.Context, workspaceID, reviewerID string, scope PendingInboxScope) ([]PendingLinkAccessRequest, error) {
 	wsUUID, err := uuid.Parse(workspaceID)
 	if err != nil {
@@ -2767,9 +2785,14 @@ func (s *Service) ListPendingAccessRequests(ctx context.Context, workspaceID, re
 			}
 			return nil, fmt.Errorf("get data room: %w", gerr)
 		}
+		if _, rerr := roomacl.Require(ctx, s.queries, wsPG, pgtype.UUID{Bytes: roomUUID, Valid: true}, reviewerID, roomacl.NeedManage); rerr != nil {
+			if errors.Is(rerr, roomacl.ErrDenied) || errors.Is(rerr, roomacl.ErrNotAdmin) {
+				return []PendingLinkAccessRequest{}, nil
+			}
+			return nil, rerr
+		}
 		rows, qerr := s.queries.ListPendingDealRoomLinkAccessRequestsDetailedByWorkspace(ctx, db.ListPendingDealRoomLinkAccessRequestsDetailedByWorkspaceParams{
 			WorkspaceID: wsPG,
-			CreatedBy:   reviewerPG,
 			DealRoomID:  pgtype.UUID{Bytes: roomUUID, Valid: true},
 		})
 		if qerr != nil {
@@ -2827,10 +2850,10 @@ func pendingFromDealRoomRow(r db.ListPendingDealRoomLinkAccessRequestsDetailedBy
 }
 
 // pendingAccessRequestForReview loads a pending request only when the link is in
-// workspaceID, the request belongs to that workspace+link, and reviewerID is the
-// link creator. Non-creator, cross-workspace, wrong-link, and missing IDs all
-// return ErrAccessRequestNotFound (opaque) so callers cannot probe existence or
-// ownership via status-code differences.
+// workspaceID, the request belongs to that workspace+link, and reviewerID may
+// review it (document: creator; deal-room: NeedManage). Non-reviewer,
+// cross-workspace, wrong-link, and missing IDs all return ErrAccessRequestNotFound
+// (opaque) so callers cannot probe existence or ownership via status-code differences.
 func (s *Service) pendingAccessRequestForReview(ctx context.Context, workspaceID, linkID, requestID, reviewerID string) (db.Link, db.LinkAccessRequest, error) {
 	link, err := s.GetByID(ctx, linkID, workspaceID)
 	if err != nil {
@@ -2839,7 +2862,7 @@ func (s *Service) pendingAccessRequestForReview(ctx context.Context, workspaceID
 		}
 		return db.Link{}, db.LinkAccessRequest{}, err
 	}
-	if !link.CreatedBy.Valid || uuid.UUID(link.CreatedBy.Bytes).String() != reviewerID {
+	if !canReviewLinkRequests(ctx, s.queries, link, reviewerID) {
 		return db.Link{}, db.LinkAccessRequest{}, ErrAccessRequestNotFound
 	}
 
@@ -3507,34 +3530,79 @@ func (s *Service) resolveLinkNDATemplate(ctx context.Context, link db.Link) (db.
 			ID:          link.NdaTemplateID,
 			WorkspaceID: link.WorkspaceID,
 		})
-		if err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
+		if err == nil {
+			if tpl.Status != "active" {
 				return db.NdaTemplate{}, ErrRequiresNDA
 			}
+			return tpl, nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
 			return db.NdaTemplate{}, fmt.Errorf("get NDA template: %w", err)
+		}
+	}
+	if !link.NdaDocumentID.Valid {
+		return db.NdaTemplate{}, ErrRequiresNDA
+	}
+	return s.ensureLinkNDATemplateFromDocument(ctx, link)
+}
+
+func (s *Service) ensureLinkNDATemplateFromDocument(ctx context.Context, link db.Link) (db.NdaTemplate, error) {
+	docID := uuid.UUID(link.NdaDocumentID.Bytes).String()
+	if s.ndaSvc != nil {
+		tpl, err := s.ndaSvc.EnsureTemplateFromDocument(ctx, link.TenantID, link.WorkspaceID, docID, link.CreatedBy, "")
+		if err != nil {
+			return db.NdaTemplate{}, ErrRequiresNDA
 		}
 		if tpl.Status != "active" {
 			return db.NdaTemplate{}, ErrRequiresNDA
 		}
 		return tpl, nil
 	}
-	if link.NdaDocumentID.Valid {
-		tpl, err := s.queries.GetNDATemplateBySourceDocument(ctx, db.GetNDATemplateBySourceDocumentParams{
+	existing, err := s.queries.GetNDATemplateBySourceDocument(ctx, db.GetNDATemplateBySourceDocumentParams{
+		WorkspaceID:      link.WorkspaceID,
+		SourceDocumentID: link.NdaDocumentID,
+	})
+	if err == nil {
+		if existing.Status != "active" {
+			return db.NdaTemplate{}, ErrRequiresNDA
+		}
+		return existing, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return db.NdaTemplate{}, fmt.Errorf("get NDA template by document: %w", err)
+	}
+	doc, derr := s.queries.GetDocumentByID(ctx, db.GetDocumentByIDParams{
+		ID:          link.NdaDocumentID,
+		WorkspaceID: link.WorkspaceID,
+	})
+	if derr != nil {
+		return db.NdaTemplate{}, ErrRequiresNDA
+	}
+	name := strings.TrimSpace(doc.Title)
+	if name == "" {
+		name = "NDA Agreement"
+	}
+	tpl, err := s.queries.CreateNDATemplate(ctx, db.CreateNDATemplateParams{
+		TenantID:          link.TenantID,
+		WorkspaceID:       link.WorkspaceID,
+		Name:              name,
+		SourceDocumentID:  link.NdaDocumentID,
+		ContentSha256:     "",
+		RequireSignerName: true,
+		Status:            "active",
+		CreatedBy:         link.CreatedBy,
+	})
+	if err != nil {
+		existing, gerr := s.queries.GetNDATemplateBySourceDocument(ctx, db.GetNDATemplateBySourceDocumentParams{
 			WorkspaceID:      link.WorkspaceID,
 			SourceDocumentID: link.NdaDocumentID,
 		})
-		if err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				return db.NdaTemplate{}, ErrRequiresNDA
-			}
-			return db.NdaTemplate{}, fmt.Errorf("get NDA template by document: %w", err)
+		if gerr == nil && existing.Status == "active" {
+			return existing, nil
 		}
-		if tpl.Status != "active" {
-			return db.NdaTemplate{}, ErrRequiresNDA
-		}
-		return tpl, nil
+		return db.NdaTemplate{}, ErrRequiresNDA
 	}
-	return db.NdaTemplate{}, ErrRequiresNDA
+	return tpl, nil
 }
 
 func (s *Service) sealAndNotifyNDA(ctx context.Context, link db.Link, tpl db.NdaTemplate, agreement db.LinkNdaAgreement, signerName, email, ua string) {
@@ -4458,11 +4526,13 @@ type LinkAnalytics struct {
 	AverageDurationSeconds float64         `json:"average_duration_seconds"`
 	RecentVisitors         []RecentVisitor `json:"recent_visitors"`
 	// RecentVisitorsHasMore is true when more visitors exist beyond the first page.
-	RecentVisitorsHasMore bool                `json:"recent_visitors_has_more"`
-	KeyPages              []KeyPage           `json:"key_pages"`
-	QARecords             []QARecord          `json:"qa_records"`
-	AskSummary            *LinkAskSummary     `json:"ask_summary,omitempty"`
-	AccessCodeContacts    []AccessCodeContact `json:"access_code_contacts"`
+	RecentVisitorsHasMore bool      `json:"recent_visitors_has_more"`
+	KeyPages              []KeyPage `json:"key_pages"`
+	// PageDurations is the full per-page dwell series (member-excluded).
+	PageDurations      []KeyPage           `json:"page_durations"`
+	QARecords          []QARecord          `json:"qa_records"`
+	AskSummary         *LinkAskSummary     `json:"ask_summary,omitempty"`
+	AccessCodeContacts []AccessCodeContact `json:"access_code_contacts"`
 	// AccessCodeContactsHasMore is true when more contacts exist beyond the first page.
 	AccessCodeContactsHasMore bool `json:"access_code_contacts_has_more"`
 	// AccessCodeFailedCount is the total failed deliveries (for nav badges).
@@ -4602,6 +4672,7 @@ func trimRecentVisitorsPage(rows []db.ListRecentVisitorsByLinkRow, limit int) ([
 
 // KeyPage is a page that received meaningful attention.
 type KeyPage struct {
+	DocumentID             string  `json:"document_id,omitempty"`
 	PageNumber             int     `json:"page_number"`
 	Views                  int64   `json:"views"`
 	AverageDurationSeconds float64 `json:"average_duration_seconds"`
@@ -4618,7 +4689,7 @@ type QARecord struct {
 const linkAnalyticsCacheTTL = 20 * time.Second
 
 func linkAnalyticsCacheKey(workspaceID, linkID string) string {
-	return fmt.Sprintf("links:analytics:v2:%s:%s", workspaceID, linkID)
+	return fmt.Sprintf("links:analytics:v6:%s:%s", workspaceID, linkID)
 }
 
 // GetLinkAnalytics returns aggregated access metrics for a link.
@@ -4654,6 +4725,7 @@ func (s *Service) GetLinkAnalytics(ctx context.Context, linkID, workspaceID stri
 		ViewsOverTime:      []DailyView{},
 		RecentVisitors:     []RecentVisitor{},
 		KeyPages:           []KeyPage{},
+		PageDurations:      []KeyPage{},
 		QARecords:          []QARecord{},
 		AccessCodeContacts: []AccessCodeContact{},
 	}
@@ -4697,11 +4769,33 @@ func (s *Service) GetLinkAnalytics(ctx context.Context, linkID, workspaceID stri
 	} else {
 		analytics.KeyPages = make([]KeyPage, 0, len(pages))
 		for _, p := range pages {
-			analytics.KeyPages = append(analytics.KeyPages, KeyPage{
+			kp := KeyPage{
 				PageNumber:             int(p.PageNumber),
 				Views:                  p.Views,
 				AverageDurationSeconds: p.AvgDurationSeconds,
-			})
+			}
+			if p.DocumentID.Valid {
+				kp.DocumentID = uuid.UUID(p.DocumentID.Bytes).String()
+			}
+			analytics.KeyPages = append(analytics.KeyPages, kp)
+		}
+	}
+
+	durations, err := s.queries.ListPageDurationsByLink(ctx, pgtype.UUID{Bytes: id, Valid: true})
+	if err != nil {
+		logger.ErrorCtx(ctx, "failed to list page durations", err)
+	} else {
+		analytics.PageDurations = make([]KeyPage, 0, len(durations))
+		for _, p := range durations {
+			kp := KeyPage{
+				PageNumber:             int(p.PageNumber),
+				Views:                  p.Views,
+				AverageDurationSeconds: p.AvgDurationSeconds,
+			}
+			if p.DocumentID.Valid {
+				kp.DocumentID = uuid.UUID(p.DocumentID.Bytes).String()
+			}
+			analytics.PageDurations = append(analytics.PageDurations, kp)
 		}
 	}
 
@@ -5770,8 +5864,8 @@ func (s *Service) ApproveUploadedFile(ctx context.Context, fileID pgtype.UUID, r
 	if !link.DealRoomID.Valid {
 		return fmt.Errorf("uploaded file approval requires a deal-room link")
 	}
-	if uuid.UUID(link.CreatedBy.Bytes) != uuid.UUID(reviewerID.Bytes) {
-		return fmt.Errorf("only the link creator can approve uploads")
+	if !canReviewLinkRequests(ctx, s.queries, link, uuid.UUID(reviewerID.Bytes).String()) {
+		return ErrLinkMutateForbidden
 	}
 
 	sourceType := mimeToSourceType(file.MimeType)
@@ -5984,8 +6078,8 @@ func (s *Service) RejectUploadedFile(ctx context.Context, fileID pgtype.UUID, re
 	if err != nil {
 		return fmt.Errorf("get link: %w", err)
 	}
-	if uuid.UUID(link.CreatedBy.Bytes) != uuid.UUID(reviewerID.Bytes) {
-		return fmt.Errorf("only the link creator can reject uploads")
+	if !canReviewLinkRequests(ctx, s.queries, link, uuid.UUID(reviewerID.Bytes).String()) {
+		return ErrLinkMutateForbidden
 	}
 	return s.releasePendingUploadedFile(ctx, file, "rejected", reviewerID)
 }

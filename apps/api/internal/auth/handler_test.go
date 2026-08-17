@@ -1,12 +1,16 @@
 package auth
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/turnstile"
 	"github.com/gin-gonic/gin"
 )
 
@@ -127,5 +131,307 @@ func TestClearAuthCookies(t *testing.T) {
 		if ck.MaxAge != -1 || ck.Value != "" {
 			t.Fatalf("cookie %s was not cleared: MaxAge=%d Value=%q", ck.Name, ck.MaxAge, ck.Value)
 		}
+	}
+}
+
+type stubCaptcha struct {
+	enabled bool
+	siteKey string
+	err     error
+	token   string
+	ip      string
+}
+
+func (s *stubCaptcha) Enabled() bool   { return s.enabled }
+func (s *stubCaptcha) SiteKey() string { return s.siteKey }
+func (s *stubCaptcha) Verify(_ context.Context, token, remoteIP string) error {
+	s.token = token
+	s.ip = remoteIP
+	return s.err
+}
+
+func TestCaptchaReturnsSiteKey(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := NewHandler(nil, &config.Config{AppEnv: "development"})
+	h.SetTurnstile(&stubCaptcha{enabled: true, siteKey: "1x00000000000000000000AA"})
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/auth/captcha", nil)
+	h.Captcha(c)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "1x00000000000000000000AA") {
+		t.Fatalf("body=%s", w.Body.String())
+	}
+}
+
+func TestRegisterRequiresCaptchaWhenEnabled(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := NewHandler(NewService(nil, NewMemoryTokenStore()), &config.Config{AppEnv: "development"})
+	h.SetTurnstile(&stubCaptcha{enabled: true, siteKey: "site", err: turnstile.ErrMissing})
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/auth/register", strings.NewReader(`{"email":"a@example.com","password":"Password123!"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	h.Register(c)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "captcha_required") {
+		t.Fatalf("body=%s", w.Body.String())
+	}
+}
+
+func TestRegisterCaptchaUnavailable(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := NewHandler(NewService(nil, NewMemoryTokenStore()), &config.Config{AppEnv: "development"})
+	h.SetTurnstile(&stubCaptcha{enabled: true, siteKey: "site", err: turnstile.ErrUnavailable})
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/auth/register", strings.NewReader(`{"email":"a@example.com","password":"Password123!","turnstile_token":"tok"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	h.Register(c)
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "captcha_unavailable") {
+		t.Fatalf("body=%s", w.Body.String())
+	}
+}
+
+func testHandler(autoVerify bool) *Handler {
+	svc, _, _, _ := testAuthService(autoVerify)
+	return NewHandler(svc, &config.Config{AppEnv: "development"})
+}
+
+func TestRegisterOmitsCookiesWhenVerificationRequired(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := testHandler(false)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/auth/register", strings.NewReader(`{"email":"a@example.com","password":"Password123!"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	h.Register(c)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"verification_required":true`) {
+		t.Fatalf("body=%s", w.Body.String())
+	}
+	for _, ck := range w.Result().Cookies() {
+		if ck.Name == accessTokenCookie && ck.Value != "" {
+			t.Fatalf("register must not set access cookie: %+v", ck)
+		}
+	}
+}
+
+func TestLoginUnverifiedReturns403(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := testHandler(false)
+	_, err := h.service.Register(context.Background(), "a@example.com", "Password123!")
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/auth/login", strings.NewReader(`{"email":"a@example.com","password":"Password123!"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	h.Login(c)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "email_not_verified") {
+		t.Fatalf("body=%s", w.Body.String())
+	}
+	for _, ck := range w.Result().Cookies() {
+		if ck.Name == accessTokenCookie && ck.Value != "" {
+			t.Fatalf("unverified login must not set cookies: %+v", ck)
+		}
+	}
+}
+
+func TestResendVerificationAlwaysOK(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := testHandler(false)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/auth/resend-verification", strings.NewReader(`{"email":"missing@example.com"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	h.ResendVerification(c)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestResendVerificationRequiresCaptchaWhenEnabled(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := testHandler(false)
+	h.SetTurnstile(&stubCaptcha{enabled: true, siteKey: "site", err: turnstile.ErrMissing})
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/auth/resend-verification", strings.NewReader(`{"email":"a@example.com"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	h.ResendVerification(c)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "captcha_required") {
+		t.Fatalf("body=%s", w.Body.String())
+	}
+}
+
+func TestVerifyEmailPOSTSetsCookies(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := testHandler(false)
+	result, err := h.service.Register(context.Background(), "a@example.com", "Password123!")
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := h.service.verifyStore.CreateVerificationToken(context.Background(), result.User.ID, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/auth/verify-email", strings.NewReader(`{"token":"`+token+`"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	h.VerifyEmail(c)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	var access *http.Cookie
+	for _, ck := range w.Result().Cookies() {
+		if ck.Name == accessTokenCookie {
+			access = ck
+		}
+	}
+	if access == nil || access.Value == "" {
+		t.Fatal("verify must set access cookie")
+	}
+}
+
+func TestRefreshUnverifiedClearsCookies(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := testHandler(false)
+	result, err := h.service.Register(context.Background(), "a@example.com", "Password123!")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pair, err := GenerateTokenPair(result.User.ID, accessTokenDuration, refreshTokenDuration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.service.tokenStore.StoreRefreshToken(context.Background(), result.User.ID, pair.RefreshToken, refreshTokenDuration); err != nil {
+		t.Fatal(err)
+	}
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/auth/refresh", strings.NewReader(`{"refresh_token":"`+pair.RefreshToken+`"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	h.Refresh(c)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	cleared := false
+	for _, ck := range w.Result().Cookies() {
+		if ck.Name == accessTokenCookie && ck.MaxAge == -1 {
+			cleared = true
+		}
+	}
+	if !cleared {
+		t.Fatal("refresh must clear cookies for unverified subject")
+	}
+}
+
+func TestForgotPasswordAlwaysOK(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := testHandler(false)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/auth/forgot-password", strings.NewReader(`{"email":"missing@example.com"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	h.ForgotPassword(c)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestForgotPasswordRequiresCaptchaWhenEnabled(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := testHandler(false)
+	h.SetTurnstile(&stubCaptcha{enabled: true, siteKey: "site", err: turnstile.ErrMissing})
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/auth/forgot-password", strings.NewReader(`{"email":"a@example.com"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	h.ForgotPassword(c)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "captcha_required") {
+		t.Fatalf("body=%s", w.Body.String())
+	}
+}
+
+func TestResetPasswordDoesNotSetCookies(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	svc, accounts, mail, _ := testAuthService(false)
+	h := NewHandler(svc, &config.Config{AppEnv: "development"})
+	seedVerified(t, accounts, "user@example.com", "OldPass123!")
+	svc.ForgotPassword(context.Background(), "user@example.com")
+	waitForMail(t, mail)
+	token := mail.lastLink[strings.LastIndex(mail.lastLink, "/")+1:]
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/auth/reset-password", strings.NewReader(`{"token":"`+token+`","password":"NewPass123!"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	h.ResetPassword(c)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	for _, ck := range w.Result().Cookies() {
+		if (ck.Name == accessTokenCookie || ck.Name == refreshTokenCookie || ck.Name == authSessionCookie) && ck.Value != "" && ck.MaxAge != -1 {
+			t.Fatalf("reset must not set session cookies: %+v", ck)
+		}
+	}
+}
+
+func TestResetPasswordWeakPassword(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	svc, accounts, mail, _ := testAuthService(false)
+	h := NewHandler(svc, &config.Config{AppEnv: "development"})
+	seedVerified(t, accounts, "user@example.com", "OldPass123!")
+	svc.ForgotPassword(context.Background(), "user@example.com")
+	waitForMail(t, mail)
+	token := mail.lastLink[strings.LastIndex(mail.lastLink, "/")+1:]
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/auth/reset-password", strings.NewReader(`{"token":"`+token+`","password":"short"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	h.ResetPassword(c)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "weak_password") {
+		t.Fatalf("body=%s", w.Body.String())
+	}
+}
+
+func TestResetPasswordInvalidToken(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := testHandler(false)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/auth/reset-password", strings.NewReader(`{"token":"missing","password":"NewPass123!"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	h.ResetPassword(c)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "invalid_or_expired_token") {
+		t.Fatalf("body=%s", w.Body.String())
 	}
 }

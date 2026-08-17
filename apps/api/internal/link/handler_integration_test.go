@@ -86,7 +86,8 @@ func TestDocumentsForAccessResponse_DealRoomScope(t *testing.T) {
 
 	t.Run("empty allowlist exposes no documents", func(t *testing.T) {
 		link, err := f.svc.CreateDealRoomLink(ctx, userID, wsID, roomID, DealRoomLinkRequest{
-			Name: "Empty allowlist",
+			Name:            "Empty allowlist",
+			FolderScopeMode: FolderScopeModeAllowlist,
 		})
 		if err != nil {
 			t.Fatalf("create empty allowlist link: %v", err)
@@ -195,7 +196,8 @@ func TestVerifyLinkDocumentAccess_DealRoomScope(t *testing.T) {
 	}
 
 	emptyAllowlistLink, err := f.svc.CreateDealRoomLink(ctx, userID, wsID, roomID, DealRoomLinkRequest{
-		Name: "Empty allowlist",
+		Name:            "Empty allowlist",
+		FolderScopeMode: FolderScopeModeAllowlist,
 	})
 	if err != nil {
 		t.Fatalf("create empty allowlist link: %v", err)

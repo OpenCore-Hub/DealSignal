@@ -142,7 +142,7 @@ type scenarioPackKPIInput struct {
 	Links                []db.Link
 	KeyPageViewsByLink   map[string]int64
 	LinkHeatLevel        map[string]string
-	Signals              []db.Signal
+	PendingActionLinkIDs []string // one entry per pending action that resolves to a link
 	ForwardSignalsByLink map[string]int64
 }
 
@@ -198,11 +198,8 @@ func (s *Service) buildScenarioPackInsights(
 	}
 
 	var openSignals int
-	for _, sig := range in.Signals {
-		if !sig.LinkID.Valid {
-			continue
-		}
-		if _, ok := dominantLinks[uuid.UUID(sig.LinkID.Bytes).String()]; ok {
+	for _, linkID := range in.PendingActionLinkIDs {
+		if _, ok := dominantLinks[linkID]; ok {
 			openSignals++
 		}
 	}

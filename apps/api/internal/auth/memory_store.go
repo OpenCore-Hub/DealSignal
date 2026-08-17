@@ -2,6 +2,9 @@ package auth
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"strings"
 	"sync"
@@ -16,9 +19,16 @@ type MemoryTokenStore struct {
 	blocklist          map[string]time.Time
 	refreshTokens      map[string]time.Time
 	verificationTokens map[string]verificationEntry
+	resetTokens        map[string]resetEntry
+	resetByUser        map[string]string
 }
 
 type verificationEntry struct {
+	userID string
+	exp    time.Time
+}
+
+type resetEntry struct {
 	userID string
 	exp    time.Time
 }
@@ -30,6 +40,8 @@ func NewMemoryTokenStore() *MemoryTokenStore {
 		blocklist:          make(map[string]time.Time),
 		refreshTokens:      make(map[string]time.Time),
 		verificationTokens: make(map[string]verificationEntry),
+		resetTokens:        make(map[string]resetEntry),
+		resetByUser:        make(map[string]string),
 	}
 	go s.cleanupExpired()
 	return s
@@ -55,6 +67,14 @@ func (m *MemoryTokenStore) cleanupExpired() {
 		for k, e := range m.verificationTokens {
 			if now.After(e.exp) {
 				delete(m.verificationTokens, k)
+			}
+		}
+		for hash, e := range m.resetTokens {
+			if now.After(e.exp) {
+				delete(m.resetTokens, hash)
+				if m.resetByUser[e.userID] == hash {
+					delete(m.resetByUser, e.userID)
+				}
 			}
 		}
 		m.mu.Unlock()
@@ -146,4 +166,52 @@ func (m *MemoryTokenStore) DeleteVerificationToken(ctx context.Context, token st
 	defer m.mu.Unlock()
 	delete(m.verificationTokens, token)
 	return nil
+}
+
+func newPasswordResetToken() (raw, hash string, err error) {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return "", "", err
+	}
+	raw = hex.EncodeToString(buf)
+	return raw, hashPasswordResetToken(raw), nil
+}
+
+func hashPasswordResetToken(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
+}
+
+// CreatePasswordResetToken mints a high-entropy token, stores only its hash,
+// and invalidates any previous unused reset token for the same user.
+func (m *MemoryTokenStore) CreatePasswordResetToken(ctx context.Context, userID string, ttl time.Duration) (string, error) {
+	raw, hash, err := newPasswordResetToken()
+	if err != nil {
+		return "", err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if old, ok := m.resetByUser[userID]; ok {
+		delete(m.resetTokens, old)
+	}
+	m.resetTokens[hash] = resetEntry{userID: userID, exp: time.Now().Add(ttl)}
+	m.resetByUser[userID] = hash
+	return raw, nil
+}
+
+// ConsumePasswordResetToken resolves and deletes a one-time reset token.
+func (m *MemoryTokenStore) ConsumePasswordResetToken(ctx context.Context, token string) (string, error) {
+	hash := hashPasswordResetToken(token)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	entry, ok := m.resetTokens[hash]
+	if !ok || time.Now().After(entry.exp) {
+		delete(m.resetTokens, hash)
+		return "", errors.New("invalid or expired token")
+	}
+	delete(m.resetTokens, hash)
+	if m.resetByUser[entry.userID] == hash {
+		delete(m.resetByUser, entry.userID)
+	}
+	return entry.userID, nil
 }

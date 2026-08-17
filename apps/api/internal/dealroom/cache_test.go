@@ -141,9 +141,94 @@ func TestListRoomsPageSlicesCachedList(t *testing.T) {
 	}
 }
 
+func TestListRoomsForUserFiltersCachedWorkspaceList(t *testing.T) {
+	t.Setenv("ROOM_LIST_SCOPED", "1")
+	fake := newFakeDB(t)
+	cache := newMemoryListCache()
+	svc := NewService(db.New(fake), nil, testCfg(), WithListCache(cache))
+	ownerID := uuid.NewString()
+	memberID := uuid.NewString()
+	outsiderID := uuid.NewString()
+	wsID := uuid.NewString()
+	wsUUID := pgUUID(wsID)
+	fake.workspace = db.Workspace{
+		ID:       wsUUID,
+		TenantID: pgUUID(uuid.NewString()),
+		Name:     "Scoped Cache Workspace",
+		Slug:     "scoped-cache-workspace",
+	}
+	fake.workspaceMembers = []db.WorkspaceMember{
+		{WorkspaceID: wsUUID, UserID: pgUUID(ownerID), Role: "owner", JoinedAt: nowTs()},
+		{WorkspaceID: wsUUID, UserID: pgUUID(memberID), Role: "member", JoinedAt: nowTs()},
+		{WorkspaceID: wsUUID, UserID: pgUUID(outsiderID), Role: "member", JoinedAt: nowTs()},
+	}
+
+	visible, err := svc.CreateRoom(context.Background(), ownerID, wsID, CreateRoomRequest{
+		Slug: "visible-room",
+		Name: "Visible Room",
+	})
+	if err != nil {
+		t.Fatalf("create visible room: %v", err)
+	}
+	if _, err := svc.CreateRoom(context.Background(), ownerID, wsID, CreateRoomRequest{
+		Slug: "hidden-room",
+		Name: "Hidden Room",
+	}); err != nil {
+		t.Fatalf("create hidden room: %v", err)
+	}
+
+	fake.members = append(fake.members, db.RoomMember{
+		ID:          newPGUUID(),
+		TenantID:    fake.workspace.TenantID,
+		WorkspaceID: wsUUID,
+		RoomID:      visible.ID,
+		Email:       "member@example.com",
+		UserID:      pgUUID(memberID),
+		Role:        "guest",
+		Status:      "active",
+		CreatedAt:   nowTs(),
+		UpdatedAt:   nowTs(),
+	})
+
+	all, err := svc.ListRooms(context.Background(), wsID)
+	if err != nil {
+		t.Fatalf("list rooms: %v", err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("workspace cache must hold 2 rooms, got %d", len(all))
+	}
+
+	leaked, err := svc.ListRoomsForUser(context.Background(), wsID, outsiderID)
+	if err != nil {
+		t.Fatalf("list for unjoined member: %v", err)
+	}
+	if len(leaked) != 0 {
+		t.Fatalf("cached full list must not leak unjoined rooms, got %d", len(leaked))
+	}
+
+	scoped, err := svc.ListRoomsForUser(context.Background(), wsID, memberID)
+	if err != nil {
+		t.Fatalf("list for invited member: %v", err)
+	}
+	if len(scoped) != 1 {
+		t.Fatalf("invited member should see 1 room, got %d", len(scoped))
+	}
+	if scoped[0].Room.ID.Bytes != visible.ID.Bytes {
+		t.Fatal("invited member listed unexpected room")
+	}
+
+	oversight, err := svc.ListRoomsForUser(context.Background(), wsID, ownerID)
+	if err != nil {
+		t.Fatalf("list for workspace owner: %v", err)
+	}
+	if len(oversight) != 2 {
+		t.Fatalf("workspace owner should see cached full list, got %d", len(oversight))
+	}
+}
+
 func TestListCacheKeyStable(t *testing.T) {
 	ws := uuid.NewString()
-	if listCacheKey(ws) != "dealrooms:list:v2:"+ws {
+	if listCacheKey(ws) != "dealrooms:list:v8:"+ws {
 		t.Fatalf("unexpected cache key: %s", listCacheKey(ws))
 	}
 }

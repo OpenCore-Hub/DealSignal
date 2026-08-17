@@ -70,4 +70,58 @@ func TestFormatKeyPageBody(t *testing.T) {
 			t.Fatalf("body missing %q:\n%s", want, body)
 		}
 	}
+	if strings.Contains(body, "Document:") {
+		t.Fatalf("solo body must omit Document line:\n%s", body)
+	}
+
+	bundle := formatEventBody(Event{
+		EventType: "key_page",
+		LinkID:    "link-1",
+		Metadata: map[string]string{
+			"page_title":       "财务模型",
+			"document_title":   "Memo.pdf",
+			"page_number":      "8",
+			"duration_seconds": "15",
+		},
+	})
+	for _, want := range []string{"Document: Memo.pdf", "财务模型", "8"} {
+		if !strings.Contains(bundle, want) {
+			t.Fatalf("bundle body missing %q:\n%s", want, bundle)
+		}
+	}
+}
+
+func TestMergeNotificationBodySkipsMachineKeys(t *testing.T) {
+	existing := "Sensitive page viewed\nPage: Cover"
+	got := mergeNotificationBody(existing, map[string]string{
+		"page_title":             "财务模型",
+		"document_title":         "Memo.pdf",
+		"document_id":            "22222222-2222-2222-2222-222222222222",
+		"page_number":            "8",
+		"duration_seconds":       "15",
+		"category":               "financials",
+		"engaged_key_page_views": "2",
+		"circle":                 "founder",
+	})
+	for _, want := range []string{
+		"Additional activity",
+		"Page: 财务模型",
+		"Document: Memo.pdf",
+		"Page #: 8",
+		"Dwell: 15s",
+		"Category: financials",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("merged body missing %q:\n%s", want, got)
+		}
+	}
+	for _, banned := range []string{"document_id", "22222222", "engaged_key_page_views", "circle"} {
+		if strings.Contains(got, banned) {
+			t.Fatalf("merged body must omit %q:\n%s", banned, got)
+		}
+	}
+
+	if got := mergeNotificationBody(existing, map[string]string{"document_id": "abc"}); got != existing {
+		t.Fatalf("machine-only metadata must not append a section, got %q", got)
+	}
 }

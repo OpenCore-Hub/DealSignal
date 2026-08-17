@@ -3,7 +3,6 @@ package link
 import (
 	"context"
 	"errors"
-	"strings"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/dealroom"
@@ -11,12 +10,8 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-// documentStatusArchived is the library archive status. Visitors must not see
-// or fetch assets for documents in this state (Access list + asset gates).
-const documentStatusArchived = "archived"
-
 func isArchivedDocumentStatus(status string) bool {
-	return strings.EqualFold(strings.TrimSpace(status), documentStatusArchived)
+	return dealroom.IsArchivedDocumentStatus(status)
 }
 
 // ErrLockedFolderScope is returned when a share link allowlist includes a locked folder.

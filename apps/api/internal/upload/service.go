@@ -45,7 +45,8 @@ func errIfAgreementNotPDF(category, sourceType string) error {
 	return nil
 }
 
-// ExistingDocumentError indicates a non-deleted document with the same title already exists.
+// ExistingDocumentError indicates a live (non-archived, non-deleted) document
+// already uses this title.
 type ExistingDocumentError struct {
 	ID    string
 	Title string
@@ -72,8 +73,9 @@ type Beginner interface {
 
 // DocumentDeleteImpact summarizes dependents revoked/detached on library delete.
 type DocumentDeleteImpact struct {
-	ActiveLinkCount int64 `json:"active_link_count"`
-	DealRoomCount   int64 `json:"deal_room_count"`
+	ActiveLinkCount  int64 `json:"active_link_count"`
+	RevokedLinkCount int64 `json:"revoked_link_count"`
+	DealRoomCount    int64 `json:"deal_room_count"`
 }
 
 // ParkedLinkResolver is notified when library archive/delete parks share links
@@ -168,8 +170,9 @@ func NormalizeUploadFilename(name string) string {
 	return base
 }
 
-// LookupLiveByTitle reports whether a non-deleted document already uses this
-// filename in the workspace. It does not read or write object storage.
+// LookupLiveByTitle reports whether a live (non-archived, non-deleted) document
+// already uses this filename in the workspace. Archived overwrite snapshots
+// and library-archived rows do not count. It does not read or write object storage.
 func (s *Service) LookupLiveByTitle(ctx context.Context, workspaceID, filename string) (exists bool, id, title string, err error) {
 	title = NormalizeUploadFilename(filename)
 	if title == "" {
@@ -401,14 +404,48 @@ func replacedSnapshotTitle(original string, at time.Time, nonce string) string {
 	return stem + " (" + suffix + ")" + ext
 }
 
-func uniqueReplacedSnapshotTitle(ctx context.Context, q *db.Queries, workspaceID pgtype.UUID, original string) (string, error) {
+func uniqueReplacedSnapshotTitle(ctx context.Context, q documentTitleAnyLookup, workspaceID pgtype.UUID, original string) (string, error) {
 	now := time.Now().UTC()
-	candidates := []string{
+	return firstUnusedDocumentTitle(ctx, q, workspaceID, []string{
 		replacedSnapshotTitle(original, now, ""),
 		replacedSnapshotTitle(original, now, uuid.NewString()[:8]),
+	}, replacedSnapshotTitle(original, now, uuid.NewString()))
+}
+
+func restoredDocumentTitle(original string, at time.Time, nonce string) string {
+	ext := filepath.Ext(original)
+	stem := strings.TrimSuffix(original, ext)
+	if stem == "" {
+		stem = "document"
 	}
+	suffix := "restored " + at.UTC().Format("20060102-150405")
+	if nonce != "" {
+		suffix = suffix + "-" + nonce
+	}
+	return stem + " (" + suffix + ")" + ext
+}
+
+func uniqueRestoredTitle(ctx context.Context, q documentTitleAnyLookup, workspaceID pgtype.UUID, original string) (string, error) {
+	now := time.Now().UTC()
+	return firstUnusedDocumentTitle(ctx, q, workspaceID, []string{
+		restoredDocumentTitle(original, now, ""),
+		restoredDocumentTitle(original, now, uuid.NewString()[:8]),
+	}, restoredDocumentTitle(original, now, uuid.NewString()))
+}
+
+type documentTitleAnyLookup interface {
+	GetDocumentByTitleInWorkspaceAny(ctx context.Context, arg db.GetDocumentByTitleInWorkspaceAnyParams) (db.GetDocumentByTitleInWorkspaceAnyRow, error)
+}
+
+func firstUnusedDocumentTitle(
+	ctx context.Context,
+	q documentTitleAnyLookup,
+	workspaceID pgtype.UUID,
+	candidates []string,
+	fallback string,
+) (string, error) {
 	for _, title := range candidates {
-		_, err := q.GetDocumentByTitleInWorkspace(ctx, db.GetDocumentByTitleInWorkspaceParams{
+		_, err := q.GetDocumentByTitleInWorkspaceAny(ctx, db.GetDocumentByTitleInWorkspaceAnyParams{
 			WorkspaceID: workspaceID,
 			Title:       title,
 		})
@@ -416,10 +453,10 @@ func uniqueReplacedSnapshotTitle(ctx context.Context, q *db.Queries, workspaceID
 			return title, nil
 		}
 		if err != nil {
-			return "", fmt.Errorf("lookup snapshot title: %w", err)
+			return "", fmt.Errorf("lookup document title: %w", err)
 		}
 	}
-	return replacedSnapshotTitle(original, now, uuid.NewString()), nil
+	return fallback, nil
 }
 
 func (s *Service) replaceExistingDocument(
@@ -555,7 +592,9 @@ func documentFromReplace(d db.ReplaceDocumentFileRow) Document {
 }
 
 // GetDocumentDeleteImpact returns live share-link and deal-room dependents.
-// Link count matches plan inventory (active and not past-due).
+// ActiveLinkCount is membership (shares that contain the document).
+// RevokedLinkCount is shares archive/delete will actually park or revoke.
+// Link counts match plan inventory (active and not past-due).
 func (s *Service) GetDocumentDeleteImpact(ctx context.Context, workspaceID, documentID string) (DocumentDeleteImpact, error) {
 	ws := pgUUID(workspaceID)
 	docID := pgUUID(documentID)
@@ -576,15 +615,19 @@ func (s *Service) GetDocumentDeleteImpact(ctx context.Context, workspaceID, docu
 		return DocumentDeleteImpact{}, err
 	}
 	return DocumentDeleteImpact{
-		ActiveLinkCount: row.ActiveLinkCount,
-		DealRoomCount:   row.DealRoomCount,
+		ActiveLinkCount:  row.ActiveLinkCount,
+		RevokedLinkCount: row.RevokedLinkCount,
+		DealRoomCount:    row.DealRoomCount,
 	}, nil
 }
 
-// ArchiveDocument parks a ready document and archives its live document-primary
-// (and orphan scoped) share links under the billing lock so plan link inventory
-// frees while the library archive remains reversible via UnarchiveDocument.
-// Unarchive does not auto-renew links — owners renew/reactivate explicitly.
+// ArchiveDocument parks a ready document. Visitor access to that document is
+// revoked on existing shares (listAuthorizedDocuments). The share itself stays
+// active when another live member remains. links.document_id is left unchanged
+// so S1 NULL page_views keep attributing to the original primary (page_views
+// partitions are append-only and cannot be restamped). The share is parked
+// (quota frees) only when no live member remains. Unarchive does not
+// auto-renew parked links — owners renew explicitly.
 func (s *Service) ArchiveDocument(ctx context.Context, workspaceID, tenantID, documentID string) error {
 	ws := pgUUID(workspaceID)
 	docID := pgUUID(documentID)
@@ -606,6 +649,9 @@ func (s *Service) ArchiveDocument(ctx context.Context, workspaceID, tenantID, do
 			if doc.Status == "archived" {
 				return nil
 			}
+			if doc.Status != "ready" {
+				return nil
+			}
 			if err := q.ArchiveDocument(ctx, db.ArchiveDocumentParams{
 				ID:          docID,
 				WorkspaceID: ws,
@@ -613,21 +659,16 @@ func (s *Service) ArchiveDocument(ctx context.Context, workspaceID, tenantID, do
 			}); err != nil {
 				return fmt.Errorf("archive document: %w", err)
 			}
-			primary, err := q.ArchiveActiveLinksByDocument(ctx, db.ArchiveActiveLinksByDocumentParams{
+			// Keep links.document_id stable. page_views is append-only; rebinding
+			// would move S1 NULL attribution onto the next live member.
+			ids, err := q.ArchiveActiveLinksWithNoLiveMembersForDocument(ctx, db.ArchiveActiveLinksWithNoLiveMembersForDocumentParams{
 				WorkspaceID: ws,
 				DocumentID:  docID,
 			})
 			if err != nil {
 				return fmt.Errorf("archive document share links: %w", err)
 			}
-			orphan, err := q.ArchiveOrphanScopedActiveLinksForDocument(ctx, db.ArchiveOrphanScopedActiveLinksForDocumentParams{
-				WorkspaceID: ws,
-				DocumentID:  docID,
-			})
-			if err != nil {
-				return fmt.Errorf("archive orphan scoped links: %w", err)
-			}
-			parked = append(primary, orphan...)
+			parked = append(parked, ids...)
 			return nil
 		})
 	}
@@ -646,6 +687,8 @@ func (s *Service) ArchiveDocument(ctx context.Context, workspaceID, tenantID, do
 
 // UnarchiveDocument restores an archived document to ready. Share links stay
 // archived/expired until the owner renews them (avoids silent quota consume).
+// If a live document already uses the same filename (archive-then-re-upload),
+// the restored row is renamed so the latest live title stays intact.
 func (s *Service) UnarchiveDocument(ctx context.Context, workspaceID, tenantID, documentID string) error {
 	ws := pgUUID(workspaceID)
 	docID := pgUUID(documentID)
@@ -654,29 +697,63 @@ func (s *Service) UnarchiveDocument(ctx context.Context, workspaceID, tenantID, 
 		return fmt.Errorf("invalid id")
 	}
 
-	doc, err := s.queries.GetDocumentByID(ctx, db.GetDocumentByIDParams{
-		ID:          docID,
-		WorkspaceID: ws,
-	})
-	if err != nil {
-		return err
-	}
-	if doc.Status != "archived" {
+	return s.withTx(ctx, func(q *db.Queries) error {
+		doc, err := q.GetDocumentByID(ctx, db.GetDocumentByIDParams{
+			ID:          docID,
+			WorkspaceID: ws,
+		})
+		if err != nil {
+			return err
+		}
+		if doc.Status != "archived" {
+			return nil
+		}
+
+		title := doc.Title
+		_, liveErr := q.GetDocumentByTitleInWorkspace(ctx, db.GetDocumentByTitleInWorkspaceParams{
+			WorkspaceID: ws,
+			Title:       doc.Title,
+		})
+		switch {
+		case liveErr == nil:
+			renamed, renameErr := uniqueRestoredTitle(ctx, q, ws, doc.Title)
+			if renameErr != nil {
+				return renameErr
+			}
+			title = renamed
+		case !errors.Is(liveErr, pgx.ErrNoRows):
+			return fmt.Errorf("lookup live title: %w", liveErr)
+		}
+
+		if err := q.UnarchiveDocument(ctx, db.UnarchiveDocumentParams{
+			ID:          docID,
+			WorkspaceID: ws,
+			TenantID:    tenant,
+			Title:       title,
+		}); err != nil {
+			if !isUniqueViolation(err) {
+				return fmt.Errorf("unarchive document: %w", err)
+			}
+			// Race: another live row claimed the title between lookup and write.
+			title = restoredDocumentTitle(doc.Title, time.Now().UTC(), uuid.NewString())
+			if err := q.UnarchiveDocument(ctx, db.UnarchiveDocumentParams{
+				ID:          docID,
+				WorkspaceID: ws,
+				TenantID:    tenant,
+				Title:       title,
+			}); err != nil {
+				return fmt.Errorf("unarchive document: %w", err)
+			}
+		}
 		return nil
-	}
-	if err := s.queries.UnarchiveDocument(ctx, db.UnarchiveDocumentParams{
-		ID:          docID,
-		WorkspaceID: ws,
-		TenantID:    tenant,
-	}); err != nil {
-		return fmt.Errorf("unarchive document: %w", err)
-	}
-	return nil
+	})
 }
 
-// DeleteDocument soft-deletes a workspace document and cleans dependent
-// memberships/share links so library deletion cannot leave live access paths.
-// Holds the billing lock so freed storage/link inventory serializes with creates.
+// DeleteDocument soft-deletes a workspace document and detaches it from
+// shares and rooms. A multi-doc share stays live when another member remains
+// (links.document_id is left unchanged). The share is revoked only when it
+// would have no live members. Holds the billing lock so freed storage/link
+// inventory serializes with creates.
 func (s *Service) DeleteDocument(ctx context.Context, workspaceID, documentID string) error {
 	ws := pgUUID(workspaceID)
 	docID := pgUUID(documentID)
@@ -694,21 +771,21 @@ func (s *Service) DeleteDocument(ctx context.Context, workspaceID, documentID st
 				return err
 			}
 
-			// Revoke document-primary links first.
-			primary, err := q.SoftDeleteLinksByDocument(ctx, db.SoftDeleteLinksByDocumentParams{
+			// Mark the document gone first so live-member checks match archive
+			// (deleted_at IS NULL). Then rebind and revoke only orphan shares.
+			if err := q.SoftDeleteDocument(ctx, db.SoftDeleteDocumentParams{
+				ID:          docID,
+				WorkspaceID: ws,
+			}); err != nil {
+				return fmt.Errorf("soft delete document: %w", err)
+			}
+			// Keep links.document_id stable (page_views is append-only).
+			ids, err := q.SoftDeleteActiveLinksWithNoLiveMembersForDocument(ctx, db.SoftDeleteActiveLinksWithNoLiveMembersForDocumentParams{
 				WorkspaceID: ws,
 				DocumentID:  docID,
 			})
 			if err != nil {
 				return fmt.Errorf("revoke share links: %w", err)
-			}
-			// Revoke multi-doc links that only pointed at this document.
-			orphan, err := q.SoftDeleteOrphanScopedLinksForDocument(ctx, db.SoftDeleteOrphanScopedLinksForDocumentParams{
-				WorkspaceID: ws,
-				DocumentID:  docID,
-			})
-			if err != nil {
-				return fmt.Errorf("revoke orphan scoped links: %w", err)
 			}
 			if err := q.DeleteLinkDocumentsByDocument(ctx, docID); err != nil {
 				return fmt.Errorf("detach scoped link documents: %w", err)
@@ -719,13 +796,7 @@ func (s *Service) DeleteDocument(ctx context.Context, workspaceID, documentID st
 			}); err != nil {
 				return fmt.Errorf("detach data room memberships: %w", err)
 			}
-			if err := q.SoftDeleteDocument(ctx, db.SoftDeleteDocumentParams{
-				ID:          docID,
-				WorkspaceID: ws,
-			}); err != nil {
-				return fmt.Errorf("soft delete document: %w", err)
-			}
-			parked = append(primary, orphan...)
+			parked = append(parked, ids...)
 			return nil
 		})
 	}

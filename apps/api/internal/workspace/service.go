@@ -9,11 +9,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/auth/emailid"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/billing"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/locale"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/mailer"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/plan"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/roomacl"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/storage"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -22,34 +24,35 @@ import (
 )
 
 var (
-	ErrInvalidSlug             = errors.New("the workspace URL can only contain lowercase letters, numbers, and hyphens")
-	ErrSlugExists              = errors.New("a workspace with this URL already exists. please choose a different name")
-	ErrNotMember               = errors.New("user is not a member of this workspace")
-	ErrAlreadyMember           = errors.New("user is already a member")
-	ErrInvalidEmail            = errors.New("invalid email")
-	ErrInvalidRole             = errors.New("invalid role")
-	ErrNotManager              = errors.New("only owner or admin can manage members")
-	ErrMemberNotFound          = errors.New("member not found")
-	ErrCannotModifyOwner       = errors.New("cannot modify the workspace owner")
-	ErrCannotModifySelf        = errors.New("cannot change your own membership here")
-	ErrCannotManageMember      = errors.New("cannot manage this member")
-	ErrInvitationNotFound      = errors.New("invitation not found")
-	ErrInvitationExpired       = errors.New("invitation expired")
-	ErrInvitationUsed          = errors.New("invitation already used")
-	ErrInvitationEmailMismatch = errors.New("email does not match invitation")
-	ErrLogoStorageUnavailable  = errors.New("logo storage is not configured")
-	ErrInvalidLogoType         = errors.New("unsupported logo image type")
-	ErrLogoTooLarge            = errors.New("logo must be smaller than 5 MB")
-	ErrInvalidPlanCode         = errors.New("invalid plan code")
-	ErrInvalidBillingPeriod    = errors.New("invalid billing period")
-	ErrPlanPaymentRequired     = errors.New("plan change requires payment")
-	ErrPlanSalesAssisted       = errors.New("enterprise plan requires sales")
-	ErrEmailUnverified         = errors.New("verify your email before creating another workspace")
-	ErrPlanManageViaPortal     = errors.New("manage this subscription in the billing portal")
-	ErrStripeNoCustomer        = errors.New("no stripe customer for this workspace")
-	ErrInvalidCheckoutPlan     = errors.New("that plan cannot be purchased at checkout")
-	slugRegex                  = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
-	emailRegex                 = regexp.MustCompile(`^[^\s@]+@[^\s@]+\.[^\s@]+$`)
+	ErrInvalidSlug                  = errors.New("the workspace URL can only contain lowercase letters, numbers, and hyphens")
+	ErrSlugExists                   = errors.New("a workspace with this URL already exists. please choose a different name")
+	ErrNotMember                    = errors.New("user is not a member of this workspace")
+	ErrAlreadyMember                = errors.New("user is already a member")
+	ErrInvalidEmail                 = errors.New("invalid email")
+	ErrInvalidRole                  = errors.New("invalid role")
+	ErrNotManager                   = errors.New("only owner or admin can manage members")
+	ErrMemberNotFound               = errors.New("member not found")
+	ErrCannotModifyOwner            = errors.New("cannot modify the workspace owner")
+	ErrCannotModifySelf             = errors.New("cannot change your own membership here")
+	ErrCannotRemoveSoleRoomOperator = errors.New("cannot remove the only operator of a data room")
+	ErrCannotManageMember           = errors.New("cannot manage this member")
+	ErrInvitationNotFound           = errors.New("invitation not found")
+	ErrInvitationExpired            = errors.New("invitation expired")
+	ErrInvitationUsed               = errors.New("invitation already used")
+	ErrInvitationEmailMismatch      = errors.New("email does not match invitation")
+	ErrLogoStorageUnavailable       = errors.New("logo storage is not configured")
+	ErrInvalidLogoType              = errors.New("unsupported logo image type")
+	ErrLogoTooLarge                 = errors.New("logo must be smaller than 5 MB")
+	ErrInvalidPlanCode              = errors.New("invalid plan code")
+	ErrInvalidBillingPeriod         = errors.New("invalid billing period")
+	ErrPlanPaymentRequired          = errors.New("plan change requires payment")
+	ErrPlanSalesAssisted            = errors.New("enterprise plan requires sales")
+	ErrEmailUnverified              = errors.New("verify your email before creating another workspace")
+	ErrPlanManageViaPortal          = errors.New("manage this subscription in the billing portal")
+	ErrStripeNoCustomer             = errors.New("no stripe customer for this workspace")
+	ErrInvalidCheckoutPlan          = errors.New("that plan cannot be purchased at checkout")
+	slugRegex                       = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
+	emailRegex                      = regexp.MustCompile(`^[^\s@]+@[^\s@]+\.[^\s@]+$`)
 )
 
 const (
@@ -86,6 +89,167 @@ func canManageTargetRole(actorRole, targetRole string) error {
 		return nil
 	}
 	return ErrCannotManageMember
+}
+
+func bindRoomMembersForUser(ctx context.Context, q *db.Queries, userID, workspaceID pgtype.UUID, email string) int64 {
+	if strings.TrimSpace(email) == "" {
+		return 0
+	}
+	n, err := q.BindRoomMembersUserByEmail(ctx, db.BindRoomMembersUserByEmailParams{
+		UserID:      userID,
+		WorkspaceID: workspaceID,
+		Email:       email,
+	})
+	if err != nil {
+		return 0
+	}
+	return n
+}
+
+// ClaimRoomInvites binds email-only room_members rows and ensures a workspace
+// guest seat (never member/admin). Fail-open: login/register must not fail.
+func (s *Service) ClaimRoomInvites(ctx context.Context, userID, email string) {
+	if s == nil || s.queries == nil {
+		return
+	}
+	email = strings.ToLower(strings.TrimSpace(email))
+	uid, err := pgUUID(userID)
+	if err != nil || !uid.Valid || email == "" {
+		return
+	}
+	keys := emailid.Keys(email)
+	if len(keys) == 0 {
+		return
+	}
+	seen := map[[16]byte]struct{}{}
+	var wsIDs []pgtype.UUID
+	for _, key := range keys {
+		ids, qerr := s.queries.ListWorkspaceIDsByRoomMemberEmail(ctx, key)
+		if qerr != nil {
+			return
+		}
+		for _, wsID := range ids {
+			if !wsID.Valid {
+				continue
+			}
+			if _, ok := seen[wsID.Bytes]; ok {
+				continue
+			}
+			seen[wsID.Bytes] = struct{}{}
+			wsIDs = append(wsIDs, wsID)
+		}
+	}
+	for _, wsID := range wsIDs {
+		if !wsID.Valid {
+			continue
+		}
+		for _, key := range keys {
+			bindRoomMembersForUser(ctx, s.queries, uid, wsID, key)
+		}
+		_, werr := s.queries.GetWorkspaceMember(ctx, db.GetWorkspaceMemberParams{
+			WorkspaceID: wsID,
+			UserID:      uid,
+		})
+		if werr == nil {
+			continue
+		}
+		if !errors.Is(werr, pgx.ErrNoRows) {
+			continue
+		}
+		if _, addErr := s.queries.AddWorkspaceMember(ctx, db.AddWorkspaceMemberParams{
+			WorkspaceID: wsID,
+			UserID:      uid,
+			Role:        RoleGuest,
+		}); addErr != nil {
+			continue
+		}
+	}
+}
+
+func (s *Service) claimMailboxInvitesForSlugRoom(ctx context.Context, userID, tenantID, slug, roomID string) bool {
+	if s == nil || s.queries == nil || strings.TrimSpace(slug) == "" || strings.TrimSpace(roomID) == "" {
+		return false
+	}
+	var tenantUUID pgtype.UUID
+	if tenantID != "" {
+		var err error
+		tenantUUID, err = pgUUID(tenantID)
+		if err != nil {
+			return false
+		}
+	}
+	var ws db.Workspace
+	var err error
+	if tenantUUID.Valid {
+		ws, err = s.queries.GetWorkspaceByTenantAndSlug(ctx, db.GetWorkspaceByTenantAndSlugParams{
+			TenantID: tenantUUID,
+			Slug:     slug,
+		})
+	} else {
+		ws, err = s.queries.GetWorkspaceBySlug(ctx, slug)
+	}
+	if err != nil {
+		return false
+	}
+	rid, err := pgUUID(roomID)
+	if err != nil || !rid.Valid {
+		return false
+	}
+	return s.claimMailboxInvitesInRoom(ctx, userID, ws.ID, rid)
+}
+
+// claimMailboxInvitesInRoom binds an unbound SameMailbox invite in one room
+// and adds a guest seat. No workspace-wide or global scan.
+func (s *Service) claimMailboxInvitesInRoom(ctx context.Context, userID string, wsID, roomID pgtype.UUID) bool {
+	if s == nil || s.queries == nil || !wsID.Valid || !roomID.Valid {
+		return false
+	}
+	uid, err := pgUUID(userID)
+	if err != nil || !uid.Valid {
+		return false
+	}
+	user, err := s.queries.GetUserByID(ctx, uid)
+	if err != nil {
+		return false
+	}
+	email := strings.TrimSpace(user.Email)
+	if email == "" {
+		return false
+	}
+	rows, err := s.queries.ListUnboundRoomMembersForRoom(ctx, db.ListUnboundRoomMembersForRoomParams{
+		WorkspaceID: wsID,
+		RoomID:      roomID,
+	})
+	if err != nil || len(rows) == 0 {
+		return false
+	}
+	match, ok := roomacl.PickMailboxMember(rows, email)
+	if !ok {
+		return false
+	}
+	bound := bindRoomMembersForUser(ctx, s.queries, uid, wsID, match.Email)
+	for _, key := range emailid.Keys(email) {
+		if key == match.Email {
+			continue
+		}
+		bound += bindRoomMembersForUser(ctx, s.queries, uid, wsID, key)
+	}
+	if bound == 0 {
+		return false
+	}
+	_, addErr := s.queries.AddWorkspaceMember(ctx, db.AddWorkspaceMemberParams{
+		WorkspaceID: wsID,
+		UserID:      uid,
+		Role:        RoleGuest,
+	})
+	if addErr != nil && !isUniqueViolation(addErr) {
+		_, werr := s.queries.GetWorkspaceMember(ctx, db.GetWorkspaceMemberParams{
+			WorkspaceID: wsID,
+			UserID:      uid,
+		})
+		return werr == nil
+	}
+	return true
 }
 
 // Workspace is the public view of a db.Workspace.
@@ -319,7 +483,7 @@ func (s *Service) Create(ctx context.Context, userID, name, slug, brandColor str
 
 		planCode := plan.CodeFree
 		trialEnds := pgtype.Timestamptz{}
-		if ownedCount == 0 && !user.TrialGrantedAt.Valid {
+		if ownedCount == 0 && user.EmailVerified && !user.TrialGrantedAt.Valid {
 			if _, grantErr := q.GrantUserTrial(ctx, uid); grantErr != nil {
 				if !errors.Is(grantErr, pgx.ErrNoRows) {
 					return Workspace{}, fmt.Errorf("grant trial: %w", grantErr)
@@ -365,6 +529,76 @@ func (s *Service) Create(ctx context.Context, userID, name, slug, brandColor str
 	}
 
 	return ws, nil
+}
+
+// ActivateEligibleTrial starts the 14-day Trial on the user's first owned
+// Free workspace after they verify email. No-op when already granted, paid,
+// or they do not yet own a workspace (Create will grant on first verified owner).
+func (s *Service) ActivateEligibleTrial(ctx context.Context, userID string) error {
+	uid, err := pgUUID(userID)
+	if err != nil {
+		return err
+	}
+	run := func(q *db.Queries) error {
+		if err := q.LockUserWriterCap(ctx, db.LockUserWriterCapParams{
+			LockNs: trialGrantLockNamespace,
+			UserID: userID,
+		}); err != nil {
+			return fmt.Errorf("lock owned workspace cap: %w", err)
+		}
+		user, err := q.GetUserByID(ctx, uid)
+		if err != nil {
+			return err
+		}
+		if !user.EmailVerified || user.TrialGrantedAt.Valid {
+			return nil
+		}
+		rows, err := q.ListOwnedWorkspaceBillingByUser(ctx, uid)
+		if err != nil {
+			return fmt.Errorf("list owned billing: %w", err)
+		}
+		if len(rows) != 1 {
+			return nil
+		}
+		row := rows[0]
+		if row.PlanCode != plan.CodeFree {
+			return nil
+		}
+		if row.StripeSubscriptionID.Valid && row.StripeSubscriptionID.String != "" {
+			return nil
+		}
+		if _, grantErr := q.GrantUserTrial(ctx, uid); grantErr != nil {
+			if errors.Is(grantErr, pgx.ErrNoRows) {
+				return nil
+			}
+			return fmt.Errorf("grant trial: %w", grantErr)
+		}
+		_, err = q.UpsertWorkspaceBilling(ctx, db.UpsertWorkspaceBillingParams{
+			WorkspaceID: row.WorkspaceID,
+			PlanCode:    plan.CodeTrial,
+			Period:      plan.PeriodMonthly,
+			TrialEndsAt: pgtype.Timestamptz{Time: time.Now().UTC().Add(plan.TrialDuration), Valid: true},
+		})
+		if err != nil {
+			return fmt.Errorf("promote trial billing: %w", err)
+		}
+		return nil
+	}
+	if s.dbPool == nil {
+		return run(s.queries)
+	}
+	tx, err := s.dbPool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := run(s.queries.WithTx(tx)); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit tx: %w", err)
+	}
+	return nil
 }
 
 func isUniqueViolation(err error) bool {
@@ -521,7 +755,7 @@ func (s *Service) CreateInvitation(ctx context.Context, actorID, workspaceID, te
 	if err := canManageTargetRole(actor.Role, role); err != nil {
 		return Invitation{}, err
 	}
-	email = strings.ToLower(strings.TrimSpace(email))
+	email = emailid.Canonical(email)
 	if email == "" || !emailRegex.MatchString(email) {
 		return Invitation{}, ErrInvalidEmail
 	}
@@ -735,6 +969,26 @@ type AcceptInvitationResult struct {
 	WorkspaceName string `json:"workspace_name"`
 }
 
+// ValidInviteMailbox reports whether token is an unexpired workspace invitation
+// for this mailbox. Used as mailbox proof at login; does not consume the token.
+func (s *Service) ValidInviteMailbox(ctx context.Context, email, token string) bool {
+	if s == nil || s.queries == nil {
+		return false
+	}
+	tokenUUID, err := pgUUID(token)
+	if err != nil {
+		return false
+	}
+	inv, err := s.queries.GetInvitationByToken(ctx, tokenUUID)
+	if err != nil {
+		return false
+	}
+	if !inv.ExpiresAt.Valid || inv.ExpiresAt.Time.Before(time.Now().UTC()) {
+		return false
+	}
+	return emailid.SameMailbox(email, inv.Email)
+}
+
 // AcceptInvitation uses a token to add a user to a workspace.
 // Runs inside a transaction to prevent TOCTOU races on invitation usage.
 // Concurrent accepts (e.g. React Strict Mode double-mount) are serialized with
@@ -779,8 +1033,15 @@ func (s *Service) AcceptInvitation(ctx context.Context, token, userID string) (A
 	if err != nil {
 		return AcceptInvitationResult{}, err
 	}
-	if !strings.EqualFold(strings.TrimSpace(user.Email), strings.TrimSpace(inv.Email)) {
+	if !emailid.SameMailbox(user.Email, inv.Email) {
 		return AcceptInvitationResult{}, ErrInvitationEmailMismatch
+	}
+	// Workspace invite token is mailbox proof (mail already reached this address).
+	if !user.EmailVerified {
+		if err := qtx.VerifyUserEmail(ctx, uUUID); err != nil {
+			return AcceptInvitationResult{}, err
+		}
+		user.EmailVerified = true
 	}
 
 	ws, err := qtx.GetWorkspaceByID(ctx, wsUUID)
@@ -804,6 +1065,7 @@ func (s *Service) AcceptInvitation(ctx context.Context, token, userID string) (A
 		UserID:      uUUID,
 	})
 	if err == nil {
+		bindRoomMembersForUser(ctx, qtx, uUUID, wsUUID, user.Email)
 		if !inv.UsedAt.Valid {
 			if err := qtx.MarkInvitationUsed(ctx, tokenUUID); err != nil {
 				return AcceptInvitationResult{}, fmt.Errorf("mark invitation used: %w", err)
@@ -850,6 +1112,7 @@ func (s *Service) AcceptInvitation(ctx context.Context, token, userID string) (A
 			if getErr != nil {
 				return AcceptInvitationResult{}, err
 			}
+			bindRoomMembersForUser(ctx, qtx, uUUID, wsUUID, user.Email)
 			if markErr := qtx.MarkInvitationUsed(ctx, tokenUUID); markErr != nil {
 				return AcceptInvitationResult{}, fmt.Errorf("mark invitation used: %w", markErr)
 			}
@@ -861,6 +1124,7 @@ func (s *Service) AcceptInvitation(ctx context.Context, token, userID string) (A
 		return AcceptInvitationResult{}, err
 	}
 
+	bindRoomMembersForUser(ctx, qtx, uUUID, wsUUID, user.Email)
 	if err := qtx.MarkInvitationUsed(ctx, tokenUUID); err != nil {
 		return AcceptInvitationResult{}, fmt.Errorf("mark invitation used: %w", err)
 	}
@@ -882,6 +1146,9 @@ func (s *Service) AddMember(ctx context.Context, actorID, workspaceID, tenantID,
 	}
 	if !validMemberRole(role) {
 		return Member{}, ErrInvalidRole
+	}
+	if err := canManageTargetRole(actor.Role, role); err != nil {
+		return Member{}, err
 	}
 
 	if tenantID != "" {
@@ -925,6 +1192,9 @@ func (s *Service) AddMember(ctx context.Context, actorID, workspaceID, tenantID,
 		}
 	} else if addErr := add(s.queries); addErr != nil {
 		return Member{}, addErr
+	}
+	if user, userErr := s.queries.GetUserByID(ctx, uUUID); userErr == nil {
+		bindRoomMembersForUser(ctx, s.queries, uUUID, wsUUID, user.Email)
 	}
 	return memberFromDB(m), nil
 }
@@ -1031,6 +1301,16 @@ func (s *Service) RemoveMember(ctx context.Context, actorID, workspaceID, tenant
 	}
 
 	run := func(q *db.Queries) error {
+		soleCount, countErr := q.CountSoleOperableRoomsByUser(ctx, db.CountSoleOperableRoomsByUserParams{
+			WorkspaceID: wsUUID,
+			UserID:      uUUID,
+		})
+		if countErr != nil {
+			return countErr
+		}
+		if soleCount > 0 {
+			return ErrCannotRemoveSoleRoomOperator
+		}
 		return q.DeleteWorkspaceMember(ctx, db.DeleteWorkspaceMemberParams{
 			WorkspaceID: wsUUID,
 			UserID:      uUUID,

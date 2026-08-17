@@ -42,11 +42,13 @@ func TestResolveKeyPageNotificationGatesHonestly(t *testing.T) {
 	})
 
 	t.Run("bundle with event document matches", func(t *testing.T) {
+		ws := pgtype.UUID{Bytes: [16]byte{2}, Valid: true}
 		svc := NewService(&mockAnalyticsQuerier{
 			pageTitleByNumber:   "财务模型",
 			visitorKeyPageCount: 1,
+			document:            db.GetDocumentByIDRow{Title: "Memo.pdf"},
 		}, nil, testCfg())
-		bundle := db.Link{ID: link.ID}
+		bundle := db.Link{ID: link.ID, WorkspaceID: ws}
 		alert, ok, err := svc.ResolveKeyPageNotification(context.Background(), bundle, "v1", 4, 15, docID)
 		if err != nil || !ok {
 			t.Fatalf("ok=%v err=%v", ok, err)
@@ -56,6 +58,9 @@ func TestResolveKeyPageNotificationGatesHonestly(t *testing.T) {
 		}
 		if alert.Metadata["document_id"] != docID {
 			t.Fatalf("document_id meta=%s", alert.Metadata["document_id"])
+		}
+		if alert.Metadata["document_title"] != "Memo.pdf" {
+			t.Fatalf("document_title meta=%s", alert.Metadata["document_title"])
 		}
 		if alert.Metadata["category"] != "financials" {
 			t.Fatalf("category=%s", alert.Metadata["category"])
@@ -79,6 +84,9 @@ func TestResolveKeyPageNotificationGatesHonestly(t *testing.T) {
 		}
 		if alert.Metadata["page_title"] != "财务模型" {
 			t.Fatalf("title=%s", alert.Metadata["page_title"])
+		}
+		if _, ok := alert.Metadata["document_title"]; ok {
+			t.Fatalf("primary document must not set document_title, got %v", alert.Metadata)
 		}
 	})
 

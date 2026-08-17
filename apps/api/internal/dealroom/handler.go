@@ -52,8 +52,10 @@ func (h *Handler) RegisterWorkspaceRoutes(r *gin.RouterGroup) {
 
 	g.GET("/:roomId/members", h.ListMembers)
 	g.POST("/:roomId/members", h.AddMember)
+	g.PATCH("/:roomId/members/:memberId", h.UpdateMemberRole)
 	g.DELETE("/:roomId/members/:memberId", h.RemoveMember)
 	g.PATCH("/:roomId/nda-agreement", h.SetMemberNDAAgreement)
+	g.POST("/:roomId/sign-nda", h.SignMemberNDA)
 
 	g.GET("/:roomId/access-requests", h.ListAccessRequests)
 	g.POST("/:roomId/access-requests/:requestId/approve", h.ApproveRequest)
@@ -95,7 +97,7 @@ func (h *Handler) List(c *gin.Context) {
 	query := strings.TrimSpace(c.Query("q"))
 	pageRaw := strings.TrimSpace(c.Query("page"))
 	if pageRaw == "" {
-		rooms, err := h.service.ListRooms(c.Request.Context(), workspaceID)
+		rooms, err := h.service.ListRoomsForUser(c.Request.Context(), workspaceID, middleware.UserIDFrom(c))
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 			return
@@ -120,6 +122,7 @@ func (h *Handler) List(c *gin.Context) {
 			out[i] = roomSummaryResponse(r)
 		}
 		h.overlayListIsAdmin(c, out, rooms)
+		h.overlayListNdaRequired(c, out, rooms)
 		c.JSON(http.StatusOK, gin.H{"data": out})
 		return
 	}
@@ -139,7 +142,7 @@ func (h *Handler) List(c *gin.Context) {
 		pageSize = n
 	}
 
-	result, err := h.service.ListRoomsPage(c.Request.Context(), workspaceID, page, pageSize, query)
+	result, err := h.service.ListRoomsPageForUser(c.Request.Context(), workspaceID, middleware.UserIDFrom(c), page, pageSize, query)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
@@ -149,6 +152,7 @@ func (h *Handler) List(c *gin.Context) {
 		out[i] = roomSummaryResponse(r)
 	}
 	h.overlayListIsAdmin(c, out, result.Items)
+	h.overlayListNdaRequired(c, out, result.Items)
 	c.JSON(http.StatusOK, gin.H{
 		"data": out,
 		"pagination": gin.H{
@@ -280,7 +284,7 @@ func (h *Handler) Delete(c *gin.Context) {
 		case errors.Is(err, ErrRoomNotFound):
 			c.JSON(http.StatusNotFound, gin.H{"code": "room_not_found", "message": httpx.SafeMessage("room_not_found", err)})
 		case errors.Is(err, ErrNotRoomAdmin):
-			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", err)})
+			httpx.WriteNotRoomAdmin(c, err)
 		default:
 			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		}
@@ -303,13 +307,17 @@ func (h *Handler) AddMember(c *gin.Context) {
 		return
 	}
 	if req.Role == "" {
-		req.Role = "viewer"
+		req.Role = "guest"
 	}
 	member, err := h.service.AddMember(c.Request.Context(), c.Param("roomId"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c), req.Email, req.Role)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrNotRoomAdmin):
-			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", err)})
+			httpx.WriteNotRoomAdmin(c, err)
+		case errors.Is(err, ErrCannotManageMember):
+			c.JSON(http.StatusForbidden, gin.H{"code": "cannot_manage_member", "message": httpx.SafeMessage("cannot_manage_member", err)})
+		case errors.Is(err, ErrInvalidRole):
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_role", "message": httpx.SafeMessage("invalid_role", err)})
 		case errors.Is(err, ErrInvalidEmail):
 			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_email", "message": httpx.SafeMessage("invalid_email", err)})
 		case errors.Is(err, ErrNDAAgreementRequired):
@@ -320,6 +328,36 @@ func (h *Handler) AddMember(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusCreated, memberResponse(member))
+}
+
+type updateMemberRoleRequest struct {
+	Role string `json:"role" binding:"required"`
+}
+
+// UpdateMemberRole changes a grantable room member role.
+func (h *Handler) UpdateMemberRole(c *gin.Context) {
+	var req updateMemberRoleRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
+		return
+	}
+	member, err := h.service.UpdateRoomMemberRole(c.Request.Context(), c.Param("roomId"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c), c.Param("memberId"), req.Role)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrNotRoomAdmin):
+			httpx.WriteNotRoomAdmin(c, err)
+		case errors.Is(err, ErrCannotManageMember):
+			c.JSON(http.StatusForbidden, gin.H{"code": "cannot_manage_member", "message": httpx.SafeMessage("cannot_manage_member", err)})
+		case errors.Is(err, ErrInvalidRole):
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_role", "message": httpx.SafeMessage("invalid_role", err)})
+		case errors.Is(err, ErrMemberNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": httpx.SafeMessage("not_found", err)})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+		}
+		return
+	}
+	c.JSON(http.StatusOK, memberResponse(member))
 }
 
 // SetMemberNDAAgreementRequest binds the room-level NDA members must sign.
@@ -346,7 +384,7 @@ func (h *Handler) SetMemberNDAAgreement(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrNotRoomAdmin):
-			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", err)})
+			httpx.WriteNotRoomAdmin(c, err)
 		case errors.Is(err, ErrRoomNotFound):
 			c.JSON(http.StatusNotFound, gin.H{"code": "room_not_found", "message": httpx.SafeMessage("room_not_found", err)})
 		case errors.Is(err, ErrNDAAgreementRequired):
@@ -359,13 +397,39 @@ func (h *Handler) SetMemberNDAAgreement(c *gin.Context) {
 	c.JSON(http.StatusOK, roomResponse(room))
 }
 
+// SignMemberNDA records the caller's NDA and activates their pending membership.
+func (h *Handler) SignMemberNDA(c *gin.Context) {
+	detail, err := h.service.SignMemberNDA(
+		c.Request.Context(),
+		c.Param("roomId"),
+		middleware.WorkspaceIDFrom(c),
+		middleware.UserIDFrom(c),
+	)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrRoomNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"code": "room_not_found", "message": httpx.SafeMessage("room_not_found", err)})
+		case errors.Is(err, ErrMemberNotFound):
+			c.JSON(http.StatusForbidden, gin.H{"code": "member_not_found", "message": httpx.SafeMessage("member_not_found", err)})
+		case errors.Is(err, ErrNDANotRequired):
+			c.JSON(http.StatusBadRequest, gin.H{"code": "nda_not_required", "message": httpx.SafeMessage("nda_not_required", err)})
+		case errors.Is(err, ErrApprovalRequired):
+			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", err)})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+		}
+		return
+	}
+	c.JSON(http.StatusOK, roomDetailResponse(detail, h.memberEmails(c)))
+}
+
 // ApproveRequest handles access request approval.
 func (h *Handler) ApproveRequest(c *gin.Context) {
 	req, err := h.service.ApproveAccessRequest(c.Request.Context(), c.Param("requestId"), c.Param("roomId"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c))
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrNotRoomAdmin):
-			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", err)})
+			httpx.WriteNotRoomAdmin(c, err)
 		case errors.Is(err, ErrRequestNotFound):
 			c.JSON(http.StatusNotFound, gin.H{"code": "request_not_found", "message": httpx.SafeMessage("request_not_found", err)})
 		default:
@@ -509,13 +573,15 @@ func (h *Handler) AddDocument(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrNotRoomAdmin):
-			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", err)})
+			httpx.WriteNotRoomAdmin(c, err)
 		case errors.Is(err, ErrFolderNotFound):
 			c.JSON(http.StatusNotFound, gin.H{"code": "folder_not_found", "message": httpx.SafeMessage("folder_not_found", err)})
 		case errors.Is(err, ErrResourceLocked):
 			c.JSON(http.StatusConflict, gin.H{"code": "resource_locked", "message": httpx.SafeMessage("resource_locked", err)})
 		case errors.Is(err, ErrAgreementNotAllowedInDealRoom):
 			c.JSON(http.StatusBadRequest, gin.H{"code": "agreement_not_allowed_in_deal_room", "message": httpx.SafeMessage("agreement_not_allowed_in_deal_room", err)})
+		case errors.Is(err, ErrArchivedDocumentNotAllowed):
+			c.JSON(http.StatusBadRequest, gin.H{"code": "archived_document_not_allowed", "message": httpx.SafeMessage("archived_document_not_allowed", err)})
 		default:
 			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		}
@@ -542,7 +608,7 @@ func (h *Handler) SetFolderPermission(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrNotRoomAdmin):
-			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", err)})
+			httpx.WriteNotRoomAdmin(c, err)
 		case errors.Is(err, ErrMemberNotFound):
 			c.JSON(http.StatusNotFound, gin.H{"code": "member_not_found", "message": httpx.SafeMessage("member_not_found", err)})
 		case errors.Is(err, ErrInvalidEmail):
@@ -597,7 +663,7 @@ func (h *Handler) CreateFolder(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrNotRoomAdmin):
-			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", err)})
+			httpx.WriteNotRoomAdmin(c, err)
 		case errors.Is(err, ErrFolderExists):
 			c.JSON(http.StatusConflict, gin.H{"code": "folder_exists", "message": httpx.SafeMessage("folder_exists", err)})
 		case errors.Is(err, ErrFolderNotFound):
@@ -628,7 +694,7 @@ func (h *Handler) RenameFolder(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrNotRoomAdmin):
-			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", err)})
+			httpx.WriteNotRoomAdmin(c, err)
 		case errors.Is(err, ErrFolderNotFound):
 			c.JSON(http.StatusNotFound, gin.H{"code": "folder_not_found", "message": httpx.SafeMessage("folder_not_found", err)})
 		case errors.Is(err, ErrFolderExists):
@@ -649,7 +715,7 @@ func (h *Handler) DeleteFolder(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrNotRoomAdmin):
-			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", err)})
+			httpx.WriteNotRoomAdmin(c, err)
 		case errors.Is(err, ErrFolderNotFound):
 			c.JSON(http.StatusNotFound, gin.H{"code": "folder_not_found", "message": httpx.SafeMessage("folder_not_found", err)})
 		case errors.Is(err, ErrFolderNotEmpty):
@@ -690,7 +756,7 @@ func (h *Handler) setResourceLocks(c *gin.Context, locked bool) {
 	); err != nil {
 		switch {
 		case errors.Is(err, ErrNotRoomAdmin):
-			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", err)})
+			httpx.WriteNotRoomAdmin(c, err)
 		case errors.Is(err, ErrRoomNotFound):
 			c.JSON(http.StatusNotFound, gin.H{"code": "room_not_found", "message": httpx.SafeMessage("room_not_found", err)})
 		case errors.Is(err, ErrFolderNotFound):
@@ -729,7 +795,7 @@ func (h *Handler) RemoveDocument(c *gin.Context) {
 	if err := h.service.RemoveDocument(c.Request.Context(), c.Param("roomId"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c), c.Param("docId")); err != nil {
 		switch {
 		case errors.Is(err, ErrNotRoomAdmin):
-			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", err)})
+			httpx.WriteNotRoomAdmin(c, err)
 		case errors.Is(err, ErrResourceLocked):
 			c.JSON(http.StatusConflict, gin.H{"code": "resource_locked", "message": httpx.SafeMessage("resource_locked", err)})
 		default:
@@ -765,7 +831,7 @@ func (h *Handler) UpdateDocument(c *gin.Context) {
 		if err := h.service.MoveDocument(c.Request.Context(), c.Param("roomId"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c), c.Param("docId"), req.FolderPath, req.SortOrder); err != nil {
 			switch {
 			case errors.Is(err, ErrNotRoomAdmin):
-				c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", err)})
+				httpx.WriteNotRoomAdmin(c, err)
 			case errors.Is(err, ErrFolderNotFound):
 				c.JSON(http.StatusNotFound, gin.H{"code": "folder_not_found", "message": httpx.SafeMessage("folder_not_found", err)})
 			case errors.Is(err, ErrResourceLocked):
@@ -779,7 +845,7 @@ func (h *Handler) UpdateDocument(c *gin.Context) {
 		if err := h.service.ReorderDocuments(c.Request.Context(), c.Param("roomId"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c), []DocumentOrder{{DocumentID: c.Param("docId"), SortOrder: *req.SortOrder}}); err != nil {
 			switch {
 			case errors.Is(err, ErrNotRoomAdmin):
-				c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", err)})
+				httpx.WriteNotRoomAdmin(c, err)
 			default:
 				c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 			}
@@ -795,6 +861,8 @@ func (h *Handler) ListMembers(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrNotRoomAdmin):
+			httpx.WriteNotRoomAdmin(c, err)
+		case errors.Is(err, ErrApprovalRequired):
 			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", err)})
 		case errors.Is(err, ErrRoomNotFound):
 			c.JSON(http.StatusNotFound, gin.H{"code": "room_not_found", "message": httpx.SafeMessage("room_not_found", err)})
@@ -811,7 +879,9 @@ func (h *Handler) RemoveMember(c *gin.Context) {
 	if err := h.service.RemoveMember(c.Request.Context(), c.Param("roomId"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c), c.Param("memberId")); err != nil {
 		switch {
 		case errors.Is(err, ErrNotRoomAdmin):
-			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", err)})
+			httpx.WriteNotRoomAdmin(c, err)
+		case errors.Is(err, ErrCannotManageMember):
+			c.JSON(http.StatusForbidden, gin.H{"code": "cannot_manage_member", "message": httpx.SafeMessage("cannot_manage_member", err)})
 		case errors.Is(err, ErrMemberNotFound):
 			c.JSON(http.StatusNotFound, gin.H{"code": "member_not_found", "message": httpx.SafeMessage("member_not_found", err)})
 		default:
@@ -828,7 +898,7 @@ func (h *Handler) ListAccessRequests(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrNotRoomAdmin):
-			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", err)})
+			httpx.WriteNotRoomAdmin(c, err)
 		case errors.Is(err, ErrRoomNotFound):
 			c.JSON(http.StatusNotFound, gin.H{"code": "room_not_found", "message": httpx.SafeMessage("room_not_found", err)})
 		default:
@@ -845,7 +915,7 @@ func (h *Handler) RejectAccessRequest(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrNotRoomAdmin):
-			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", err)})
+			httpx.WriteNotRoomAdmin(c, err)
 		case errors.Is(err, ErrRequestNotFound):
 			c.JSON(http.StatusNotFound, gin.H{"code": "request_not_found", "message": httpx.SafeMessage("request_not_found", err)})
 		default:
@@ -883,6 +953,8 @@ func roomSummaryResponse(r RoomSummary) gin.H {
 	resp["memberCount"] = r.MemberCount
 	resp["pendingApprovals"] = r.PendingApprovals
 	resp["visitorCount"] = r.VisitorCount
+	resp["viewCount"] = r.ViewCount
+	resp["activeLinkCount"] = r.ActiveLinkCount
 	resp["unreadQuestions"] = r.UnreadQuestions
 	resp["heatScore"] = r.HeatScore
 	if r.LastAccessedAt.Valid {
@@ -892,14 +964,64 @@ func roomSummaryResponse(r RoomSummary) gin.H {
 }
 
 func (h *Handler) overlayListIsAdmin(c *gin.Context, out []gin.H, rooms []RoomSummary) {
-	adminIDs, err := h.service.AdminRoomIDsForUser(c.Request.Context(), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c))
+	wsID := middleware.WorkspaceIDFrom(c)
+	userID := middleware.UserIDFrom(c)
+	adminIDs, err := h.service.AdminRoomIDsForUser(c.Request.Context(), wsID, userID)
 	if err != nil {
 		adminIDs = map[string]struct{}{}
 	}
+	oversight := h.service.IsWorkspaceOversight(c.Request.Context(), wsID, userID)
 	for i, r := range rooms {
 		_, ok := adminIDs[uuid.UUID(r.Room.ID.Bytes).String()]
 		out[i]["isAdmin"] = ok
+		out[i]["oversight"] = oversight && !ok
 	}
+}
+
+func (h *Handler) overlayListNdaRequired(c *gin.Context, out []gin.H, rooms []RoomSummary) {
+	wsID := middleware.WorkspaceIDFrom(c)
+	userID := middleware.UserIDFrom(c)
+	if h.service.IsWorkspaceOversight(c.Request.Context(), wsID, userID) {
+		for i := range out {
+			out[i]["ndaRequired"] = false
+		}
+		return
+	}
+	pending, err := h.service.PendingNdaRoomIDsForUser(
+		c.Request.Context(),
+		wsID,
+		userID,
+	)
+	if err != nil {
+		// Fail-closed for non-oversight: never return live aggregates when NDA state is unknown.
+		for i := range out {
+			out[i]["ndaRequired"] = false
+			redactPendingListRoom(out[i])
+		}
+		return
+	}
+	for i, r := range rooms {
+		_, ok := pending[uuid.UUID(r.Room.ID.Bytes).String()]
+		out[i]["ndaRequired"] = ok
+		if ok {
+			redactPendingListRoom(out[i])
+		}
+	}
+}
+
+func redactPendingListRoom(item gin.H) {
+	item["documentCount"] = 0
+	item["memberCount"] = 0
+	item["pendingApprovals"] = 0
+	item["visitorCount"] = 0
+	item["unreadQuestions"] = 0
+	item["heatScore"] = 0
+	item["viewCount"] = 0
+	item["activeLinkCount"] = 0
+	item["lastAccessedAt"] = nil
+	delete(item, "description")
+	delete(item, "ndaTemplateId")
+	delete(item, "ndaDocumentId")
 }
 
 func roomDetailResponse(r RoomDetail, internal action.MemberEmailSet) gin.H {
@@ -908,10 +1030,20 @@ func roomDetailResponse(r RoomDetail, internal action.MemberEmailSet) gin.H {
 	resp["memberCount"] = r.MemberCount
 	resp["pendingApprovals"] = r.PendingApprovals
 	resp["isAdmin"] = r.IsAdmin
+	resp["oversight"] = r.Oversight
+	resp["canContribute"] = r.CanContribute
+	resp["roomRole"] = r.RoomRole
+	resp["ndaRequired"] = r.NdaRequired
+	resp["memberStatus"] = r.MemberStatus
 	resp["folders"] = folderListResponse(r.Folders)
 	resp["documents"] = folderDocsListResponse(r.Documents)
 	resp["members"] = memberDetailListResponse(r.Members)
 	resp["accessRequests"] = requestListResponse(r.AccessRequests, internal)
+	if r.NdaRequired {
+		delete(resp, "description")
+		delete(resp, "ndaTemplateId")
+		delete(resp, "ndaDocumentId")
+	}
 	return resp
 }
 

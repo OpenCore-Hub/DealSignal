@@ -39,6 +39,8 @@ func NewHandler(s *Service, cfg *config.Config) *Handler {
 func (h *Handler) RegisterWorkspaceRoutes(r *gin.RouterGroup) {
 	g := r.Group("/analytics")
 	g.GET("/links/:linkId/score", h.GetScore)
+	g.GET("/documents/scores", h.ListDocumentScores)
+	g.GET("/documents/:documentId/score", h.GetDocumentScore)
 
 	r.GET("/dashboard/stats", h.GetDashboardStats)
 	r.GET("/insights/overview", h.GetInsightsOverview)
@@ -59,10 +61,16 @@ func (h *Handler) GetScore(c *gin.Context) {
 	linkID := c.Param("linkId")
 	workspaceID := middleware.WorkspaceIDFrom(c)
 
-	score, err := h.service.GetScore(c.Request.Context(), pgUUID(linkID), pgUUID(workspaceID), circleOverrideFromQuery(c))
+	override := circleOverrideFromQuery(c)
+	score, err := h.service.GetScore(c.Request.Context(), pgUUID(linkID), pgUUID(workspaceID), override)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": httpx.SafeMessage("link_not_found", err)})
 		return
+	}
+
+	circle := heat.CircleDefault
+	if rs, rsErr := h.service.loadWorkspaceRuleSet(c.Request.Context(), workspaceID, override); rsErr == nil {
+		circle = rs.Circle
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -70,9 +78,91 @@ func (h *Handler) GetScore(c *gin.Context) {
 		"score":     score.Score,
 		"level":     score.Level,
 		"trend":     score.Trend,
+		"circle":    string(circle),
 		"breakdown": score.Breakdown,
+		"keyPages":  documentKeyPagesJSON(h.service.LinkKeyPageEvidence(c.Request.Context(), pgUUID(linkID), pgUUID(workspaceID), override)),
 		"updatedAt": time.Now().UTC().Format(time.RFC3339),
 	})
+}
+
+// ListDocumentScores returns workspace document-native heat for library overlay.
+func (h *Handler) ListDocumentScores(c *gin.Context) {
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	docs, err := h.service.ListDocumentHeatScores(c.Request.Context(), pgUUID(workspaceID), circleOverrideFromQuery(c))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"documents": documentScoreList(docs)})
+}
+
+// GetDocumentScore returns document-native heat for Insights explain.
+func (h *Handler) GetDocumentScore(c *gin.Context) {
+	documentID := c.Param("documentId")
+	workspaceID := middleware.WorkspaceIDFrom(c)
+
+	score, err := h.service.GetDocumentHeatScore(c.Request.Context(), pgUUID(documentID), pgUUID(workspaceID), circleOverrideFromQuery(c))
+	if err != nil {
+		if errors.Is(err, ErrDocumentHeatNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"code": "document_not_found", "message": httpx.SafeMessage("document_not_found", err)})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+		return
+	}
+
+	links := make([]gin.H, 0, len(score.ContributingLinks))
+	for _, l := range score.ContributingLinks {
+		item := gin.H{
+			"id":        l.ID,
+			"name":      l.Name,
+			"pageViews": l.PageViews,
+			"shareKind": l.ShareKind,
+		}
+		if l.DealRoomID != "" {
+			item["dealRoomId"] = l.DealRoomID
+		}
+		if l.HasDocumentScope {
+			item["hasDocumentScope"] = true
+		}
+		links = append(links, item)
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"documentId": score.DocumentID,
+		"title":      score.Title,
+		"score":      score.Score,
+		"level":      score.Level,
+		"trend":      score.Trend,
+		"circle":     score.Circle,
+		"breakdown":  score.Breakdown,
+		"overlay": gin.H{
+			"readingDepth": score.Overlay.ReadingDepth,
+			"qaCitations":  score.Overlay.QACitations,
+			"crossDomain":  score.Overlay.CrossDomain,
+		},
+		"views":             score.Views,
+		"contributingLinks": links,
+		"keyPages":          documentKeyPagesJSON(score.KeyPages),
+		"updatedAt":         time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+func documentKeyPagesJSON(kp DocumentHeatKeyPages) gin.H {
+	pages := make([]gin.H, 0, len(kp.Pages))
+	for _, p := range kp.Pages {
+		pages = append(pages, gin.H{
+			"pageNumber":   p.PageNumber,
+			"title":        p.Title,
+			"engagedViews": p.EngagedViews,
+			"totalViews":   p.TotalViews,
+		})
+	}
+	return gin.H{
+		"engaged":    kp.Engaged,
+		"total":      kp.Total,
+		"minSeconds": kp.MinSeconds,
+		"pages":      pages,
+	}
 }
 
 // GetDashboardStats returns workspace-level dashboard data.
@@ -146,7 +236,7 @@ func (h *Handler) GetInsightsOverview(c *gin.Context) {
 		"previousPeriodCompletionRate":        overview.PreviousPeriodCompletionRate,
 		"openSignalCount":                     overview.OpenSignalCount,
 		"dailyVisits":                         dailyVisitList(overview.DailyVisits),
-		// top* rankings use lifetime heat — not filtered by rangeDays.
+		// topLinks: lifetime link heat. topDocuments: attributed page_views.
 		// topContacts feeds Deal Radar recent-visitors; Insights Overview CTA uses openSignalCount.
 		"topDocuments": documentScoreList(overview.TopDocuments),
 		"topLinks":     linkScoreList(c, h.cfg, overview.TopLinks),
@@ -281,6 +371,7 @@ func (h *Handler) GetKeyPageCompliance(c *gin.Context) {
 			"pageTitle":          p.PageTitle,
 			"category":           p.Category,
 			"views":              p.Views,
+			"engagedViews":       p.EngagedViews,
 			"uniqueVisitors":     p.UniqueVisitors,
 			"avgDurationSeconds": p.AvgDurationSeconds,
 		}
@@ -801,18 +892,34 @@ func linkOverviewItem(c *gin.Context, cfg *config.Config, l LinkOverview) gin.H 
 func linkScoreList(c *gin.Context, cfg *config.Config, links []LinkScore) []gin.H {
 	out := make([]gin.H, len(links))
 	for i, l := range links {
-		title := strings.TrimSpace(l.DocumentTitle)
+		name := ""
+		if l.Link.Name.Valid {
+			name = strings.TrimSpace(l.Link.Name.String)
+		}
+		docTitle := strings.TrimSpace(l.DocumentTitle)
 		item := gin.H{
-			"id":        uuidToString(l.Link.ID),
-			"title":     title,
-			"shortUrl":  publicURL(c, cfg, l.Link.PublicToken),
-			"views":     l.Link.AccessCount,
-			"score":     l.Score,
-			"heatLevel": l.Level,
+			"id":            uuidToString(l.Link.ID),
+			"name":          name,
+			"title":         name,
+			"documentTitle": docTitle,
+			"shortUrl":      publicURL(c, cfg, l.Link.PublicToken),
+			"views":         l.Link.AccessCount,
+			"score":         l.Score,
+			"heatLevel":     l.Level,
 		}
 		if l.Link.DocumentID.Valid {
 			item["documentId"] = uuidToString(l.Link.DocumentID)
 		}
+		if l.Link.DealRoomID.Valid {
+			item["dealRoomId"] = uuidToString(l.Link.DealRoomID)
+		}
+		if l.Link.HasDocumentScope {
+			item["hasDocumentScope"] = true
+		}
+		if l.Link.LinkType != "" {
+			item["linkType"] = l.Link.LinkType
+		}
+		item["shareKind"] = documentHeatShareKind(l.Link.DealRoomID.Valid, l.Link.HasDocumentScope)
 		out[i] = item
 	}
 	return out

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -88,5 +89,30 @@ func (s *Service) ResolveKeyPageNotification(
 		"circle":                 string(rs.Circle),
 		"document_id":            uuidToString(docUUID),
 	}
+	if docTitle := bundleMemberDocumentTitle(ctx, s, link, docUUID); docTitle != "" {
+		meta["document_title"] = docTitle
+	}
 	return KeyPageNotification{EventType: eventType, Metadata: meta}, true, nil
+}
+
+// bundleMemberDocumentTitle is set only when the viewed file is not the share
+// primary, so solo / primary-document emails stay unchanged.
+func bundleMemberDocumentTitle(ctx context.Context, s *Service, link db.Link, docUUID pgtype.UUID) string {
+	if !docUUID.Valid {
+		return ""
+	}
+	if link.DocumentID.Valid && link.DocumentID.Bytes == docUUID.Bytes {
+		return ""
+	}
+	if !link.WorkspaceID.Valid {
+		return ""
+	}
+	doc, err := s.queries.GetDocumentByID(ctx, db.GetDocumentByIDParams{
+		ID:          docUUID,
+		WorkspaceID: link.WorkspaceID,
+	})
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(doc.Title)
 }

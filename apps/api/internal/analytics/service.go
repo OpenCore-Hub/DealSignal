@@ -32,11 +32,21 @@ type Querier interface {
 	GetLinkLastAccessAt(ctx context.Context, linkID pgtype.UUID) (pgtype.Timestamptz, error)
 	GetLinkPageViewMetrics(ctx context.Context, linkID pgtype.UUID) (db.GetLinkPageViewMetricsRow, error)
 	GetLinkKeyPageViewMetrics(ctx context.Context, arg db.GetLinkKeyPageViewMetricsParams) (db.GetLinkKeyPageViewMetricsRow, error)
+	GetLinkKeyPageViewDetails(ctx context.Context, arg db.GetLinkKeyPageViewDetailsParams) ([]db.GetLinkKeyPageViewDetailsRow, error)
 	GetLinkBounceCount(ctx context.Context, linkID pgtype.UUID) (int64, error)
 	ListRecentDocumentsByWorkspace(ctx context.Context, arg db.ListRecentDocumentsByWorkspaceParams) ([]db.ListRecentDocumentsByWorkspaceRow, error)
 	ListRecentLinksByWorkspace(ctx context.Context, arg db.ListRecentLinksByWorkspaceParams) ([]db.Link, error)
 	ListLinksByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]db.Link, error)
+	ListLinkDocumentIDsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]db.ListLinkDocumentIDsByWorkspaceRow, error)
+	CountPendingActionItemsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) (int64, error)
+	ListPendingActionLinkIDsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]pgtype.UUID, error)
 	GetDocumentViewMetrics(ctx context.Context, arg db.GetDocumentViewMetricsParams) ([]db.GetDocumentViewMetricsRow, error)
+	ListDocumentHeatMetricsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]db.ListDocumentHeatMetricsByWorkspaceRow, error)
+	GetDocumentHeatMetrics(ctx context.Context, arg db.GetDocumentHeatMetricsParams) (db.GetDocumentHeatMetricsRow, error)
+	GetDocumentKeyPageViewMetricsBatch(ctx context.Context, arg db.GetDocumentKeyPageViewMetricsBatchParams) ([]db.GetDocumentKeyPageViewMetricsBatchRow, error)
+	GetDocumentKeyPageViewDetails(ctx context.Context, arg db.GetDocumentKeyPageViewDetailsParams) ([]db.GetDocumentKeyPageViewDetailsRow, error)
+	GetDocumentHeatExtrasBatch(ctx context.Context, arg db.GetDocumentHeatExtrasBatchParams) ([]db.GetDocumentHeatExtrasBatchRow, error)
+	ListDocumentHeatContributingLinks(ctx context.Context, arg db.ListDocumentHeatContributingLinksParams) ([]db.ListDocumentHeatContributingLinksRow, error)
 	ListSignalsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]db.Signal, error)
 	ListActionItemsByWorkspaceForUser(ctx context.Context, arg db.ListActionItemsByWorkspaceForUserParams) ([]db.ActionItem, error)
 	GetContactAggregatesByWorkspace(ctx context.Context, arg db.GetContactAggregatesByWorkspaceParams) ([]db.GetContactAggregatesByWorkspaceRow, error)
@@ -100,6 +110,8 @@ type Querier interface {
 	ListPendingDealRoomLinkAccessRequestsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]db.ListPendingDealRoomLinkAccessRequestsByWorkspaceRow, error)
 	ListPendingRoomAccessRequestsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]db.ListPendingRoomAccessRequestsByWorkspaceRow, error)
 }
+
+var _ Querier = (*db.Queries)(nil)
 
 // SignalFeed is the synced signal/action pair used by the dashboard.
 type SignalFeed struct {
@@ -489,6 +501,12 @@ func (s *Service) GetScore(ctx context.Context, linkID, workspaceID pgtype.UUID,
 	return s.getScoreForLink(ctx, link, circleOverride)
 }
 
+// linkHeatKeyPageCount is the Compute KeyPageViews input for a share.
+// Title-matched views with dwell ≥3s only — same gate as document heat.
+func linkHeatKeyPageCount(engaged int64) int {
+	return int(engaged)
+}
+
 // computeHeatFromScoreRow computes a heat result from a pre-aggregated
 // link_heat_scores row. Decay is applied at request time so the score stays
 // accurate between materialized view refreshes.
@@ -553,7 +571,7 @@ func (s *Service) getScoreForLink(ctx context.Context, link db.Link, circleOverr
 		if err != nil {
 			return heat.Result{}, fmt.Errorf("key page view metrics: %w", err)
 		}
-		keyPageViews = int(keyMetrics.TotalKeyPageViews)
+		keyPageViews = linkHeatKeyPageCount(keyMetrics.EngagedKeyPageViews)
 	}
 	circle := rs.Circle
 
@@ -672,7 +690,7 @@ func (s *Service) DashboardStats(ctx context.Context, workspaceID, userID string
 				Patterns: patterns,
 			})
 			for _, r := range kpRows {
-				keyPageViewsByLink[uuid.UUID(r.LinkID.Bytes).String()] = r.TotalKeyPageViews
+				keyPageViewsByLink[uuid.UUID(r.LinkID.Bytes).String()] = int64(linkHeatKeyPageCount(r.EngagedKeyPageViews))
 			}
 		}
 	}
@@ -837,7 +855,8 @@ type LinkScore struct {
 	DocumentTitle string
 }
 
-// DocumentScore pairs a document with engagement metrics and link-derived heat.
+// DocumentScore is a document-native heat row for Insights.
+// Views is attributed page_views (same grain as document detail), not unique visitors.
 type DocumentScore struct {
 	ID            pgtype.UUID
 	Title         string
@@ -918,7 +937,8 @@ func (s *Service) InsightsOverview(ctx context.Context, workspaceID string, days
 }
 
 // InsightsOverviewQuery aggregates discovery-oriented analytics for a preset
-// or custom UTC calendar range. Tops remain lifetime heat rankings.
+// or custom UTC calendar range. Top links use lifetime link heat; top documents
+// use document-attributed page_views (not a copy of link heat).
 func (s *Service) InsightsOverviewQuery(ctx context.Context, workspaceID string, q InsightsRangeQuery) (InsightsOverview, error) {
 	if s.planChecker != nil {
 		if err := s.planChecker.AssertCanUseRoomInsights(ctx, workspaceID); err != nil {
@@ -975,20 +995,12 @@ func (s *Service) InsightsOverviewQuery(ctx context.Context, workspaceID string,
 				Patterns: patterns,
 			})
 			for _, r := range kpRows {
-				keyPageViewsByLink[uuid.UUID(r.LinkID.Bytes).String()] = r.TotalKeyPageViews
+				keyPageViewsByLink[uuid.UUID(r.LinkID.Bytes).String()] = int64(linkHeatKeyPageCount(r.EngagedKeyPageViews))
 			}
 		}
 	}
 
-	// Document heat = max heat.Compute score among that document's share links
-	// (same algorithm as tierCounts / topLinks — never a separate views threshold).
-	type docHeat struct {
-		res           heat.Result
-		primaryLinkID pgtype.UUID
-		docID         pgtype.UUID
-	}
-	heatByDoc := make(map[string]docHeat)
-	viewsByDoc := make(map[string]int64)
+	linkHeatLevel := make(map[string]string, len(links))
 
 	overview.TopLinks = make([]LinkScore, 0, len(links))
 	overview.ActiveLinkCount = len(links)
@@ -1000,14 +1012,7 @@ func (s *Service) InsightsOverviewQuery(ctx context.Context, workspaceID string,
 		}
 		overview.TierCounts[res.Level]++
 		overview.TopLinks = append(overview.TopLinks, LinkScore{Link: link, Score: res.Score, Level: res.Level})
-
-		if link.DocumentID.Valid {
-			docID := uuid.UUID(link.DocumentID.Bytes).String()
-			viewsByDoc[docID] += int64(link.AccessCount)
-			if prev, ok := heatByDoc[docID]; !ok || res.Score > prev.res.Score {
-				heatByDoc[docID] = docHeat{res: res, primaryLinkID: link.ID, docID: link.DocumentID}
-			}
-		}
+		linkHeatLevel[linkIDStr] = res.Level
 	}
 
 	sort.Slice(overview.TopLinks, func(i, j int) bool {
@@ -1052,50 +1057,12 @@ func (s *Service) InsightsOverviewQuery(ctx context.Context, workspaceID string,
 		}
 	}
 
-	// Rank documents by max link heat.Compute — never by raw views (views stay as secondary metric).
-	docRanked := make([]docHeat, 0, len(heatByDoc))
-	for _, h := range heatByDoc {
-		docRanked = append(docRanked, h)
+	// Document ranking is page-view attributed (not a projection of link heat).
+	topDocs, docErr := s.rankTopDocuments(ctx, wsUUID, overviewRuleSet, topN)
+	if docErr != nil {
+		return overview, docErr
 	}
-	sort.Slice(docRanked, func(i, j int) bool {
-		if docRanked[i].res.Score != docRanked[j].res.Score {
-			return docRanked[i].res.Score > docRanked[j].res.Score
-		}
-		di := uuid.UUID(docRanked[i].docID.Bytes).String()
-		dj := uuid.UUID(docRanked[j].docID.Bytes).String()
-		return viewsByDoc[di] > viewsByDoc[dj]
-	})
-	if len(docRanked) > topN {
-		docRanked = docRanked[:topN]
-	}
-	topDocIDs := make([]pgtype.UUID, 0, len(docRanked))
-	for _, h := range docRanked {
-		topDocIDs = append(topDocIDs, h.docID)
-	}
-	docTitleByID := make(map[string]string, len(topDocIDs))
-	if len(topDocIDs) > 0 {
-		docs, err := s.queries.GetDocumentsByIDs(ctx, db.GetDocumentsByIDsParams{
-			Column1:     topDocIDs,
-			WorkspaceID: wsUUID,
-		})
-		if err != nil {
-			return overview, fmt.Errorf("top document titles: %w", err)
-		}
-		for _, d := range docs {
-			docTitleByID[uuid.UUID(d.ID.Bytes).String()] = strings.TrimSpace(d.Title)
-		}
-	}
-	for _, h := range docRanked {
-		docID := uuid.UUID(h.docID.Bytes).String()
-		overview.TopDocuments = append(overview.TopDocuments, DocumentScore{
-			ID:            h.docID,
-			Title:         docTitleByID[docID],
-			Views:         viewsByDoc[docID],
-			Score:         h.res.Score,
-			Level:         h.res.Level,
-			PrimaryLinkID: h.primaryLinkID,
-		})
-	}
+	overview.TopDocuments = topDocs
 
 	contacts, err := s.queries.GetContactAggregatesByWorkspace(ctx, db.GetContactAggregatesByWorkspaceParams{
 		WorkspaceID: wsUUID,
@@ -1233,11 +1200,24 @@ func (s *Service) InsightsOverviewQuery(ctx context.Context, workspaceID string,
 	overview.PreviousPeriodCompletedSessions = prevSessions.CompletedSessions
 	overview.PreviousPeriodCompletionRate = completionRate(prevSessions.CompletedSessions, prevSessions.MeasurableSessions)
 
-	signals, sigErr := s.queries.ListSignalsByWorkspace(ctx, wsUUID)
-	if sigErr != nil {
-		return overview, fmt.Errorf("open signals: %w", sigErr)
+	pendingCount, pendErr := s.queries.CountPendingActionItemsByWorkspace(ctx, wsUUID)
+	if pendErr != nil {
+		return overview, fmt.Errorf("pending actions: %w", pendErr)
 	}
-	overview.OpenSignalCount = len(signals)
+	overview.OpenSignalCount = int(pendingCount)
+
+	pendingLinkIDs := make([]string, 0)
+	if pendingLinks, linkErr := s.queries.ListPendingActionLinkIDsByWorkspace(ctx, wsUUID); linkErr != nil {
+		return overview, fmt.Errorf("pending action links: %w", linkErr)
+	} else {
+		pendingLinkIDs = make([]string, 0, len(pendingLinks))
+		for _, id := range pendingLinks {
+			if !id.Valid {
+				continue
+			}
+			pendingLinkIDs = append(pendingLinkIDs, uuid.UUID(id.Bytes).String())
+		}
+	}
 
 	forwardSignalsByLink := make(map[string]int64)
 	if fwdRows, fwdErr := s.queries.CountWorkspaceForwardSignalsByLinkInRange(ctx, db.CountWorkspaceForwardSignalsByLinkInRangeParams{
@@ -1253,18 +1233,11 @@ func (s *Service) InsightsOverviewQuery(ctx context.Context, workspaceID string,
 		}
 	}
 
-	linkHeatLevel := make(map[string]string, len(overview.TopLinks))
-	for _, ls := range overview.TopLinks {
-		if !ls.Link.ID.Valid {
-			continue
-		}
-		linkHeatLevel[uuid.UUID(ls.Link.ID.Bytes).String()] = ls.Level
-	}
 	overview.ScenarioPack = s.buildScenarioPackInsights(ctx, wsUUID, overviewRuleSet, scenarioPackKPIInput{
 		Links:                links,
 		KeyPageViewsByLink:   keyPageViewsByLink,
 		LinkHeatLevel:        linkHeatLevel,
-		Signals:              signals,
+		PendingActionLinkIDs: pendingLinkIDs,
 		ForwardSignalsByLink: forwardSignalsByLink,
 	})
 
@@ -1487,14 +1460,17 @@ func (s *Service) PageAnalyticsRange(ctx context.Context, documentID, workspaceI
 			exitRate = 1
 		}
 
-		out[i] = PageAnalytic{
+		item := PageAnalytic{
 			PageNumber:         r.PageNumber,
 			ViewCount:          r.ViewCount,
 			AvgDurationSeconds: r.AvgDurationSeconds,
-			LastViewedAt:       r.LastViewedAt.Time,
 			Title:              title,
 			ExitRate:           exitRate,
 		}
+		if r.LastViewedAt.Valid {
+			item.LastViewedAt = r.LastViewedAt.Time
+		}
+		out[i] = item
 	}
 	return out, nil
 }

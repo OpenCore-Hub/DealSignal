@@ -264,6 +264,8 @@ func writeMemberManageError(c *gin.Context, err error) bool {
 		c.JSON(http.StatusForbidden, gin.H{"code": "cannot_modify_owner", "message": httpx.SafeMessage("cannot_modify_owner", err)})
 	case errors.Is(err, ErrCannotModifySelf):
 		c.JSON(http.StatusForbidden, gin.H{"code": "cannot_modify_self", "message": httpx.SafeMessage("cannot_modify_self", err)})
+	case errors.Is(err, ErrCannotRemoveSoleRoomOperator):
+		c.JSON(http.StatusConflict, gin.H{"code": "cannot_remove_sole_room_operator", "message": httpx.SafeMessage("cannot_remove_sole_room_operator", err)})
 	case errors.Is(err, ErrInvitationNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"code": "invitation_not_found", "message": httpx.SafeMessage("invitation_not_found", err)})
 	case errors.Is(err, ErrInvitationUsed):

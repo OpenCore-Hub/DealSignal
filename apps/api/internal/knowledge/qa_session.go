@@ -141,7 +141,7 @@ func (s *Service) queryWithSession(
 	if !s.Enabled() {
 		return SessionQueryResponse{}, ErrUnavailable
 	}
-	if err := s.access.RequireActiveRoomMember(ctx, roomID, workspaceID, userID); err != nil {
+	if err := s.access.RequireRoomContribute(ctx, roomID, workspaceID, userID); err != nil {
 		return SessionQueryResponse{}, err
 	}
 
@@ -338,7 +338,7 @@ func (s *Service) CreateSession(
 	roomID, workspaceID, userID string,
 	req CreateSessionRequest,
 ) (QASession, error) {
-	if err := s.access.RequireActiveRoomMember(ctx, roomID, workspaceID, userID); err != nil {
+	if err := s.access.RequireRoomContribute(ctx, roomID, workspaceID, userID); err != nil {
 		return QASession{}, err
 	}
 	title := truncateRunes(req.Title, knowledgeQATitleMaxRunes)
@@ -385,7 +385,7 @@ func (s *Service) GetSession(ctx context.Context, roomID, workspaceID, userID, s
 // CloseSession marks active sessions in the room closed (新会话).
 // Closes all actives so orphan actives cannot remain after a successful close.
 func (s *Service) CloseSession(ctx context.Context, roomID, workspaceID, userID, sessionID string) (QASession, error) {
-	if err := s.access.RequireActiveRoomMember(ctx, roomID, workspaceID, userID); err != nil {
+	if err := s.access.RequireRoomContribute(ctx, roomID, workspaceID, userID); err != nil {
 		return QASession{}, err
 	}
 	closeAndLoad := func(q *db.Queries) (db.KnowledgeQaSession, error) {

@@ -15,6 +15,7 @@ import (
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/mailer"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -31,10 +32,10 @@ func TestNormalizeRole(t *testing.T) {
 		in   string
 		want string
 	}{
-		{"", "viewer"},
-		{"viewer", "viewer"},
+		{"", "guest"},
+		{"viewer", "guest"},
 		{"Admin", "admin"},
-		{"contributor", "contributor"},
+		{"contributor", "member"},
 		{"owner", ""},
 		{"superuser", ""},
 	}
@@ -1053,6 +1054,88 @@ func TestDocumentCategoryTransitions(t *testing.T) {
 	}
 }
 
+func TestArchivedDocumentHiddenFromRoomAndRejectedOnAdd(t *testing.T) {
+	fake := newFakeDB(t)
+	svc := NewService(db.New(fake), nil, testCfg())
+	ownerID := uuid.NewString()
+	wsID := uuid.NewString()
+	fake.workspace = db.Workspace{
+		ID:       pgUUID(wsID),
+		TenantID: pgUUID(uuid.NewString()),
+		Name:     "Test Workspace",
+		Slug:     "test-workspace",
+	}
+	room, err := svc.CreateRoom(context.Background(), ownerID, wsID, CreateRoomRequest{
+		Slug: "archive-room",
+		Name: "Archive Room",
+	})
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	roomID := uuid.UUID(room.ID.Bytes).String()
+
+	liveID := uuid.NewString()
+	archivedID := uuid.NewString()
+	fake.documents = append(fake.documents,
+		db.Document{
+			ID:          pgUUID(liveID),
+			WorkspaceID: pgUUID(wsID),
+			TenantID:    fake.workspace.TenantID,
+			Title:       "Live memo",
+			SourceType:  "pdf",
+			Status:      "ready",
+		},
+		db.Document{
+			ID:          pgUUID(archivedID),
+			WorkspaceID: pgUUID(wsID),
+			TenantID:    fake.workspace.TenantID,
+			Title:       "Old memo",
+			SourceType:  "pdf",
+			Status:      "archived",
+		},
+	)
+	if _, err := svc.AddDocument(context.Background(), roomID, wsID, ownerID, liveID, "/general", 0); err != nil {
+		t.Fatalf("add live: %v", err)
+	}
+	if _, err := svc.AddDocument(context.Background(), roomID, wsID, ownerID, archivedID, "/general", 1); !errors.Is(err, ErrArchivedDocumentNotAllowed) {
+		t.Fatalf("add archived: got %v, want ErrArchivedDocumentNotAllowed", err)
+	}
+
+	// Membership can already exist from a later archive; live lists must hide it.
+	fake.roomDocs = append(fake.roomDocs, db.DealRoomDocument{
+		ID:          newPGUUID(),
+		TenantID:    fake.workspace.TenantID,
+		WorkspaceID: pgUUID(wsID),
+		RoomID:      room.ID,
+		DocumentID:  pgUUID(archivedID),
+		FolderPath:  "/general",
+		SortOrder:   1,
+		CreatedAt:   nowTs(),
+	})
+
+	docs, err := svc.GetRoomDocuments(context.Background(), roomID, wsID, ownerID)
+	if err != nil {
+		t.Fatalf("get documents: %v", err)
+	}
+	var seen []string
+	for _, fd := range docs {
+		for _, d := range fd.Documents {
+			seen = append(seen, d.DocumentID)
+		}
+	}
+	if len(seen) != 1 || seen[0] != liveID {
+		t.Fatalf("live room docs = %v, want only %s", seen, liveID)
+	}
+
+	summary, err := svc.GetRoomSummary(context.Background(), roomID, wsID)
+	if err != nil {
+		t.Fatalf("summary: %v", err)
+	}
+	if summary.DocumentCount != 1 {
+		t.Fatalf("documentCount = %d, want 1", summary.DocumentCount)
+	}
+}
+
 func TestAdminAuthorization(t *testing.T) {
 	fake := newFakeDB(t)
 	svc := NewService(db.New(fake), nil, testCfg())
@@ -1091,9 +1174,8 @@ func TestAdminAuthorization(t *testing.T) {
 		t.Fatalf("expected ErrNotRoomAdmin for viewer, got %v", err)
 	}
 
-	_, err = svc.ListMembers(context.Background(), roomID, wsID, viewerID)
-	if !errors.Is(err, ErrNotRoomAdmin) {
-		t.Fatalf("expected ErrNotRoomAdmin for viewer listing members, got %v", err)
+	if _, err = svc.ListMembers(context.Background(), roomID, wsID, viewerID); err != nil {
+		t.Fatalf("room guest should be able to list members: %v", err)
 	}
 }
 
@@ -1144,6 +1226,9 @@ func TestGetRoomDetailEnriched(t *testing.T) {
 	}
 	if !detail.IsAdmin {
 		t.Fatal("expected room owner IsAdmin=true")
+	}
+	if detail.RoomRole != "owner" {
+		t.Fatalf("expected room owner RoomRole=owner, got %q", detail.RoomRole)
 	}
 	if len(detail.Folders) != 7 {
 		t.Fatalf("expected 7 template folders, got %d", len(detail.Folders))
@@ -1319,8 +1404,17 @@ func TestWorkspaceManagerCanAccessRoomWithoutRoomMembership(t *testing.T) {
 	if err != nil {
 		t.Fatalf("workspace owner get detail: %v", err)
 	}
-	if !detail.IsAdmin {
-		t.Fatal("expected workspace owner IsAdmin=true")
+	if detail.IsAdmin {
+		t.Fatal("workspace owner without a room role must not be IsAdmin")
+	}
+	if !detail.Oversight {
+		t.Fatal("workspace owner without a room role must have Oversight")
+	}
+	if detail.CanContribute {
+		t.Fatal("oversight must not contribute")
+	}
+	if detail.RoomRole != "" {
+		t.Fatalf("oversight must have empty RoomRole, got %q", detail.RoomRole)
 	}
 	if len(detail.Members) == 0 {
 		t.Fatal("expected workspace owner to receive admin detail including members")
@@ -1331,6 +1425,160 @@ func TestWorkspaceManagerCanAccessRoomWithoutRoomMembership(t *testing.T) {
 
 	if _, err := svc.ListFoldersForMember(context.Background(), roomID, wsID, outsiderID); !errors.Is(err, ErrApprovalRequired) {
 		t.Fatalf("expected ErrApprovalRequired for outsider, got %v", err)
+	}
+}
+
+func TestUpdateAndRemoveRoomMemberRoles(t *testing.T) {
+	fake := newFakeDB(t)
+	svc := NewService(db.New(fake), nil, testCfg())
+	ownerID := uuid.NewString()
+	adminID := uuid.NewString()
+	wsID := uuid.NewString()
+	fake.workspace = db.Workspace{
+		ID:       pgUUID(wsID),
+		TenantID: pgUUID(uuid.NewString()),
+		Name:     "Test Workspace",
+		Slug:     "test-workspace",
+	}
+
+	room, err := svc.CreateRoom(context.Background(), ownerID, wsID, CreateRoomRequest{
+		Slug: "role-acl",
+		Name: "Role ACL",
+	})
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	roomID := uuid.UUID(room.ID.Bytes).String()
+
+	guest, err := svc.AddMember(context.Background(), roomID, wsID, ownerID, "guest@example.com", "guest")
+	if err != nil {
+		t.Fatalf("add guest: %v", err)
+	}
+	guestID := uuid.UUID(guest.ID.Bytes).String()
+
+	updated, err := svc.UpdateRoomMemberRole(context.Background(), roomID, wsID, ownerID, guestID, "member")
+	if err != nil {
+		t.Fatalf("owner promote guest: %v", err)
+	}
+	if updated.Role != "member" {
+		t.Fatalf("expected member, got %s", updated.Role)
+	}
+
+	var ownerMemberID string
+	for _, m := range fake.members {
+		if m.Role == "owner" {
+			ownerMemberID = uuid.UUID(m.ID.Bytes).String()
+		}
+	}
+	if ownerMemberID == "" {
+		t.Fatal("missing owner member")
+	}
+	if _, err := svc.UpdateRoomMemberRole(context.Background(), roomID, wsID, ownerID, ownerMemberID, "admin"); !errors.Is(err, ErrCannotManageMember) {
+		t.Fatalf("expected cannot manage owner, got %v", err)
+	}
+	if err := svc.RemoveMember(context.Background(), roomID, wsID, ownerID, ownerMemberID); !errors.Is(err, ErrCannotManageMember) {
+		t.Fatalf("expected cannot remove owner, got %v", err)
+	}
+
+	adminMember := db.RoomMember{
+		ID:          newPGUUID(),
+		TenantID:    room.TenantID,
+		WorkspaceID: room.WorkspaceID,
+		RoomID:      room.ID,
+		Email:       "admin@example.com",
+		UserID:      pgUUID(adminID),
+		Role:        "admin",
+		Status:      "active",
+		CreatedAt:   nowTs(),
+		UpdatedAt:   nowTs(),
+	}
+	fake.members = append(fake.members, adminMember)
+	fake.workspaceMembers = append(fake.workspaceMembers, db.WorkspaceMember{
+		WorkspaceID: room.WorkspaceID,
+		UserID:      pgUUID(adminID),
+		Role:        "member",
+	})
+	adminMemberID := uuid.UUID(adminMember.ID.Bytes).String()
+
+	if _, err := svc.UpdateRoomMemberRole(context.Background(), roomID, wsID, adminID, guestID, "admin"); !errors.Is(err, ErrCannotManageMember) {
+		t.Fatalf("room admin must not grant admin, got %v", err)
+	}
+	if err := svc.RemoveMember(context.Background(), roomID, wsID, adminID, adminMemberID); !errors.Is(err, ErrCannotManageMember) {
+		t.Fatalf("must not remove self, got %v", err)
+	}
+
+	otherAdmin := db.RoomMember{
+		ID:          newPGUUID(),
+		TenantID:    room.TenantID,
+		WorkspaceID: room.WorkspaceID,
+		RoomID:      room.ID,
+		Email:       "admin2@example.com",
+		Role:        "admin",
+		Status:      "active",
+		CreatedAt:   nowTs(),
+		UpdatedAt:   nowTs(),
+	}
+	fake.members = append(fake.members, otherAdmin)
+	if err := svc.RemoveMember(context.Background(), roomID, wsID, adminID, uuid.UUID(otherAdmin.ID.Bytes).String()); !errors.Is(err, ErrCannotManageMember) {
+		t.Fatalf("room admin must not remove another admin, got %v", err)
+	}
+
+	if err := svc.RemoveMember(context.Background(), roomID, wsID, adminID, guestID); err != nil {
+		t.Fatalf("room admin should remove member: %v", err)
+	}
+}
+
+func TestRoomMemberCanAddDocumentButNotRemove(t *testing.T) {
+	fake := newFakeDB(t)
+	svc := NewService(db.New(fake), nil, testCfg())
+	ownerID := uuid.NewString()
+	memberID := uuid.NewString()
+	wsID := uuid.NewString()
+	fake.workspace = db.Workspace{
+		ID:       pgUUID(wsID),
+		TenantID: pgUUID(uuid.NewString()),
+		Name:     "Test Workspace",
+		Slug:     "test-workspace",
+	}
+
+	room, err := svc.CreateRoom(context.Background(), ownerID, wsID, CreateRoomRequest{
+		Slug: "contrib-docs",
+		Name: "Contribute Docs",
+	})
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	roomID := uuid.UUID(room.ID.Bytes).String()
+	if _, err := svc.CreateFolder(context.Background(), roomID, wsID, ownerID, "Docs", "/"); err != nil {
+		t.Fatalf("create folder: %v", err)
+	}
+	if _, err := svc.AddMember(context.Background(), roomID, wsID, ownerID, "member@example.com", "member"); err != nil {
+		t.Fatalf("add member: %v", err)
+	}
+	for i := range fake.members {
+		if fake.members[i].Email == "member@example.com" {
+			fake.members[i].UserID = pgUUID(memberID)
+		}
+	}
+
+	docID := uuid.NewString()
+	fake.documents = append(fake.documents, db.Document{
+		ID:          pgUUID(docID),
+		WorkspaceID: pgUUID(wsID),
+		TenantID:    fake.workspace.TenantID,
+		Title:       "Member Upload",
+		SourceType:  "pdf",
+		Status:      "ready",
+		Category:    "general",
+	})
+	if _, err := svc.AddDocument(context.Background(), roomID, wsID, memberID, docID, "/docs", 0); err != nil {
+		t.Fatalf("room member should add document: %v", err)
+	}
+	if err := svc.RemoveDocument(context.Background(), roomID, wsID, memberID, docID); !errors.Is(err, ErrNotRoomAdmin) {
+		t.Fatalf("room member must not remove document, got %v", err)
+	}
+	if _, err := svc.CreateFolder(context.Background(), roomID, wsID, memberID, "Secret", "/"); !errors.Is(err, ErrNotRoomAdmin) {
+		t.Fatalf("room member must not create folder, got %v", err)
 	}
 }
 
@@ -1362,25 +1610,12 @@ func TestWorkspaceGuestCanViewRoomWithoutRoomMembership(t *testing.T) {
 	}
 	roomID := uuid.UUID(room.ID.Bytes).String()
 
-	folders, err := svc.ListFoldersForMember(context.Background(), roomID, wsID, guestID)
-	if err != nil {
-		t.Fatalf("guest list folders: %v", err)
+	if _, err := svc.ListFoldersForMember(context.Background(), roomID, wsID, guestID); !errors.Is(err, ErrApprovalRequired) {
+		t.Fatalf("workspace guest without a room row must not view the room, got %v", err)
 	}
-	if len(folders) == 0 {
-		t.Fatal("expected folders for workspace guest")
+	if _, err := svc.GetRoomDetail(context.Background(), roomID, wsID, guestID); !errors.Is(err, ErrApprovalRequired) {
+		t.Fatalf("workspace guest without a room row must not get detail, got %v", err)
 	}
-
-	detail, err := svc.GetRoomDetail(context.Background(), roomID, wsID, guestID)
-	if err != nil {
-		t.Fatalf("guest get detail: %v", err)
-	}
-	if detail.IsAdmin {
-		t.Fatal("workspace guest must not be room admin")
-	}
-	if len(detail.Members) != 0 {
-		t.Fatal("workspace guest must not receive admin member list")
-	}
-
 	if _, err := svc.CreateFolder(context.Background(), roomID, wsID, guestID, "secret", "/"); !errors.Is(err, ErrNotRoomAdmin) {
 		t.Fatalf("guest create folder: %v", err)
 	}
@@ -1511,6 +1746,431 @@ func TestAddMemberRequiresNDAAgreement(t *testing.T) {
 	}
 }
 
+func TestGetRoomDetailPendingMemberNdaGateAndSign(t *testing.T) {
+	fake := newFakeDB(t)
+	mail := &captureMailer{}
+	cfg := testCfg()
+	cfg.FrontendURL = "https://app.example.com"
+	svc := NewService(db.New(fake), nil, cfg, WithMailer(mail))
+	ownerID := uuid.NewString()
+	inviteeID := uuid.NewString()
+	wsID := uuid.NewString()
+	wsUUID := pgUUID(wsID)
+	fake.workspace = db.Workspace{
+		ID:       wsUUID,
+		TenantID: pgUUID(uuid.NewString()),
+		Name:     "Acme",
+		Slug:     "acme",
+	}
+	fake.users = []db.User{
+		{ID: pgUUID(ownerID), Email: "owner@example.com", CreatedAt: nowTs()},
+		{ID: pgUUID(inviteeID), Email: "invitee@example.com", CreatedAt: nowTs()},
+	}
+	fake.workspaceMembers = []db.WorkspaceMember{
+		{WorkspaceID: wsUUID, UserID: pgUUID(ownerID), Role: "owner", JoinedAt: nowTs()},
+		{WorkspaceID: wsUUID, UserID: pgUUID(inviteeID), Role: "guest", JoinedAt: nowTs()},
+	}
+
+	room, err := svc.CreateRoom(context.Background(), ownerID, wsID, CreateRoomRequest{
+		Slug:        "pending-nda-room",
+		Name:        "Pending NDA Room",
+		RequiresNDA: true,
+	})
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	roomID := uuid.UUID(room.ID.Bytes).String()
+	tplID := uuid.New()
+	fake.ndaTemplates = append(fake.ndaTemplates, db.NdaTemplate{
+		ID:          pgUUID(tplID.String()),
+		TenantID:    fake.workspace.TenantID,
+		WorkspaceID: wsUUID,
+		Name:        "NDA",
+		Status:      "active",
+		CreatedAt:   nowTs(),
+		UpdatedAt:   nowTs(),
+	})
+	if _, err := svc.SetMemberNDAAgreement(context.Background(), roomID, wsID, ownerID, tplID.String(), ""); err != nil {
+		t.Fatalf("set nda: %v", err)
+	}
+
+	if _, err := svc.AddMember(context.Background(), roomID, wsID, ownerID, "invitee@example.com", "member"); err != nil {
+		t.Fatalf("add member: %v", err)
+	}
+	if len(mail.jobs) != 1 || mail.jobs[0].EmailType != mailer.EmailTypeRoomInvite {
+		t.Fatalf("expected room invite email, got %+v", mail.jobs)
+	}
+	if !strings.Contains(mail.jobs[0].TemplateVariables["InvitationLink"], "/acme/deal-rooms/"+roomID) {
+		t.Fatalf("invite link: %+v", mail.jobs[0].TemplateVariables)
+	}
+
+	detail, err := svc.GetRoomDetail(context.Background(), roomID, wsID, inviteeID)
+	if err != nil {
+		t.Fatalf("pending detail: %v", err)
+	}
+	if !detail.NdaRequired || detail.MemberStatus != "pending" || len(detail.Documents) != 0 || len(detail.Folders) != 0 {
+		t.Fatalf("pending must get NDA shell without docs: %+v", detail)
+	}
+	if detail.Room.Description.Valid || detail.Room.NdaTemplateID.Valid || detail.Room.NdaDocumentID.Valid {
+		t.Fatalf("pending shell must not include description or NDA document ids: %+v", detail.Room)
+	}
+	if _, err := svc.GetRoomDocuments(context.Background(), roomID, wsID, inviteeID); !errors.Is(err, ErrApprovalRequired) {
+		t.Fatalf("pending must not list documents, got %v", err)
+	}
+
+	signed, err := svc.SignMemberNDA(context.Background(), roomID, wsID, inviteeID)
+	if err != nil {
+		t.Fatalf("sign nda: %v", err)
+	}
+	if signed.NdaRequired || signed.MemberStatus != "active" {
+		t.Fatalf("after sign: ndaRequired=%v status=%s", signed.NdaRequired, signed.MemberStatus)
+	}
+}
+
+type captureMailer struct {
+	jobs []mailer.EmailJob
+}
+
+func (c *captureMailer) SendVerificationEmail(context.Context, string, string) (string, error) {
+	return "", nil
+}
+func (c *captureMailer) SendLinkAccessCodeEmail(context.Context, string, string, string, string) (string, error) {
+	return "", nil
+}
+func (c *captureMailer) SendEmail(_ context.Context, job mailer.EmailJob) (string, error) {
+	c.jobs = append(c.jobs, job)
+	return "ok", nil
+}
+
+func TestSignMemberNDARejectsSuspended(t *testing.T) {
+	fake := newFakeDB(t)
+	svc := NewService(db.New(fake), nil, testCfg())
+	ownerID := uuid.NewString()
+	inviteeID := uuid.NewString()
+	wsID := uuid.NewString()
+	wsUUID := pgUUID(wsID)
+	fake.workspace = db.Workspace{
+		ID:       wsUUID,
+		TenantID: pgUUID(uuid.NewString()),
+		Name:     "Acme",
+		Slug:     "acme",
+	}
+	fake.users = []db.User{
+		{ID: pgUUID(inviteeID), Email: "suspended@example.com", CreatedAt: nowTs()},
+	}
+	fake.workspaceMembers = []db.WorkspaceMember{
+		{WorkspaceID: wsUUID, UserID: pgUUID(ownerID), Role: "owner", JoinedAt: nowTs()},
+		{WorkspaceID: wsUUID, UserID: pgUUID(inviteeID), Role: "guest", JoinedAt: nowTs()},
+	}
+	room, err := svc.CreateRoom(context.Background(), ownerID, wsID, CreateRoomRequest{
+		Slug: "suspended-room",
+		Name: "Suspended Room",
+	})
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	fake.members = append(fake.members, db.RoomMember{
+		ID:          newPGUUID(),
+		TenantID:    fake.workspace.TenantID,
+		WorkspaceID: wsUUID,
+		RoomID:      room.ID,
+		Email:       "suspended@example.com",
+		UserID:      pgUUID(inviteeID),
+		Role:        "guest",
+		Status:      "suspended",
+		NdaStatus:   "not_required",
+		CreatedAt:   nowTs(),
+		UpdatedAt:   nowTs(),
+	})
+	if _, err := svc.SignMemberNDA(context.Background(), uuid.UUID(room.ID.Bytes).String(), wsID, inviteeID); !errors.Is(err, ErrMemberNotFound) {
+		t.Fatalf("suspended must not self-activate, got %v", err)
+	}
+}
+
+func TestPendingNdaRoomIDsForUserAlignsWithResolve(t *testing.T) {
+	fake := newFakeDB(t)
+	svc := NewService(db.New(fake), nil, testCfg())
+	ownerID := uuid.NewString()
+	inviteeID := uuid.NewString()
+	wsID := uuid.NewString()
+	wsUUID := pgUUID(wsID)
+	fake.workspace = db.Workspace{
+		ID:       wsUUID,
+		TenantID: pgUUID(uuid.NewString()),
+		Name:     "Acme",
+		Slug:     "acme",
+	}
+	fake.users = []db.User{
+		{ID: pgUUID(inviteeID), Email: "invitee@example.com", CreatedAt: nowTs()},
+	}
+	fake.workspaceMembers = []db.WorkspaceMember{
+		{WorkspaceID: wsUUID, UserID: pgUUID(ownerID), Role: "owner", JoinedAt: nowTs()},
+		{WorkspaceID: wsUUID, UserID: pgUUID(inviteeID), Role: "guest", JoinedAt: nowTs()},
+	}
+	room, err := svc.CreateRoom(context.Background(), ownerID, wsID, CreateRoomRequest{
+		Slug:        "pending-list-room",
+		Name:        "Pending List Room",
+		RequiresNDA: true,
+	})
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	tplID := uuid.New()
+	fake.ndaTemplates = append(fake.ndaTemplates, db.NdaTemplate{
+		ID:          pgUUID(tplID.String()),
+		TenantID:    fake.workspace.TenantID,
+		WorkspaceID: wsUUID,
+		Name:        "NDA",
+		Status:      "active",
+		CreatedAt:   nowTs(),
+		UpdatedAt:   nowTs(),
+	})
+	if _, err := svc.SetMemberNDAAgreement(context.Background(), uuid.UUID(room.ID.Bytes).String(), wsID, ownerID, tplID.String(), ""); err != nil {
+		t.Fatalf("set nda: %v", err)
+	}
+	if _, err := svc.AddMember(context.Background(), uuid.UUID(room.ID.Bytes).String(), wsID, ownerID, "invitee@example.com", "member"); err != nil {
+		t.Fatalf("add member: %v", err)
+	}
+
+	pending, err := svc.PendingNdaRoomIDsForUser(context.Background(), wsID, inviteeID)
+	if err != nil {
+		t.Fatalf("pending guest: %v", err)
+	}
+	if _, ok := pending[uuid.UUID(room.ID.Bytes).String()]; !ok {
+		t.Fatalf("guest pending must overlay NDA, got %v", pending)
+	}
+
+	// Owner also has a leftover pending row; Resolve still grants oversight View.
+	fake.members = append(fake.members, db.RoomMember{
+		ID:          newPGUUID(),
+		TenantID:    fake.workspace.TenantID,
+		WorkspaceID: wsUUID,
+		RoomID:      room.ID,
+		Email:       "owner-pending@example.com",
+		UserID:      pgUUID(ownerID),
+		Role:        "guest",
+		Status:      "pending",
+		NdaStatus:   "pending",
+		CreatedAt:   nowTs(),
+		UpdatedAt:   nowTs(),
+	})
+	ownerPending, err := svc.PendingNdaRoomIDsForUser(context.Background(), wsID, ownerID)
+	if err != nil {
+		t.Fatalf("owner pending: %v", err)
+	}
+	if len(ownerPending) != 0 {
+		t.Fatalf("oversight must not get NDA list overlay, got %v", ownerPending)
+	}
+}
+
+func TestAddMemberCanonicalizesGmailMailbox(t *testing.T) {
+	fake := newFakeDB(t)
+	mail := &captureMailer{}
+	cfg := testCfg()
+	cfg.FrontendURL = "https://app.example.com"
+	svc := NewService(db.New(fake), nil, cfg, WithMailer(mail))
+	ownerID := uuid.NewString()
+	inviteeID := uuid.NewString()
+	wsID := uuid.NewString()
+	wsUUID := pgUUID(wsID)
+	fake.workspace = db.Workspace{
+		ID:       wsUUID,
+		TenantID: pgUUID(uuid.NewString()),
+		Name:     "Acme",
+		Slug:     "acme",
+	}
+	fake.users = []db.User{
+		{ID: pgUUID(inviteeID), Email: "janedoe@gmail.com", CreatedAt: nowTs()},
+	}
+	fake.workspaceMembers = []db.WorkspaceMember{
+		{WorkspaceID: wsUUID, UserID: pgUUID(ownerID), Role: "owner", JoinedAt: nowTs()},
+		{WorkspaceID: wsUUID, UserID: pgUUID(inviteeID), Role: "guest", JoinedAt: nowTs()},
+	}
+	room, err := svc.CreateRoom(context.Background(), ownerID, wsID, CreateRoomRequest{
+		Slug: "gmail-invite-room",
+		Name: "Gmail Invite Room",
+	})
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	member, err := svc.AddMember(context.Background(), uuid.UUID(room.ID.Bytes).String(), wsID, ownerID, "Jane.Doe+vdr@Gmail.COM", "guest")
+	if err != nil {
+		t.Fatalf("add member: %v", err)
+	}
+	if member.Email != "janedoe@gmail.com" {
+		t.Fatalf("stored email=%q", member.Email)
+	}
+	if member.UserID != pgUUID(inviteeID) {
+		t.Fatal("must bind existing gmail account")
+	}
+	if len(mail.jobs) != 1 || mail.jobs[0].Recipient != "jane.doe+vdr@gmail.com" {
+		t.Fatalf("deliver to typed address, got %+v", mail.jobs)
+	}
+	if _, err := svc.AddMember(context.Background(), uuid.UUID(room.ID.Bytes).String(), wsID, ownerID, "jane.doe@gmail.com", "guest"); err == nil {
+		t.Fatal("same mailbox must be rejected")
+	}
+}
+
+func TestSignMemberNDAMatchesGmailAliasRow(t *testing.T) {
+	fake := newFakeDB(t)
+	svc := NewService(db.New(fake), nil, testCfg())
+	ownerID := uuid.NewString()
+	inviteeID := uuid.NewString()
+	wsID := uuid.NewString()
+	wsUUID := pgUUID(wsID)
+	fake.workspace = db.Workspace{
+		ID:       wsUUID,
+		TenantID: pgUUID(uuid.NewString()),
+		Name:     "Acme",
+		Slug:     "acme",
+	}
+	fake.users = []db.User{
+		{ID: pgUUID(inviteeID), Email: "janedoe@gmail.com", CreatedAt: nowTs()},
+	}
+	fake.workspaceMembers = []db.WorkspaceMember{
+		{WorkspaceID: wsUUID, UserID: pgUUID(ownerID), Role: "owner", JoinedAt: nowTs()},
+		{WorkspaceID: wsUUID, UserID: pgUUID(inviteeID), Role: "guest", JoinedAt: nowTs()},
+	}
+	room, err := svc.CreateRoom(context.Background(), ownerID, wsID, CreateRoomRequest{
+		Slug: "gmail-sign-room",
+		Name: "Gmail Sign Room",
+	})
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	fake.members = append(fake.members, db.RoomMember{
+		ID:          newPGUUID(),
+		TenantID:    fake.workspace.TenantID,
+		WorkspaceID: wsUUID,
+		RoomID:      room.ID,
+		Email:       "jane.doe+vdr@gmail.com",
+		Role:        "guest",
+		Status:      "pending",
+		NdaStatus:   "not_required",
+		CreatedAt:   nowTs(),
+		UpdatedAt:   nowTs(),
+	})
+	signed, err := svc.SignMemberNDA(context.Background(), uuid.UUID(room.ID.Bytes).String(), wsID, inviteeID)
+	if err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+	if signed.NdaRequired || signed.MemberStatus != "active" {
+		t.Fatalf("alias pending must activate: %+v", signed)
+	}
+}
+
+func TestSetMemberNDAAgreementFromAgreementDocument(t *testing.T) {
+	fake := newFakeDB(t)
+	svc := NewService(db.New(fake), nil, testCfg())
+	ownerID := uuid.NewString()
+	wsID := uuid.NewString()
+	tenantID := uuid.NewString()
+	fake.workspace = db.Workspace{
+		ID:       pgUUID(wsID),
+		TenantID: pgUUID(tenantID),
+		Name:     "Test Workspace",
+		Slug:     "test-workspace",
+	}
+
+	room, err := svc.CreateRoom(context.Background(), ownerID, wsID, CreateRoomRequest{
+		Slug:        "nda-doc-invite-room",
+		Name:        "NDA Doc Invite Room",
+		RequiresNDA: true,
+	})
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	roomID := uuid.UUID(room.ID.Bytes).String()
+	docID := uuid.New()
+	fake.documents = append(fake.documents, db.Document{
+		ID:          pgUUID(docID.String()),
+		TenantID:    pgUUID(tenantID),
+		WorkspaceID: pgUUID(wsID),
+		Title:       "Mutual NDA",
+		Status:      "ready",
+		Category:    "agreement",
+	})
+
+	updated, err := svc.SetMemberNDAAgreement(context.Background(), roomID, wsID, ownerID, "", docID.String())
+	if err != nil {
+		t.Fatalf("set nda from agreement document: %v", err)
+	}
+	if !updated.NdaDocumentID.Valid || uuid.UUID(updated.NdaDocumentID.Bytes) != docID {
+		t.Fatalf("expected document %s, got %s", docID, uuid.UUID(updated.NdaDocumentID.Bytes))
+	}
+	if !updated.NdaTemplateID.Valid {
+		t.Fatal("expected auto-created NDA template")
+	}
+
+	member, err := svc.AddMember(context.Background(), roomID, wsID, ownerID, "lp@example.com", "member")
+	if err != nil {
+		t.Fatalf("add member after document bind: %v", err)
+	}
+	if member.NdaStatus != "pending" {
+		t.Fatalf("expected pending NDA, got %s", member.NdaStatus)
+	}
+}
+
+func TestRecordNDAFromAgreementDocumentWithoutTemplate(t *testing.T) {
+	fake := newFakeDB(t)
+	svc := NewService(db.New(fake), nil, testCfg())
+	ownerID := uuid.NewString()
+	wsID := uuid.NewString()
+	tenantID := uuid.NewString()
+	fake.workspace = db.Workspace{
+		ID:       pgUUID(wsID),
+		TenantID: pgUUID(tenantID),
+		Name:     "Test Workspace",
+		Slug:     "test-workspace",
+	}
+
+	room, err := svc.CreateRoom(context.Background(), ownerID, wsID, CreateRoomRequest{
+		Slug:        "nda-sign-doc-room",
+		Name:        "NDA Sign Doc Room",
+		RequiresNDA: true,
+	})
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	docID := uuid.New()
+	fake.documents = append(fake.documents, db.Document{
+		ID:          pgUUID(docID.String()),
+		TenantID:    pgUUID(tenantID),
+		WorkspaceID: pgUUID(wsID),
+		Title:       "Mutual NDA",
+		Status:      "ready",
+		Category:    "agreement",
+	})
+	for i := range fake.rooms {
+		if fake.rooms[i].ID == room.ID {
+			fake.rooms[i].NdaDocumentID = pgUUID(docID.String())
+			room = fake.rooms[i]
+			break
+		}
+	}
+
+	email := "lp@example.com"
+	fake.members = append(fake.members, db.RoomMember{
+		ID:          newPGUUID(),
+		TenantID:    pgUUID(tenantID),
+		WorkspaceID: pgUUID(wsID),
+		RoomID:      room.ID,
+		Email:       email,
+		Role:        "guest",
+		NdaStatus:   "pending",
+		Status:      "pending",
+		CreatedAt:   nowTs(),
+		UpdatedAt:   nowTs(),
+	})
+
+	if err := svc.RecordNDA(context.Background(), room.Slug, email, "127.0.0.1", "test"); err != nil {
+		t.Fatalf("record nda from document: %v", err)
+	}
+	if len(fake.ndaTemplates) == 0 {
+		t.Fatal("expected auto-created NDA template for signing")
+	}
+}
+
 func TestRecordNDARejectedWhenRoomDoesNotRequireNDA(t *testing.T) {
 	fake := newFakeDB(t)
 	svc := NewService(db.New(fake), nil, testCfg())
@@ -1592,6 +2252,7 @@ type fakeDB struct {
 	requests         []db.RoomAccessRequest
 	perms            []db.RoomMemberFolderPermission
 	ndaTemplates     []db.NdaTemplate
+	users            []db.User
 }
 
 func newFakeDB(t *testing.T) *fakeDB {
@@ -1753,6 +2414,19 @@ func (f *fakeDB) Exec(ctx context.Context, sql string, arguments ...interface{})
 		}
 	case strings.Contains(sqlLower, "insert into room_nda_agreements"):
 		// Idempotent agreement insert; fake stores nothing beyond success.
+	case strings.Contains(sqlLower, "update room_members") && strings.Contains(sqlLower, "set user_id"):
+		userID := argUUID(arguments, 0)
+		wsID := argUUID(arguments, 1)
+		email := strings.ToLower(argString(arguments, 2))
+		for i := range f.members {
+			if f.members[i].WorkspaceID != wsID || strings.ToLower(f.members[i].Email) != email || f.members[i].UserID.Valid {
+				continue
+			}
+			if f.members[i].Status != "active" && f.members[i].Status != "pending" {
+				continue
+			}
+			f.members[i].UserID = userID
+		}
 	}
 	return pgconn.CommandTag{}, nil
 }
@@ -1761,6 +2435,34 @@ func (f *fakeDB) Query(ctx context.Context, sql string, args ...interface{}) (pg
 	sqlLower := normalizeSQL(sql)
 
 	switch {
+	case strings.Contains(sqlLower, "from room_members") &&
+		strings.Contains(sqlLower, "where workspace_id") &&
+		strings.Contains(sqlLower, "and user_id") &&
+		strings.Contains(sqlLower, "nda_status"):
+		wsID := argUUID(args, 0)
+		userID := argUUID(args, 1)
+		rows := make([][]interface{}, 0)
+		for _, m := range f.members {
+			if m.WorkspaceID == wsID && m.UserID == userID && m.UserID.Valid && (m.Status == "active" || m.Status == "pending") {
+				rows = append(rows, []interface{}{m.RoomID, m.Status, m.NdaStatus, m.Role})
+			}
+		}
+		return &fakeRows{rows: rows}, nil
+
+	case strings.Contains(sqlLower, "from room_members") &&
+		strings.Contains(sqlLower, "where workspace_id") &&
+		strings.Contains(sqlLower, "and user_id") &&
+		!strings.Contains(sqlLower, "role in"):
+		wsID := argUUID(args, 0)
+		userID := argUUID(args, 1)
+		rows := make([][]interface{}, 0)
+		for _, m := range f.members {
+			if m.WorkspaceID == wsID && m.UserID == userID && m.UserID.Valid && (m.Status == "active" || m.Status == "pending") {
+				rows = append(rows, []interface{}{m.RoomID})
+			}
+		}
+		return &fakeRows{rows: rows}, nil
+
 	case strings.Contains(sqlLower, "from room_members") && strings.Contains(sqlLower, "role in"):
 		wsID := argUUID(args, 0)
 		userID := argUUID(args, 1)
@@ -1785,6 +2487,50 @@ func (f *fakeDB) Query(ctx context.Context, sql string, args ...interface{}) (pg
 		}
 		return &fakeRows{rows: rows}, nil
 
+	case (strings.Contains(sqlLower, "from deal_rooms dr") && strings.Contains(sqlLower, "group by dr.id")) ||
+		(strings.Contains(sqlLower, "with rooms as") && strings.Contains(sqlLower, "as pending_question_count")):
+		// Must run before the document-join and generic deal_rooms branches:
+		// GetDealRoomAggregatesByWorkspace also contains "from deal_room_documents drd".
+		rows := make([][]interface{}, 0, len(f.rooms))
+		for _, r := range f.rooms {
+			if r.WorkspaceID != argUUID(args, 0) || r.DeletedAt.Valid {
+				continue
+			}
+			var docCount, memberCount, pendingCount int64
+			for _, d := range f.roomDocs {
+				if d.RoomID != r.ID {
+					continue
+				}
+				doc := f.findDocument(d.DocumentID)
+				if doc.ID == (pgtype.UUID{}) || doc.DeletedAt.Valid || IsArchivedDocumentStatus(doc.Status) {
+					continue
+				}
+				docCount++
+			}
+			for _, m := range f.members {
+				if m.RoomID == r.ID {
+					memberCount++
+				}
+			}
+			for _, req := range f.requests {
+				if req.RoomID == r.ID && req.Status == "pending" {
+					pendingCount++
+				}
+			}
+			rows = append(rows, []interface{}{
+				r.ID, docCount, memberCount, pendingCount,
+				int64(0), int64(0), int64(0), int64(0),
+				pgtype.Timestamptz{},
+			})
+		}
+		return &fakeRows{rows: rows}, nil
+
+	case strings.Contains(sqlLower, "from link_heat_scores") && strings.Contains(sqlLower, "l.deal_room_id"):
+		return &fakeRows{rows: nil}, nil
+
+	case strings.Contains(sqlLower, "as engaged_key_page_views") && strings.Contains(sqlLower, "pv.link_id = any"):
+		return &fakeRows{rows: nil}, nil
+
 	case strings.Contains(sqlLower, "from deal_room_documents drd") && strings.Contains(sqlLower, "join documents d"):
 		roomID := argUUID(args, 0)
 		rows := make([][]interface{}, 0)
@@ -1808,37 +2554,6 @@ func (f *fakeDB) Query(ctx context.Context, sql string, args ...interface{}) (pg
 				rd.ID, rd.TenantID, rd.WorkspaceID, rd.RoomID, rd.DocumentID,
 				rd.FolderPath, rd.SortOrder, rd.CreatedAt, rd.Locked,
 				doc.Title, pageCount, fileSize, doc.SourceType, doc.Status,
-			})
-		}
-		return &fakeRows{rows: rows}, nil
-
-	case (strings.Contains(sqlLower, "from deal_rooms dr") && strings.Contains(sqlLower, "group by dr.id")) ||
-		(strings.Contains(sqlLower, "with rooms as") && strings.Contains(sqlLower, "as heat_score")):
-		// Must run before the generic "from deal_rooms … where workspace_id" branch:
-		// the CTE aggregate query also contains those substrings.
-		rows := make([][]interface{}, 0, len(f.rooms))
-		for _, r := range f.rooms {
-			if r.WorkspaceID != argUUID(args, 0) || r.DeletedAt.Valid {
-				continue
-			}
-			var docCount, memberCount, pendingCount int64
-			for _, d := range f.roomDocs {
-				if d.RoomID == r.ID {
-					docCount++
-				}
-			}
-			for _, m := range f.members {
-				if m.RoomID == r.ID {
-					memberCount++
-				}
-			}
-			for _, req := range f.requests {
-				if req.RoomID == r.ID && req.Status == "pending" {
-					pendingCount++
-				}
-			}
-			rows = append(rows, []interface{}{
-				r.ID, docCount, memberCount, pendingCount, int64(0), int64(0), pgtype.Timestamptz{}, int32(0),
 			})
 		}
 		return &fakeRows{rows: rows}, nil
@@ -1977,6 +2692,24 @@ func (f *fakeDB) QueryRow(ctx context.Context, sql string, args ...interface{}) 
 	case strings.Contains(sqlLower, "from workspaces") && strings.Contains(sqlLower, "where id = $1 limit"):
 		return fakeRow{values: []interface{}{f.workspace.ID, f.workspace.TenantID, f.workspace.Name, f.workspace.Slug, f.workspace.BrandColor, f.workspace.CreatedAt, false, false, false, f.workspace.CrmConfig, f.workspace.WebhookSecret}}
 
+	case strings.Contains(sqlLower, "from users") && strings.Contains(sqlLower, "where id = $1"):
+		id := argUUID(args, 0)
+		for _, u := range f.users {
+			if u.ID == id {
+				return fakeRow{values: []interface{}{u.ID, u.Email, u.PasswordHash, u.CreatedAt, u.EmailVerified, u.TrialGrantedAt}}
+			}
+		}
+		return fakeRow{err: pgx.ErrNoRows}
+
+	case strings.Contains(sqlLower, "from users") && strings.Contains(sqlLower, "where email = $1"):
+		email := strings.ToLower(argString(args, 0))
+		for _, u := range f.users {
+			if strings.ToLower(u.Email) == email {
+				return fakeRow{values: []interface{}{u.ID, u.Email, u.PasswordHash, u.CreatedAt, u.EmailVerified, u.TrialGrantedAt}}
+			}
+		}
+		return fakeRow{err: pgx.ErrNoRows}
+
 	case strings.Contains(sqlLower, "from workspace_members") && strings.Contains(sqlLower, "where workspace_id = $1 and user_id"):
 		wsID := argUUID(args, 0)
 		userID := argUUID(args, 1)
@@ -2076,6 +2809,19 @@ func (f *fakeDB) QueryRow(ctx context.Context, sql string, args ...interface{}) 
 		for _, m := range f.members {
 			if m.ID == id && m.RoomID == roomID {
 				return fakeRow{values: memberRow(m)}
+			}
+		}
+		return fakeRow{err: pgx.ErrNoRows}
+
+	case strings.Contains(sqlLower, "update room_members") && strings.Contains(sqlLower, "set role"):
+		role := argString(args, 0)
+		id := argUUID(args, 1)
+		roomID := argUUID(args, 2)
+		for i := range f.members {
+			if f.members[i].ID == id && f.members[i].RoomID == roomID {
+				f.members[i].Role = role
+				f.members[i].UpdatedAt = nowTs()
+				return fakeRow{values: memberRow(f.members[i])}
 			}
 		}
 		return fakeRow{err: pgx.ErrNoRows}
@@ -2275,6 +3021,23 @@ func (f *fakeDB) QueryRow(ctx context.Context, sql string, args ...interface{}) 
 			}
 		}
 		return fakeRow{err: pgx.ErrNoRows}
+
+	case strings.Contains(sqlLower, "insert into nda_templates"):
+		tpl := db.NdaTemplate{
+			ID:                pgUUID(uuid.NewString()),
+			TenantID:          argUUID(args, 0),
+			WorkspaceID:       argUUID(args, 1),
+			Name:              argString(args, 2),
+			SourceDocumentID:  argUUID(args, 3),
+			ContentSha256:     argString(args, 4),
+			RequireSignerName: argBool(args, 5),
+			Status:            argString(args, 6),
+			CreatedBy:         argUUID(args, 7),
+			CreatedAt:         nowTs(),
+			UpdatedAt:         nowTs(),
+		}
+		f.ndaTemplates = append(f.ndaTemplates, tpl)
+		return fakeRow{values: ndaTemplateRow(tpl)}
 	}
 
 	f.t.Logf("unexpected QueryRow: %s", sql)
@@ -2743,6 +3506,9 @@ func TestListRoomsReturnsAggregates(t *testing.T) {
 	}
 	if summary.PendingApprovals != 1 {
 		t.Errorf("pendingApprovals = %d, want 1", summary.PendingApprovals)
+	}
+	if summary.ViewCount != 0 || summary.VisitorCount != 0 || summary.ActiveLinkCount != 0 {
+		t.Errorf("engagement zeros = view %d visitor %d links %d", summary.ViewCount, summary.VisitorCount, summary.ActiveLinkCount)
 	}
 }
 

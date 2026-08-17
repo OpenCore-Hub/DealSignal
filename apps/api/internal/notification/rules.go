@@ -3,6 +3,8 @@ package notification
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
@@ -140,17 +142,26 @@ func defaultRules(wsUUID [16]byte) []db.NotificationRule {
 func notificationSubject(ev Event) string {
 	switch ev.EventType {
 	case "key_page":
-		if title := ev.Metadata["page_title"]; title != "" {
-			return fmt.Sprintf("[key_page] Sensitive page viewed: %s", title)
-		}
-		return "[key_page] Sensitive page viewed"
+		return formatKeyPageSubject("[key_page] Sensitive page viewed", ev.Metadata)
 	case "repeat_key_page":
-		if title := ev.Metadata["page_title"]; title != "" {
-			return fmt.Sprintf("[repeat_key_page] Sensitive page revisited: %s", title)
-		}
-		return "[repeat_key_page] Sensitive page revisited"
+		return formatKeyPageSubject("[repeat_key_page] Sensitive page revisited", ev.Metadata)
 	default:
 		return fmt.Sprintf("[%s] Activity on your link", ev.EventType)
+	}
+}
+
+// formatKeyPageSubject keeps solo subjects unchanged. Bundle secondary
+// views (document_title set) append the file name so inbox rows do not collide.
+func formatKeyPageSubject(base string, meta map[string]string) string {
+	title := strings.TrimSpace(meta["page_title"])
+	doc := strings.TrimSpace(meta["document_title"])
+	switch {
+	case title != "" && doc != "":
+		return base + ": " + title + " · " + doc
+	case title != "":
+		return base + ": " + title
+	default:
+		return base
 	}
 }
 
@@ -209,20 +220,73 @@ func (e *RuleEngine) fireRule(ctx context.Context, rule db.NotificationRule, wsU
 	}
 }
 
+// Machine-only key-page fields. document_id is for deep links; dumping the
+// UUID into merged email/Slack bodies was introduced with bundle attribution.
+var mergeMetadataSkip = map[string]struct{}{
+	"document_id":            {},
+	"engaged_key_page_views": {},
+	"circle":                 {},
+}
+
+// Human labels aligned with formatKeyPageBody. Unknown keys stay as-is.
+var mergeMetadataOrder = []struct{ key, label string }{
+	{"page_title", "Page"},
+	{"document_title", "Document"},
+	{"category", "Category"},
+	{"page_number", "Page #"},
+	{"duration_seconds", "Dwell"},
+}
+
 // mergeNotificationBody appends new metadata to an existing notification body.
 func mergeNotificationBody(existing string, metadata map[string]string) string {
-	if len(metadata) == 0 {
+	lines := formatMergeMetadataLines(metadata)
+	if len(lines) == 0 {
 		return existing
 	}
 	extra := "\n\n--- Additional activity ---"
-	for k, v := range metadata {
-		extra += fmt.Sprintf("\n%s: %s", k, v)
+	for _, line := range lines {
+		extra += "\n" + line
 	}
 	const maxLen = 4000
 	if len(existing)+len(extra) > maxLen {
 		return existing[:maxLen-len(extra)-3] + "..." + extra
 	}
 	return existing + extra
+}
+
+func formatMergeMetadataLines(metadata map[string]string) []string {
+	if len(metadata) == 0 {
+		return nil
+	}
+	used := make(map[string]struct{}, len(mergeMetadataOrder))
+	var lines []string
+	for _, item := range mergeMetadataOrder {
+		v := strings.TrimSpace(metadata[item.key])
+		if v == "" {
+			continue
+		}
+		if item.key == "duration_seconds" && !strings.HasSuffix(v, "s") {
+			v += "s"
+		}
+		lines = append(lines, item.label+": "+v)
+		used[item.key] = struct{}{}
+	}
+	var other []string
+	for k, v := range metadata {
+		if _, skip := mergeMetadataSkip[k]; skip {
+			continue
+		}
+		if _, seen := used[k]; seen {
+			continue
+		}
+		v = strings.TrimSpace(v)
+		if v == "" {
+			continue
+		}
+		other = append(other, k+": "+v)
+	}
+	sort.Strings(other)
+	return append(lines, other...)
 }
 
 // formatEventBody creates a human-readable notification body from an event.
@@ -251,6 +315,9 @@ func formatKeyPageBody(ev Event) string {
 	b := label + "\n"
 	if title := ev.Metadata["page_title"]; title != "" {
 		b += fmt.Sprintf("Page: %s\n", title)
+	}
+	if doc := ev.Metadata["document_title"]; doc != "" {
+		b += fmt.Sprintf("Document: %s\n", doc)
 	}
 	if cat := ev.Metadata["category"]; cat != "" {
 		b += fmt.Sprintf("Category: %s\n", cat)

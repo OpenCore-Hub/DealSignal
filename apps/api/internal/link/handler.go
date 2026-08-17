@@ -26,6 +26,7 @@ import (
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/compliance"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/dealroom"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/httpx"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/knowledge"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/logger"
@@ -162,6 +163,70 @@ func (h *Handler) rejectIfAskLimited(c *gin.Context, result AccessResult, linkID
 // NewHandler creates a link handler.
 func NewHandler(s *Service, a *analytics.Service, sg *suggestions.Service, st *storage.Client, cfg *config.Config) *Handler {
 	return &Handler{service: s, analytics: a, suggestions: sg, storage: st, cfg: cfg}
+}
+
+func (h *Handler) rejectIfLinkMutateForbidden(c *gin.Context, link db.Link) bool {
+	err := authorizeLinkMutate(c.Request.Context(), h.service.queries, link.WorkspaceID, link.DealRoomID, middleware.UserIDFrom(c), middleware.WorkspaceRoleFrom(c))
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, ErrLinkMutateForbidden) {
+		c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", err)})
+		return true
+	}
+	c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+	return true
+}
+
+func (h *Handler) loadLinkForMutate(c *gin.Context) (db.Link, bool) {
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	link, err := h.service.GetByID(c.Request.Context(), c.Param("id"), workspaceID)
+	if err != nil {
+		if errors.Is(err, ErrNotFoundInWorkspace) {
+			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": httpx.SafeMessage("link_not_found", err)})
+			return db.Link{}, false
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+		return db.Link{}, false
+	}
+	if h.rejectIfLinkMutateForbidden(c, link) {
+		return db.Link{}, false
+	}
+	return link, true
+}
+
+func (h *Handler) rejectIfLinkViewForbidden(c *gin.Context, link db.Link) bool {
+	err := authorizeLinkView(c.Request.Context(), h.service.queries, link.WorkspaceID, link.DealRoomID, middleware.UserIDFrom(c))
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, ErrLinkViewForbidden) {
+		c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", err)})
+		return true
+	}
+	c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+	return true
+}
+
+func (h *Handler) loadLinkForView(c *gin.Context) (db.Link, bool) {
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	link, err := h.service.GetByID(c.Request.Context(), c.Param("id"), workspaceID)
+	if err != nil {
+		if errors.Is(err, ErrNotFoundInWorkspace) {
+			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": httpx.SafeMessage("link_not_found", err)})
+			return db.Link{}, false
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+		return db.Link{}, false
+	}
+	if h.rejectIfLinkViewForbidden(c, link) {
+		return db.Link{}, false
+	}
+	return link, true
+}
+
+func pgUUIDEqual(a, b pgtype.UUID) bool {
+	return a.Valid && b.Valid && a.Bytes == b.Bytes
 }
 
 // RegisterWorkspaceRoutes mounts authenticated workspace routes.
@@ -506,14 +571,8 @@ func (h *Handler) List(c *gin.Context) {
 
 // Get returns a single link.
 func (h *Handler) Get(c *gin.Context) {
-	workspaceID := middleware.WorkspaceIDFrom(c)
-	link, err := h.service.GetByID(c.Request.Context(), c.Param("id"), workspaceID)
-	if err != nil {
-		if errors.Is(err, ErrNotFoundInWorkspace) {
-			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": httpx.SafeMessage("link_not_found", err)})
-			return
-		}
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+	link, ok := h.loadLinkForView(c)
+	if !ok {
 		return
 	}
 	item, err := h.linkResponse(c, link)
@@ -543,6 +602,9 @@ func (h *Handler) Update(c *gin.Context) {
 	workspaceID := middleware.WorkspaceIDFrom(c)
 	linkID := c.Param("id")
 	ctx := c.Request.Context()
+	if _, ok := h.loadLinkForMutate(c); !ok {
+		return
+	}
 
 	var link db.Link
 	var err error
@@ -629,6 +691,9 @@ func (h *Handler) UpdateFull(c *gin.Context) {
 			return
 		}
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+		return
+	}
+	if h.rejectIfLinkMutateForbidden(c, existing) {
 		return
 	}
 
@@ -729,6 +794,9 @@ type AccessRulesRequest struct {
 
 // GetAccessRules returns the allow/block rules for a link.
 func (h *Handler) GetAccessRules(c *gin.Context) {
+	if _, ok := h.loadLinkForView(c); !ok {
+		return
+	}
 	workspaceID := middleware.WorkspaceIDFrom(c)
 	rules, err := h.service.ListAccessRules(c.Request.Context(), workspaceID, c.Param("id"))
 	if err != nil {
@@ -761,6 +829,9 @@ func (h *Handler) SetAccessRules(c *gin.Context) {
 
 	userID := middleware.UserIDFrom(c)
 	workspaceID := middleware.WorkspaceIDFrom(c)
+	if _, ok := h.loadLinkForMutate(c); !ok {
+		return
+	}
 	if err := h.service.UpdateAccessRules(c.Request.Context(), userID, workspaceID, c.Param("id"), rules); err != nil {
 		switch {
 		case errors.Is(err, ErrNotFoundInWorkspace):
@@ -782,6 +853,9 @@ type CreateInvitationsRequest struct {
 
 // ListInvitations returns all invitations for a link.
 func (h *Handler) ListInvitations(c *gin.Context) {
+	if _, ok := h.loadLinkForView(c); !ok {
+		return
+	}
 	workspaceID := middleware.WorkspaceIDFrom(c)
 	invitations, err := h.service.ListInvitations(c.Request.Context(), workspaceID, c.Param("id"))
 	if err != nil {
@@ -805,6 +879,9 @@ func (h *Handler) CreateInvitations(c *gin.Context) {
 
 	userID := middleware.UserIDFrom(c)
 	workspaceID := middleware.WorkspaceIDFrom(c)
+	if _, ok := h.loadLinkForMutate(c); !ok {
+		return
+	}
 	invitations, err := h.service.InviteViewers(c.Request.Context(), userID, workspaceID, c.Param("id"), req.Emails)
 	if err != nil {
 		switch {
@@ -838,7 +915,10 @@ func (h *Handler) RevokeInvitation(c *gin.Context) {
 	}
 
 	workspaceID := middleware.WorkspaceIDFrom(c)
-	if err := h.service.RevokeInvitation(c.Request.Context(), workspaceID, c.Param("invitationId"), removeFromAllowList); err != nil {
+	if _, ok := h.loadLinkForMutate(c); !ok {
+		return
+	}
+	if err := h.service.RevokeInvitation(c.Request.Context(), workspaceID, c.Param("id"), c.Param("invitationId"), removeFromAllowList); err != nil {
 		switch {
 		case errors.Is(err, ErrNotFoundInWorkspace):
 			c.JSON(http.StatusNotFound, gin.H{"code": "invitation_not_found", "message": httpx.SafeMessage("invitation_not_found", err)})
@@ -981,6 +1061,9 @@ func (h *Handler) CheckPublicEmail(c *gin.Context) {
 
 // ListAccessRequests returns access requests for a link (creator-only; others get []).
 func (h *Handler) ListAccessRequests(c *gin.Context) {
+	if _, ok := h.loadLinkForView(c); !ok {
+		return
+	}
 	workspaceID := middleware.WorkspaceIDFrom(c)
 	userID := middleware.UserIDFrom(c)
 	requests, err := h.service.ListAccessRequests(c.Request.Context(), workspaceID, c.Param("id"), userID)
@@ -1057,6 +1140,9 @@ func (h *Handler) ListPendingAccessRequests(c *gin.Context) {
 
 // ApproveAccessRequest approves a pending access request.
 func (h *Handler) ApproveAccessRequest(c *gin.Context) {
+	if _, ok := h.loadLinkForMutate(c); !ok {
+		return
+	}
 	userID := middleware.UserIDFrom(c)
 	workspaceID := middleware.WorkspaceIDFrom(c)
 	ar, err := h.service.ApproveAccessRequest(c.Request.Context(), workspaceID, c.Param("id"), c.Param("requestId"), userID)
@@ -1089,6 +1175,9 @@ func writeApproveAccessRequestResponse(c *gin.Context, ar LinkAccessRequest, err
 
 // RejectAccessRequest rejects a pending access request.
 func (h *Handler) RejectAccessRequest(c *gin.Context) {
+	if _, ok := h.loadLinkForMutate(c); !ok {
+		return
+	}
 	userID := middleware.UserIDFrom(c)
 	workspaceID := middleware.WorkspaceIDFrom(c)
 	ar, err := h.service.RejectAccessRequest(c.Request.Context(), workspaceID, c.Param("id"), c.Param("requestId"), userID)
@@ -1252,6 +1341,8 @@ func (h *Handler) CreateDealRoomLink(c *gin.Context) {
 		switch {
 		case errors.Is(err, ErrDealRoomNotFound):
 			c.JSON(http.StatusNotFound, gin.H{"code": "deal_room_not_found", "message": httpx.SafeMessage("deal_room_not_found", err)})
+		case errors.Is(err, dealroom.ErrNotRoomAdmin):
+			httpx.WriteNotRoomAdmin(c, err)
 		case errors.Is(err, ErrDuplicateName):
 			c.JSON(http.StatusConflict, gin.H{"code": "duplicate_name", "message": httpx.SafeMessage("duplicate_name", err)})
 		case errors.Is(err, ErrRoomAccessPolicyInvalid), errors.Is(err, ErrRoomSecurityFloor),
@@ -1286,10 +1377,19 @@ type upsertRoomAccessPolicyBody struct {
 // GetRoomAccessPolicy returns the deal-room security policy (unconfigured default when absent).
 func (h *Handler) GetRoomAccessPolicy(c *gin.Context) {
 	workspaceID := middleware.WorkspaceIDFrom(c)
-	policy, err := h.service.GetRoomAccessPolicy(c.Request.Context(), workspaceID, c.Param("roomId"))
+	userID := middleware.UserIDFrom(c)
+	policy, err := h.service.GetRoomAccessPolicy(c.Request.Context(), userID, workspaceID, c.Param("roomId"))
 	if err != nil {
 		if errors.Is(err, ErrDealRoomNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"code": "deal_room_not_found", "message": httpx.SafeMessage("deal_room_not_found", err)})
+			return
+		}
+		if errors.Is(err, dealroom.ErrNotRoomAdmin) {
+			httpx.WriteNotRoomAdmin(c, err)
+			return
+		}
+		if errors.Is(err, dealroom.ErrApprovalRequired) {
+			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", err)})
 			return
 		}
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
@@ -1318,6 +1418,10 @@ func (h *Handler) UpsertRoomAccessPolicy(c *gin.Context) {
 		switch {
 		case errors.Is(err, ErrDealRoomNotFound):
 			c.JSON(http.StatusNotFound, gin.H{"code": "deal_room_not_found", "message": httpx.SafeMessage("deal_room_not_found", err)})
+		case errors.Is(err, dealroom.ErrNotRoomAdmin):
+			httpx.WriteNotRoomAdmin(c, err)
+		case errors.Is(err, dealroom.ErrApprovalRequired):
+			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", err)})
 		case errors.Is(err, ErrRoomAccessPolicyInvalid), errors.Is(err, ErrConflictingAccessRule),
 			errors.Is(err, ErrInvalidPermission), errors.Is(err, ErrInvalidInput):
 			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
@@ -1340,11 +1444,12 @@ func (h *Handler) UpsertRoomAccessPolicy(c *gin.Context) {
 //   - q (name/token search)
 func (h *Handler) ListDealRoomLinks(c *gin.Context) {
 	workspaceID := middleware.WorkspaceIDFrom(c)
+	userID := middleware.UserIDFrom(c)
 	roomID := c.Param("roomId")
 
 	pageRaw := strings.TrimSpace(c.Query("page"))
 	if pageRaw == "" {
-		links, err := h.service.ListDealRoomLinks(c.Request.Context(), workspaceID, roomID)
+		links, err := h.service.ListDealRoomLinks(c.Request.Context(), userID, workspaceID, roomID)
 		if err != nil {
 			h.writeDealRoomLinksError(c, err)
 			return
@@ -1375,7 +1480,7 @@ func (h *Handler) ListDealRoomLinks(c *gin.Context) {
 	sortAsc := strings.EqualFold(strings.TrimSpace(c.Query("sort")), "created_at_asc")
 	query := strings.TrimSpace(c.Query("q"))
 
-	result, err := h.service.ListDealRoomLinksPage(c.Request.Context(), workspaceID, roomID, page, pageSize, sortAsc, query)
+	result, err := h.service.ListDealRoomLinksPage(c.Request.Context(), userID, workspaceID, roomID, page, pageSize, sortAsc, query)
 	if err != nil {
 		h.writeDealRoomLinksError(c, err)
 		return
@@ -1399,8 +1504,12 @@ func (h *Handler) ListDealRoomLinks(c *gin.Context) {
 }
 
 func (h *Handler) writeDealRoomLinksError(c *gin.Context, err error) {
-	if errors.Is(err, ErrNotFoundInWorkspace) {
+	if errors.Is(err, ErrNotFoundInWorkspace) || errors.Is(err, ErrDealRoomNotFound) {
 		c.JSON(http.StatusNotFound, gin.H{"code": "deal_room_not_found", "message": httpx.SafeMessage("deal_room_not_found", err)})
+		return
+	}
+	if errors.Is(err, dealroom.ErrApprovalRequired) || errors.Is(err, ErrLinkViewForbidden) {
+		c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", err)})
 		return
 	}
 	c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
@@ -1420,6 +1529,9 @@ func (h *Handler) encodeDealRoomLinks(c *gin.Context, links []db.Link) ([]gin.H,
 
 // Delete soft-deletes a link within a workspace.
 func (h *Handler) Delete(c *gin.Context) {
+	if _, ok := h.loadLinkForMutate(c); !ok {
+		return
+	}
 	workspaceID := middleware.WorkspaceIDFrom(c)
 	linkID := c.Param("id")
 	if err := h.service.Delete(c.Request.Context(), linkID, workspaceID); err != nil {
@@ -1439,6 +1551,9 @@ func (h *Handler) Delete(c *gin.Context) {
 
 // AccessLogs returns access logs for a link.
 func (h *Handler) AccessLogs(c *gin.Context) {
+	if _, ok := h.loadLinkForView(c); !ok {
+		return
+	}
 	workspaceID := middleware.WorkspaceIDFrom(c)
 	limit := accessLogsDefaultLimit
 	offset := 0
@@ -1470,6 +1585,9 @@ func (h *Handler) AccessLogs(c *gin.Context) {
 
 // LinkAnalytics returns aggregated analytics for a link.
 func (h *Handler) LinkAnalytics(c *gin.Context) {
+	if _, ok := h.loadLinkForView(c); !ok {
+		return
+	}
 	workspaceID := middleware.WorkspaceIDFrom(c)
 	analytics, err := h.service.GetLinkAnalytics(c.Request.Context(), c.Param("id"), workspaceID)
 	if err != nil {
@@ -1485,6 +1603,9 @@ func (h *Handler) LinkAnalytics(c *gin.Context) {
 
 // LinkAnalyticsVisitors returns a paginated page of recent visitors for a link.
 func (h *Handler) LinkAnalyticsVisitors(c *gin.Context) {
+	if _, ok := h.loadLinkForView(c); !ok {
+		return
+	}
 	workspaceID := middleware.WorkspaceIDFrom(c)
 	limit := recentVisitorsPageSize
 	offset := 0
@@ -1516,6 +1637,9 @@ func (h *Handler) LinkAnalyticsVisitors(c *gin.Context) {
 
 // LinkAnalyticsAccessCodeContacts returns a paginated page of verification-code contacts.
 func (h *Handler) LinkAnalyticsAccessCodeContacts(c *gin.Context) {
+	if _, ok := h.loadLinkForView(c); !ok {
+		return
+	}
 	workspaceID := middleware.WorkspaceIDFrom(c)
 	limit := accessCodeContactsPageSize
 	offset := 0
@@ -1557,6 +1681,9 @@ func (h *Handler) OwnerResendAccessCode(c *gin.Context) {
 		return
 	}
 
+	if _, ok := h.loadLinkForMutate(c); !ok {
+		return
+	}
 	if err := h.service.OwnerResendAccessCode(c.Request.Context(), c.Param("id"), workspaceID, body.Email, body.Force); err != nil {
 		writeOwnerResendAccessCodeError(c, err)
 		return
@@ -1566,6 +1693,9 @@ func (h *Handler) OwnerResendAccessCode(c *gin.Context) {
 
 // OwnerResendFailedAccessCodes remediates all failed / stuck-pending invitees.
 func (h *Handler) OwnerResendFailedAccessCodes(c *gin.Context) {
+	if _, ok := h.loadLinkForMutate(c); !ok {
+		return
+	}
 	workspaceID := middleware.WorkspaceIDFrom(c)
 	summary, err := h.service.OwnerResendFailedAccessCodes(c.Request.Context(), c.Param("id"), workspaceID)
 	if err != nil {
@@ -1635,6 +1765,8 @@ func (h *Handler) Create(c *gin.Context) {
 		switch {
 		case errors.Is(err, ErrDocumentNotReady):
 			c.JSON(http.StatusConflict, gin.H{"code": "document_not_ready", "message": httpx.SafeMessage("document_not_ready", err)})
+		case errors.Is(err, dealroom.ErrNotRoomAdmin):
+			httpx.WriteNotRoomAdmin(c, err)
 		case errors.Is(err, ErrDuplicateName):
 			c.JSON(http.StatusConflict, gin.H{"code": "duplicate_name", "message": httpx.SafeMessage("duplicate_name", err)})
 		case errors.Is(err, ErrInvalidPermission), errors.Is(err, ErrInvalidInput),
@@ -2002,14 +2134,19 @@ func (h *Handler) PublicNDASignedDownload(c *gin.Context) {
 		return
 	}
 	h.writeSessionRefreshHeader(c, result)
-	if !result.Link.RequireNda || !result.Link.NdaTemplateID.Valid {
+	if !result.Link.RequireNda {
+		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": "nda not available"})
+		return
+	}
+	tpl, err := h.service.resolveLinkNDATemplate(c.Request.Context(), result.Link)
+	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": "nda not available"})
 		return
 	}
 	row, err := h.service.queries.GetLinkNDAAgreementByLinkVisitorTemplate(c.Request.Context(), db.GetLinkNDAAgreementByLinkVisitorTemplateParams{
 		LinkID:        result.Link.ID,
 		VisitorID:     pgtype.Text{String: result.VisitorID, Valid: result.VisitorID != ""},
-		NdaTemplateID: result.Link.NdaTemplateID,
+		NdaTemplateID: tpl.ID,
 	})
 	if err != nil || row.SignedFileKey == "" {
 		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": "signed nda not ready"})
@@ -2091,11 +2228,15 @@ func (h *Handler) SendEmailVerificationCode(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
-// verifyLinkDocumentAccess checks whether docID belongs to the link.
-// For document links it checks the primary document or link_documents.
-// For deal-room links it honors folder_scope_mode (full vs allowlist),
-// excludes locked folders/documents, and verifies the document is still
-// present in the deal room (stale-scope guard).
+// verifyLinkDocumentAccess reports whether docID belongs to the link.
+// Deal-room links honor folder scope and locked folders/documents.
+func (h *Handler) verifyLinkDocumentAccess(ctx context.Context, link db.Link, docID uuid.UUID) bool {
+	if h == nil || h.service == nil || h.service.queries == nil {
+		return false
+	}
+	return evaluateLinkDocumentAccess(ctx, h.service.queries, link, docID) == linkDocAccessAllowed
+}
+
 func (h *Handler) ensurePublicDocumentAccess(c *gin.Context, link db.Link, docID uuid.UUID) bool {
 	denial := evaluateLinkDocumentAccess(c.Request.Context(), h.service.queries, link, docID)
 	return writeLinkDocumentAccessDenied(c, denial)
@@ -2824,6 +2965,13 @@ func (h *Handler) linkResponse(c *gin.Context, link db.Link) (gin.H, error) {
 	if link.DealRoomID.Valid {
 		item["dealRoomId"] = uuidToString(link.DealRoomID)
 	}
+	item["canManageAsk"] = authorizeAskHostOwnerView(
+		ctx,
+		h.service.queries,
+		link.WorkspaceID,
+		link.DealRoomID,
+		middleware.UserIDFrom(c),
+	) == nil
 	if link.NdaDocumentID.Valid {
 		item["ndaDocumentId"] = uuidToString(link.NdaDocumentID)
 	}
@@ -2875,6 +3023,9 @@ func accessLogList(logs []db.ListAccessLogsByLinkRow) []gin.H {
 		}
 		if log.PageNumber > 0 {
 			item["pageNumber"] = log.PageNumber
+		}
+		if log.DocumentID.Valid {
+			item["documentId"] = uuidToString(log.DocumentID)
 		}
 		if log.UserAgent.Valid {
 			item["device"] = log.UserAgent.String
@@ -2942,6 +3093,9 @@ func (h *Handler) ReverseFunnel(c *gin.Context) {
 
 // ArchiveLink sets a link status to archived.
 func (h *Handler) ArchiveLink(c *gin.Context) {
+	if _, ok := h.loadLinkForMutate(c); !ok {
+		return
+	}
 	wsID, lID := middleware.WorkspaceIDFrom(c), c.Param("id")
 	if _, err := h.service.ArchiveLink(c.Request.Context(), wsID, lID); err != nil {
 		if errors.Is(err, ErrNotFoundInWorkspace) {
@@ -2958,6 +3112,9 @@ func (h *Handler) ArchiveLink(c *gin.Context) {
 // body allows the caller to set a custom future expiry; otherwise the link is
 // extended by the default renewal window.
 func (h *Handler) RenewLink(c *gin.Context) {
+	if _, ok := h.loadLinkForMutate(c); !ok {
+		return
+	}
 	wsID, lID := middleware.WorkspaceIDFrom(c), c.Param("id")
 
 	var body struct {
@@ -2996,11 +3153,8 @@ func (h *Handler) RenewLink(c *gin.Context) {
 
 // GenerateLinkIndex triggers AI-powered index file generation for a link.
 func (h *Handler) GenerateLinkIndex(c *gin.Context) {
-	workspaceID := middleware.WorkspaceIDFrom(c)
-	linkID := c.Param("id")
-	link, err := h.service.GetByID(c.Request.Context(), linkID, workspaceID)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": "link not found"})
+	link, ok := h.loadLinkForMutate(c)
+	if !ok {
 		return
 	}
 	if !link.IndexFileEnabled {
@@ -3013,11 +3167,8 @@ func (h *Handler) GenerateLinkIndex(c *gin.Context) {
 
 // GetLinkIndexFile returns the AI-generated index file for a link (owner view).
 func (h *Handler) GetLinkIndexFile(c *gin.Context) {
-	workspaceID := middleware.WorkspaceIDFrom(c)
-	linkID := c.Param("id")
-	link, err := h.service.GetByID(c.Request.Context(), linkID, workspaceID)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": "link not found"})
+	link, ok := h.loadLinkForView(c)
+	if !ok {
 		return
 	}
 	indexFile, err := h.service.GetLinkIndexFileByLink(c.Request.Context(), link.ID)
@@ -3408,6 +3559,10 @@ func (h *Handler) GetLinkAskPolicy(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
+	if err := authorizeAskHostOwnerView(c.Request.Context(), h.service.queries, link.WorkspaceID, link.DealRoomID, middleware.UserIDFrom(c)); err != nil {
+		writeAskHostError(c, err)
+		return
+	}
 	payload, err := h.linkAskPolicyPayload(c.Request.Context(), link)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
@@ -3418,6 +3573,9 @@ func (h *Handler) GetLinkAskPolicy(c *gin.Context) {
 
 // PatchLinkAskPolicy updates visitor Ask routing policy (mode / AI enable / quota).
 func (h *Handler) PatchLinkAskPolicy(c *gin.Context) {
+	if _, ok := h.loadLinkForMutate(c); !ok {
+		return
+	}
 	workspaceID := middleware.WorkspaceIDFrom(c)
 	linkID := c.Param("id")
 	var req patchLinkAskPolicyRequest
@@ -3512,11 +3670,8 @@ func writeAskSecurityEventsQueryError(c *gin.Context, err error) {
 
 // ListLinkFileRequests returns all file requests for a link (owner view).
 func (h *Handler) ListLinkFileRequests(c *gin.Context) {
-	wsID := middleware.WorkspaceIDFrom(c)
-	lID := c.Param("id")
-	link, err := h.service.GetByID(c.Request.Context(), lID, wsID)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": "link not found"})
+	link, ok := h.loadLinkForView(c)
+	if !ok {
 		return
 	}
 	reqs, err := h.service.ListLinkFileRequests(c.Request.Context(), link.ID)
@@ -3541,12 +3696,21 @@ func (h *Handler) UpdateFileRequestStatus(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
 		return
 	}
+	link, ok := h.loadLinkForMutate(c)
+	if !ok {
+		return
+	}
 	rID := pgtype.UUID{Bytes: rid, Valid: true}
+	req, err := h.service.GetFileRequestByID(c.Request.Context(), rID)
+	if err != nil || !pgUUIDEqual(req.LinkID, link.ID) || uuid.UUID(req.WorkspaceID.Bytes).String() != middleware.WorkspaceIDFrom(c) {
+		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": "file request not found"})
+		return
+	}
 	if err := h.service.UpdateFileRequestStatus(c.Request.Context(), rID, body.Status); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
-	req, err := h.service.GetFileRequestByID(c.Request.Context(), rID)
+	req, err = h.service.GetFileRequestByID(c.Request.Context(), rID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
@@ -3582,11 +3746,8 @@ func uploadedFileToResponse(f db.LinkUploadedFile) uploadedFileResponse {
 
 // ListUploadedFiles returns all files uploaded through a file-request link.
 func (h *Handler) ListUploadedFiles(c *gin.Context) {
-	wsID := middleware.WorkspaceIDFrom(c)
-	lID := c.Param("id")
-	link, err := h.service.GetByID(c.Request.Context(), lID, wsID)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": "link not found"})
+	link, ok := h.loadLinkForView(c)
+	if !ok {
 		return
 	}
 	files, err := h.service.ListUploadedFiles(c.Request.Context(), link.ID)
@@ -3603,24 +3764,27 @@ func (h *Handler) ListUploadedFiles(c *gin.Context) {
 
 // ApproveUploadedFile approves a pending uploaded file.
 func (h *Handler) ApproveUploadedFile(c *gin.Context) {
-	wsID := middleware.WorkspaceIDFrom(c)
+	link, ok := h.loadLinkForMutate(c)
+	if !ok {
+		return
+	}
 	fID, err := uuid.Parse(c.Param("fileId"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_id", "message": "invalid file id"})
 		return
 	}
 	f, err := h.service.GetUploadedFileByID(c.Request.Context(), pgtype.UUID{Bytes: fID, Valid: true})
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": "file not found"})
-		return
-	}
-	if uuid.UUID(f.WorkspaceID.Bytes).String() != wsID {
+	if err != nil || !pgUUIDEqual(f.LinkID, link.ID) || uuid.UUID(f.WorkspaceID.Bytes).String() != middleware.WorkspaceIDFrom(c) {
 		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": "file not found"})
 		return
 	}
 	uID, _ := uuid.Parse(middleware.UserIDFrom(c))
 	if err := h.service.ApproveUploadedFile(c.Request.Context(), pgtype.UUID{Bytes: fID, Valid: true}, pgtype.UUID{Bytes: uID, Valid: true}); err != nil {
 		if httpx.WriteIfPlanLimit(c, err) {
+			return
+		}
+		if errors.Is(err, ErrLinkMutateForbidden) {
+			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", err)})
 			return
 		}
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
@@ -3631,23 +3795,26 @@ func (h *Handler) ApproveUploadedFile(c *gin.Context) {
 
 // RejectUploadedFile rejects a pending uploaded file.
 func (h *Handler) RejectUploadedFile(c *gin.Context) {
-	wsID := middleware.WorkspaceIDFrom(c)
+	link, ok := h.loadLinkForMutate(c)
+	if !ok {
+		return
+	}
 	fID, err := uuid.Parse(c.Param("fileId"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_id", "message": "invalid file id"})
 		return
 	}
 	f, err := h.service.GetUploadedFileByID(c.Request.Context(), pgtype.UUID{Bytes: fID, Valid: true})
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": "file not found"})
-		return
-	}
-	if uuid.UUID(f.WorkspaceID.Bytes).String() != wsID {
+	if err != nil || !pgUUIDEqual(f.LinkID, link.ID) || uuid.UUID(f.WorkspaceID.Bytes).String() != middleware.WorkspaceIDFrom(c) {
 		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": "file not found"})
 		return
 	}
 	uID, _ := uuid.Parse(middleware.UserIDFrom(c))
 	if err := h.service.RejectUploadedFile(c.Request.Context(), pgtype.UUID{Bytes: fID, Valid: true}, pgtype.UUID{Bytes: uID, Valid: true}); err != nil {
+		if errors.Is(err, ErrLinkMutateForbidden) {
+			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", err)})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}

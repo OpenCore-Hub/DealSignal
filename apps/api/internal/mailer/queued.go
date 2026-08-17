@@ -168,6 +168,9 @@ func (m *QueuedMailer) enqueue(ctx context.Context, opts EnqueueOpts) (string, e
 	if vars == nil {
 		vars = make(map[string]string)
 	}
+	if _, ok := vars["BrandName"]; !ok {
+		vars["BrandName"] = m.brandName
+	}
 	vars["Body"] = body
 	vars["Subject"] = subject
 
@@ -245,10 +248,14 @@ func emailTypeToTemplateName(emailType EmailType) string {
 		return mailtemplate.TemplateMarketing
 	case EmailTypeInvitation:
 		return mailtemplate.TemplateInvitation
+	case EmailTypeRoomInvite:
+		return mailtemplate.TemplateRoomInvite
 	case EmailTypeLinkInvite:
 		return mailtemplate.TemplateLinkInvite
 	case EmailTypeLinkAccess:
 		return mailtemplate.TemplateLinkAccess
+	case EmailTypePasswordReset:
+		return mailtemplate.TemplatePasswordReset
 	default:
 		return mailtemplate.TemplateMarketing
 	}
@@ -260,10 +267,14 @@ func emailTypeToDefaultSubject(emailType EmailType) string {
 		return "Verify your DealSignal account"
 	case EmailTypeAccessCode:
 		return "Your DealSignal document access code"
+	case EmailTypeRoomInvite:
+		return "You've been added to a data room on DealSignal"
 	case EmailTypeLinkInvite:
 		return "You've been invited to view a document on DealSignal"
 	case EmailTypeLinkAccess:
 		return "Someone viewed your DealSignal link"
+	case EmailTypePasswordReset:
+		return "Reset your DealSignal password"
 	default:
 		return "DealSignal update"
 	}

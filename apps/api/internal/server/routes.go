@@ -37,6 +37,7 @@ import (
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/sse"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/storage"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/suggestions"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/turnstile"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/upload"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/workspace"
 	"github.com/gin-gonic/gin"
@@ -139,8 +140,14 @@ func (s *Server) registerRoutes() error {
 			auth.WithAppBaseURL(s.cfg.FrontendURL),
 			auth.WithVerificationTokenTTL(time.Duration(s.cfg.VerificationTokenTTLHours)*time.Hour),
 			auth.WithSendTimeout(authMailTimeout),
+			auth.WithAutoVerifyEmail(!strings.EqualFold(s.cfg.AppEnv, "production")),
 		)
 		authHandler := auth.NewHandler(authSvc, s.cfg)
+		authHandler.SetTurnstile(turnstile.New(s.cfg.TurnstileSecret, s.cfg.TurnstileSiteKey,
+			turnstile.WithTimeout(s.cfg.TurnstileTimeout),
+			turnstile.WithExpectedHost(turnstile.HostFromURL(s.cfg.FrontendURL)),
+			turnstile.WithAction(turnstile.ActionRegister),
+		))
 		authHandler.RegisterRoutes(api)
 
 		stripePrices, err := billing.NewPrices(
@@ -164,6 +171,9 @@ func (s *Server) registerRoutes() error {
 			workspace.WithAllowUnpaidPlanChange(s.cfg.AllowUnpaidPlanChange),
 			workspace.WithStripe(stripeGW, stripePrices),
 		)
+		authSvc.SetTrialActivator(workspaceSvc)
+		authSvc.SetRoomInviteClaimer(workspaceSvc)
+		authSvc.SetInviteMailboxProver(workspaceSvc)
 		workspaceHandler := workspace.NewHandler(workspaceSvc, authSvc)
 		workspaceHandler.RegisterRoutes(api)
 
@@ -403,6 +413,7 @@ func (s *Server) registerRoutes() error {
 				dealroom.WithRateLimiter(s.redisClient),
 				dealroom.WithKnowledgeEnqueuer(knowledgeSvc),
 				dealroom.WithPlanChecker(workspaceSvc),
+				dealroom.WithMailer(appMailer),
 			}
 			if s.redisClient != nil {
 				dealroomOpts = append(dealroomOpts, dealroom.WithListCache(dealroom.NewRedisListCache(s.redisClient)))

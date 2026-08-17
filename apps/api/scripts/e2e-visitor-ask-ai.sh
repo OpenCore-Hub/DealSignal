@@ -9,6 +9,10 @@
 #   2  skip (knowledge disabled)
 #   1  fail
 
+_E2E_TS_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck source=e2e-turnstile.sh
+source "$_E2E_TS_DIR/e2e-turnstile.sh"
+
 run_e2e_visitor_ask_ai() {
   set -euo pipefail
 
@@ -40,7 +44,7 @@ run_e2e_visitor_ask_ai() {
   echo -n "[register] "
   curl -fsS -c "$cookie_jar" -b "$cookie_jar" -X POST "$base_url/api/auth/register" \
     -H "Content-Type: application/json" \
-    -d "{\"email\":\"$email\",\"password\":\"$password\"}" >/dev/null
+    -d "{\"email\":\"$email\",\"password\":\"$password\"$(e2e_turnstile_field "$base_url")}" >/dev/null
   echo "ok"
 
   echo -n "[workspace] "

@@ -114,15 +114,15 @@ type Strand struct {
 
 // Feed is the compiled radar response body.
 type Feed struct {
-	NextUp       *WorkItem      `json:"nextUp"`
-	Strands      []Strand       `json:"strands"`
-	Items        []WorkItem     `json:"items"`
-	ClearedToday int            `json:"clearedToday"`
-	Counts       map[string]int `json:"counts"`
-	Lens         string         `json:"lens"`
-	DefaultLens  string         `json:"defaultLens"`
-	LensSource   string         `json:"lensSource"` // query | inferred | default
-	Scenarios    []string       `json:"scenarios,omitempty"`
+	NextUp       *WorkItem         `json:"nextUp"`
+	Strands      []Strand          `json:"strands"`
+	Items        []WorkItem        `json:"items"`
+	ClearedToday int               `json:"clearedToday"`
+	Counts       map[string]int    `json:"counts"`
+	Lens         string            `json:"lens"`
+	DefaultLens  string            `json:"defaultLens"`
+	LensSource   string            `json:"lensSource"` // query | inferred | default
+	Scenarios    []string          `json:"scenarios,omitempty"`
 	ScenarioPack *ScenarioPackMeta `json:"scenarioPack,omitempty"`
 	NoiseHints   []NoiseHint       `json:"noiseHints,omitempty"`
 	// DegradedSections lists ranking-critical facets that failed to load.
@@ -540,6 +540,9 @@ func buildItem(in CompileInput, a db.ActionItem, sig *db.Signal, product Product
 		}
 		actor, email, docTitle = contextActor(sig.Context)
 		page = metadataPage(sig.Metadata)
+		if focusDoc := metadataDocumentID(sig.Metadata); focusDoc != "" {
+			docID = focusDoc
+		}
 	}
 
 	src := textOrEmpty(a.SourceType)
@@ -997,7 +1000,19 @@ func metadataPage(raw []byte) string {
 	if !ok {
 		return ""
 	}
-	return md["page_number"]
+	return strings.TrimSpace(md["page_number"])
+}
+
+func metadataDocumentID(raw []byte) string {
+	md, ok := unmarshalStringMap(raw)
+	if !ok {
+		return ""
+	}
+	id := strings.TrimSpace(md["document_id"])
+	if id == "" {
+		id = strings.TrimSpace(md["documentId"])
+	}
+	return id
 }
 
 func unmarshalMap(b []byte) (map[string]any, bool) {
