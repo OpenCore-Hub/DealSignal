@@ -32,31 +32,45 @@ import (
 var (
 	slugRegex = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 
-	ErrRoomNotFound         = errors.New("room not found")
-	ErrInvalidSlug          = errors.New("the data room URL can only contain lowercase letters, numbers, and hyphens")
-	ErrDuplicateSlug        = errors.New("a data room with this URL already exists. please choose a different name")
-	ErrNotRoomAdmin         = errors.New("not a room admin")
-	ErrCannotManageMember   = errors.New("cannot manage this member")
-	ErrInvalidRole          = errors.New("invalid role")
-	ErrMemberNotFound       = errors.New("member not found")
-	ErrRequestNotFound      = errors.New("access request not found")
-	ErrNDARequired          = errors.New("nda required")
-	ErrApprovalRequired     = errors.New("access not approved")
-	ErrFolderAccessDenied   = errors.New("folder access denied")
-	ErrInvalidEmail         = errors.New("invalid email")
-	ErrFolderNotEmpty       = errors.New("folder is not empty")
-	ErrFolderNotFound       = errors.New("folder not found")
-	ErrFolderExists         = errors.New("folder already exists")
-	ErrInvalidFolder        = errors.New("invalid folder")
-	ErrResourceLocked       = errors.New("resource is locked")
-	ErrNDANotRequired       = errors.New("nda is not required for this room")
-	ErrNDAAgreementRequired = errors.New("nda agreement is required")
-	ErrAccessRequestExists  = errors.New("access request already exists")
-	ErrRateLimited          = errors.New("too many requests")
+	ErrRoomNotFound          = errors.New("room not found")
+	ErrInvalidSlug           = errors.New("the data room URL can only contain lowercase letters, numbers, and hyphens")
+	ErrDuplicateSlug         = errors.New("a data room with this URL already exists. please choose a different name")
+	ErrNotRoomAdmin          = errors.New("not a room admin")
+	ErrCannotManageMember    = errors.New("cannot manage this member")
+	ErrInvalidRole           = errors.New("invalid role")
+	ErrMemberNotFound        = errors.New("member not found")
+	ErrRequestNotFound       = errors.New("access request not found")
+	ErrNDARequired           = errors.New("nda required")
+	ErrApprovalRequired      = errors.New("access not approved")
+	ErrFolderAccessDenied    = errors.New("folder access denied")
+	ErrInvalidEmail          = errors.New("invalid email")
+	ErrFolderNotEmpty        = errors.New("folder is not empty")
+	ErrFolderNotFound        = errors.New("folder not found")
+	ErrFolderExists          = errors.New("folder already exists")
+	ErrInvalidFolder         = errors.New("invalid folder")
+	ErrResourceLocked        = errors.New("resource is locked")
+	ErrNDANotRequired        = errors.New("nda is not required for this room")
+	ErrNDAAgreementRequired  = errors.New("nda agreement is required")
+	ErrNDAConsentRequired    = errors.New("nda consent is required")
+	ErrNDAContentMismatch    = errors.New("nda content does not match")
+	ErrNDAPreviewUnavailable = errors.New("nda preview is unavailable")
+	ErrAccessRequestExists   = errors.New("access request already exists")
+	ErrRateLimited           = errors.New("too many requests")
 	// ErrAgreementNotAllowedInDealRoom blocks attaching agreement-library docs to rooms.
 	ErrAgreementNotAllowedInDealRoom = errors.New("agreement documents cannot be added to a data room")
 	// ErrArchivedDocumentNotAllowed blocks attaching library-archived docs to rooms.
 	ErrArchivedDocumentNotAllowed = errors.New("archived documents cannot be added to a data room")
+	ErrRoomInviteNotFound         = errors.New("invitation not found")
+	ErrRoomInviteEmailMismatch    = errors.New("signed-in email does not match this invitation")
+	ErrRoomInviteUsed             = errors.New("invitation already used")
+	// ErrDocumentExistsOutsideRoom rejects attaching a document that already
+	// belongs to another live data room. Same-id membership would share bytes.
+	ErrDocumentExistsOutsideRoom = errors.New("this document is already in another live data room")
+	// ErrDocumentTitleExistsInRoom rejects attaching a different id that collides
+	// with a live filename already in this room.
+	ErrDocumentTitleExistsInRoom   = errors.New("a document with this filename already exists in this data room")
+	ErrDocumentUploadNotConfigured = errors.New("data room upload is not configured")
+	ErrFolderPathRequired          = errors.New("folder path is required")
 )
 
 const (
@@ -89,6 +103,7 @@ type Service struct {
 	listFlight  singleflight.Group
 	planChecker plan.Checker
 	mailer      mailer.Mailer
+	docs        WorkspaceDocuments
 }
 
 // ActionSyncer resolves operational action items when room events are handled.
@@ -96,9 +111,9 @@ type ActionSyncer interface {
 	ResolveBySource(ctx context.Context, workspaceID, sourceType, sourceID string)
 }
 
-// KnowledgeEnqueuer schedules external knowledge-base ingest/delete jobs.
+// KnowledgeEnqueuer schedules external knowledge-base deletes.
+// Ingest is Knowledge-tab Sync only; deal-room membership must not mint a corpus.
 type KnowledgeEnqueuer interface {
-	EnqueueIngestDocument(ctx context.Context, roomID, workspaceID, documentID string) error
 	EnqueueDeleteDocument(ctx context.Context, roomID, workspaceID, documentID string) error
 }
 
@@ -115,7 +130,7 @@ func WithRateLimiter(r RateLimiter) ServiceOption {
 	return func(s *Service) { s.rateLimiter = r }
 }
 
-// WithKnowledgeEnqueuer wires knowledge-base sync hooks for room document changes.
+// WithKnowledgeEnqueuer wires knowledge-base delete hooks for lock/remove/delete-room.
 func WithKnowledgeEnqueuer(k KnowledgeEnqueuer) ServiceOption {
 	return func(s *Service) { s.knowledgeEnqueuer = k }
 }
@@ -1260,47 +1275,30 @@ func (s *Service) ensureRoomMailboxAvailable(ctx context.Context, roomID pgtype.
 }
 
 // SignMemberNDA lets the authenticated invitee activate their own pending row.
-func (s *Service) SignMemberNDA(ctx context.Context, roomID, workspaceID, userID string) (RoomDetail, error) {
+// When the room requires NDA, agreed must be true (informed consent). Already-active
+// members remain idempotent and do not need to re-consent.
+func (s *Service) SignMemberNDA(ctx context.Context, roomID, workspaceID, userID string, agreed bool, contentSHA256 string) (RoomDetail, error) {
 	room, err := s.GetRoom(ctx, roomID, workspaceID)
 	if err != nil {
 		return RoomDetail{}, err
 	}
-	uid := pgUUID(userID)
-	user, err := s.queries.GetUserByID(ctx, uid)
-	if err != nil {
-		return RoomDetail{}, ErrMemberNotFound
-	}
-	sessionEmail := strings.ToLower(strings.TrimSpace(user.Email))
-
-	caps, err := roomacl.Resolve(ctx, s.queries, room.WorkspaceID, room.ID, userID)
+	signer, err := s.resolveNDASigner(ctx, room, userID)
 	if err != nil {
 		return RoomDetail{}, err
 	}
-	if caps.View && !caps.InvitedPending {
+	if signer.alreadyActive {
 		return s.GetRoomDetail(ctx, roomID, workspaceID, userID)
 	}
-	signEmail := strings.ToLower(strings.TrimSpace(caps.MemberEmail))
-	if !caps.InvitedPending {
-		if sessionEmail == "" {
-			return RoomDetail{}, ErrMemberNotFound
-		}
-		member, merr := s.findRoomMemberByMailbox(ctx, room.ID, sessionEmail)
-		if merr != nil || !member.ID.Valid {
-			return RoomDetail{}, ErrMemberNotFound
-		}
-		if member.Status == "active" {
-			return s.GetRoomDetail(ctx, roomID, workspaceID, userID)
-		}
-		if member.Status != "pending" {
-			return RoomDetail{}, ErrMemberNotFound
-		}
-		signEmail = member.Email
-	}
-	if strings.TrimSpace(signEmail) == "" {
-		return RoomDetail{}, ErrMemberNotFound
-	}
+	signEmail := signer.email
+	uid := signer.userID
 
 	if room.RequiresNda {
+		if !agreed {
+			return RoomDetail{}, ErrNDAConsentRequired
+		}
+		if err := s.matchMemberNDAContent(ctx, room, contentSHA256); err != nil {
+			return RoomDetail{}, err
+		}
 		if err := s.RecordNDA(ctx, room.Slug, signEmail, "", ""); err != nil {
 			return RoomDetail{}, err
 		}
@@ -1336,7 +1334,11 @@ func (s *Service) sendRoomInviteEmail(ctx context.Context, room db.DealRoom, wor
 	if err != nil || strings.TrimSpace(ws.Slug) == "" {
 		return
 	}
-	roomURL := fmt.Sprintf("%s/%s/deal-rooms/%s", frontend, ws.Slug, uuid.UUID(room.ID.Bytes).String())
+	roomID := uuid.UUID(room.ID.Bytes).String()
+	roomURL := fmt.Sprintf("%s/%s/deal-rooms/%s", frontend, ws.Slug, roomID)
+	if token, terr := mintRoomInviteToken(s.inviteTokenSecret(), roomID, email); terr == nil {
+		roomURL = fmt.Sprintf("%s/room-invitations/%s/accept", frontend, token)
+	}
 	vars := map[string]string{
 		"BrandName":      "DealSignal",
 		"WorkspaceName":  ws.Name,
@@ -1805,6 +1807,7 @@ func (s *Service) RecordNDA(ctx context.Context, roomSlug, email, ip, ua string)
 		Ip:            hashIPText(s.cfg.IPHashKey, ip),
 		UserAgent:     pgtype.Text{String: ua, Valid: ua != ""},
 		NdaTemplateID: tplID,
+		ContentSha256: s.boundMemberNDAContentSHA(ctx, room.WorkspaceID, tplID),
 	}); err != nil {
 		return fmt.Errorf("record nda: %w", err)
 	}
@@ -1909,7 +1912,7 @@ func (s *Service) AddDocument(ctx context.Context, roomID, workspaceID, adminUse
 	}
 	folderPath = normalizeFolderPath(folderPath)
 	if folderPath == "/" || folderPath == "" {
-		return db.DealRoomDocument{}, errors.New("folder path is required")
+		return db.DealRoomDocument{}, ErrFolderPathRequired
 	}
 	if !folderExists(folders, folderPath) {
 		return db.DealRoomDocument{}, ErrFolderNotFound
@@ -1938,88 +1941,100 @@ func (s *Service) AddDocument(ctx context.Context, roomID, workspaceID, adminUse
 		return db.DealRoomDocument{}, ErrAgreementNotAllowedInDealRoom
 	}
 
-	// Idempotent: replacing an upload keeps the same document id; re-adding it
-	// to the room should update folder placement instead of failing UNIQUE.
-	if existing, getErr := s.queries.GetDealRoomDocumentByDocumentID(ctx, db.GetDealRoomDocumentByDocumentIDParams{
-		RoomID:     room.ID,
-		DocumentID: doc.ID,
-	}); getErr == nil {
-		if existing.FolderPath != folderPath {
-			if err := s.queries.UpdateDealRoomDocumentFolder(ctx, db.UpdateDealRoomDocumentFolderParams{
-				FolderPath: folderPath,
-				ID:         existing.ID,
-				RoomID:     room.ID,
-			}); err != nil {
-				return db.DealRoomDocument{}, err
-			}
-			existing.FolderPath = folderPath
+	var row db.DealRoomDocument
+	if err := s.runInTx(ctx, func(q *db.Queries) error {
+		// Document lock first, then title — same order everywhere to avoid deadlock.
+		if lockErr := upload.LockLiveDealRoomDocument(ctx, q, doc.ID); lockErr != nil {
+			return lockErr
 		}
-		if existing.SortOrder != sortOrder {
-			if err := s.queries.UpdateDealRoomDocumentSortOrder(ctx, db.UpdateDealRoomDocumentSortOrderParams{
-				SortOrder: sortOrder,
-				ID:        existing.ID,
-				RoomID:    room.ID,
-			}); err != nil {
-				return db.DealRoomDocument{}, err
-			}
-			existing.SortOrder = sortOrder
-		}
-		if err := s.ensureDealRoomDocumentCategory(ctx, doc); err != nil {
-			return db.DealRoomDocument{}, err
-		}
-		if s.knowledgeEnqueuer != nil {
-			if kerr := s.knowledgeEnqueuer.EnqueueIngestDocument(
-				ctx,
-				uuid.UUID(room.ID.Bytes).String(),
-				uuid.UUID(room.WorkspaceID.Bytes).String(),
-				uuid.UUID(doc.ID.Bytes).String(),
-			); kerr != nil {
-				logger.ErrorCtx(ctx, "enqueue knowledge ingest after re-add document", kerr)
+		if strings.TrimSpace(doc.Title) != "" {
+			if lockErr := upload.LockRoomTitle(ctx, q, room.ID, doc.Title); lockErr != nil {
+				return lockErr
 			}
 		}
-		s.invalidateListCache(ctx, workspaceID)
-		return existing, nil
-	} else if !errors.Is(getErr, pgx.ErrNoRows) {
-		return db.DealRoomDocument{}, getErr
-	}
 
-	row, err := s.queries.AddDealRoomDocument(ctx, db.AddDealRoomDocumentParams{
-		TenantID:    room.TenantID,
-		WorkspaceID: room.WorkspaceID,
-		RoomID:      room.ID,
-		DocumentID:  doc.ID,
-		FolderPath:  folderPath,
-		SortOrder:   sortOrder,
-	})
-	if err != nil {
-		return db.DealRoomDocument{}, err
-	}
-	if err := s.ensureDealRoomDocumentCategory(ctx, doc); err != nil {
-		return db.DealRoomDocument{}, err
-	}
-	if s.knowledgeEnqueuer != nil {
-		if kerr := s.knowledgeEnqueuer.EnqueueIngestDocument(
-			ctx,
-			uuid.UUID(room.ID.Bytes).String(),
-			uuid.UUID(room.WorkspaceID.Bytes).String(),
-			uuid.UUID(doc.ID.Bytes).String(),
-		); kerr != nil {
-			logger.ErrorCtx(ctx, "enqueue knowledge ingest after add document", kerr)
+		// Idempotent: replacing an upload keeps the same document id; re-adding it
+		// to the room should update folder placement instead of failing UNIQUE.
+		if existing, getErr := q.GetDealRoomDocumentByDocumentID(ctx, db.GetDealRoomDocumentByDocumentIDParams{
+			RoomID:     room.ID,
+			DocumentID: doc.ID,
+		}); getErr == nil {
+			if existing.FolderPath != folderPath {
+				if err := q.UpdateDealRoomDocumentFolder(ctx, db.UpdateDealRoomDocumentFolderParams{
+					FolderPath: folderPath,
+					ID:         existing.ID,
+					RoomID:     room.ID,
+				}); err != nil {
+					return err
+				}
+				existing.FolderPath = folderPath
+			}
+			if existing.SortOrder != sortOrder {
+				if err := q.UpdateDealRoomDocumentSortOrder(ctx, db.UpdateDealRoomDocumentSortOrderParams{
+					SortOrder: sortOrder,
+					ID:        existing.ID,
+					RoomID:    room.ID,
+				}); err != nil {
+					return err
+				}
+				existing.SortOrder = sortOrder
+			}
+			if err := ensureDealRoomDocumentCategoryQ(ctx, q, doc); err != nil {
+				return err
+			}
+			row = existing
+			return nil
+		} else if !errors.Is(getErr, pgx.ErrNoRows) {
+			return getErr
 		}
+
+		liveMem, liveErr := q.GetLiveDealRoomMembershipByDocument(ctx, doc.ID)
+		if liveErr == nil && liveMem.RoomID != room.ID {
+			return ErrDocumentExistsOutsideRoom
+		}
+		if liveErr != nil && !errors.Is(liveErr, pgx.ErrNoRows) {
+			return liveErr
+		}
+		if titleHit, titleErr := q.GetLiveDealRoomDocumentByTitle(ctx, db.GetLiveDealRoomDocumentByTitleParams{
+			RoomID: room.ID,
+			Title:  doc.Title,
+		}); titleErr == nil && titleHit.ID != doc.ID {
+			return ErrDocumentTitleExistsInRoom
+		} else if titleErr != nil && !errors.Is(titleErr, pgx.ErrNoRows) {
+			return titleErr
+		}
+
+		created, addErr := q.AddDealRoomDocument(ctx, db.AddDealRoomDocumentParams{
+			TenantID:    room.TenantID,
+			WorkspaceID: room.WorkspaceID,
+			RoomID:      room.ID,
+			DocumentID:  doc.ID,
+			FolderPath:  folderPath,
+			SortOrder:   sortOrder,
+		})
+		if addErr != nil {
+			return addErr
+		}
+		if err := ensureDealRoomDocumentCategoryQ(ctx, q, doc); err != nil {
+			return err
+		}
+		row = created
+		return nil
+	}); err != nil {
+		return db.DealRoomDocument{}, err
 	}
 	s.invalidateListCache(ctx, workspaceID)
 	return row, nil
 }
 
-// ensureDealRoomDocumentCategory promotes general → deal_room after a successful attach.
-func (s *Service) ensureDealRoomDocumentCategory(ctx context.Context, doc db.GetDocumentByIDRow) error {
+func ensureDealRoomDocumentCategoryQ(ctx context.Context, q *db.Queries, doc db.GetDocumentByIDRow) error {
 	if strings.EqualFold(doc.Category, upload.CategoryDealRoom) {
 		return nil
 	}
 	if strings.EqualFold(doc.Category, upload.CategoryAgreement) {
 		return ErrAgreementNotAllowedInDealRoom
 	}
-	return s.queries.UpdateDocumentCategory(ctx, db.UpdateDocumentCategoryParams{
+	return q.UpdateDocumentCategory(ctx, db.UpdateDocumentCategoryParams{
 		Category:    upload.CategoryDealRoom,
 		ID:          doc.ID,
 		WorkspaceID: doc.WorkspaceID,
@@ -2109,6 +2124,27 @@ func demoteDealRoomCategoryIfOrphanedQ(ctx context.Context, q *db.Queries, docum
 	}
 	if !strings.EqualFold(doc.Category, upload.CategoryDealRoom) {
 		return nil
+	}
+	general, genErr := q.GetDocumentByTitleInWorkspaceCategory(ctx, db.GetDocumentByTitleInWorkspaceCategoryParams{
+		WorkspaceID: workspaceID,
+		Title:       doc.Title,
+		Category:    upload.CategoryGeneral,
+	})
+	if genErr != nil && !errors.Is(genErr, pgx.ErrNoRows) {
+		return genErr
+	}
+	if genErr == nil && general.ID != documentID {
+		renamed, renameErr := upload.UniqueRestoredTitle(ctx, q, workspaceID, doc.Title)
+		if renameErr != nil {
+			return renameErr
+		}
+		if err := q.UpdateDocumentTitle(ctx, db.UpdateDocumentTitleParams{
+			Title:       renamed,
+			ID:          documentID,
+			WorkspaceID: workspaceID,
+		}); err != nil {
+			return err
+		}
 	}
 	return q.UpdateDocumentCategory(ctx, db.UpdateDocumentCategoryParams{
 		Category:    upload.CategoryGeneral,
@@ -2604,7 +2640,7 @@ func (s *Service) SetResourceLocks(
 	knowledgeDocIDs := make([]string, 0)
 	seenKnowledgeDocs := map[string]bool{}
 	enqueueKnowledgeDoc := func(docID string) {
-		if docID == "" || seenKnowledgeDocs[docID] {
+		if !locked || docID == "" || seenKnowledgeDocs[docID] {
 			return
 		}
 		seenKnowledgeDocs[docID] = true
@@ -2661,21 +2697,15 @@ func (s *Service) SetResourceLocks(
 		}
 	}
 
-	// Knowledge corpus: lock → purge from external index; unlock → re-ingest.
+	// Knowledge corpus: lock purges withdrawn files when a corpus already exists.
+	// Unlock does not ingest; the next Knowledge Sync is the re-index.
 	if s.knowledgeEnqueuer != nil && len(knowledgeDocIDs) > 0 {
 		roomIDStr := uuid.UUID(room.ID.Bytes).String()
 		wsIDStr := uuid.UUID(room.WorkspaceID.Bytes).String()
 		for _, docID := range knowledgeDocIDs {
-			var kerr error
-			if locked {
-				kerr = s.knowledgeEnqueuer.EnqueueDeleteDocument(ctx, roomIDStr, wsIDStr, docID)
-			} else {
-				kerr = s.knowledgeEnqueuer.EnqueueIngestDocument(ctx, roomIDStr, wsIDStr, docID)
-			}
-			if kerr != nil {
-				logger.ErrorCtx(ctx, "enqueue knowledge sync after resource lock change", kerr,
+			if kerr := s.knowledgeEnqueuer.EnqueueDeleteDocument(ctx, roomIDStr, wsIDStr, docID); kerr != nil {
+				logger.ErrorCtx(ctx, "enqueue knowledge delete after resource lock", kerr,
 					logger.Attr("document_id", docID),
-					logger.Attr("locked", locked),
 				)
 			}
 		}

@@ -118,6 +118,31 @@ func TestRBACMiddlewareGuestCannotWriteDealRooms(t *testing.T) {
 	}
 }
 
+func TestRBACMiddlewareGuestCannotPostDocuments(t *testing.T) {
+	r := withRole(RoleGuest, func(r *gin.Engine) {
+		r.POST("/api/workspaces/demo/documents", func(c *gin.Context) { c.Status(http.StatusCreated) })
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/demo/documents", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("guest POST /documents expected 403, got %d", w.Code)
+	}
+}
+
+func TestRBACMiddlewareGuestCanPostDealRoomUploads(t *testing.T) {
+	roomID := uuid.NewString()
+	r := withRole(RoleGuest, func(r *gin.Engine) {
+		r.POST("/api/workspaces/demo/deal-rooms/:roomId/uploads", func(c *gin.Context) { c.Status(http.StatusCreated) })
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/demo/deal-rooms/"+roomID+"/uploads", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("guest scoped room upload expected 201 from middleware, got %d", w.Code)
+	}
+}
+
 func TestRBACMiddlewareGuestCanMutateScopedDealRoom(t *testing.T) {
 	roomID := uuid.NewString()
 	r := withRole(RoleGuest, func(r *gin.Engine) {

@@ -3770,8 +3770,8 @@ func (q *Queries) CreateLinkNDAAgreement(ctx context.Context, arg CreateLinkNDAA
 }
 
 const createNDAAgreement = `-- name: CreateNDAAgreement :exec
-INSERT INTO room_nda_agreements (room_id, email, ip, user_agent, nda_template_id)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO room_nda_agreements (room_id, email, ip, user_agent, nda_template_id, content_sha256)
+VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (room_id, email) DO NOTHING
 `
 
@@ -3781,6 +3781,7 @@ type CreateNDAAgreementParams struct {
 	Ip            pgtype.Text
 	UserAgent     pgtype.Text
 	NdaTemplateID pgtype.UUID
+	ContentSha256 string
 }
 
 func (q *Queries) CreateNDAAgreement(ctx context.Context, arg CreateNDAAgreementParams) error {
@@ -3790,6 +3791,7 @@ func (q *Queries) CreateNDAAgreement(ctx context.Context, arg CreateNDAAgreement
 		arg.Ip,
 		arg.UserAgent,
 		arg.NdaTemplateID,
+		arg.ContentSha256,
 	)
 	return err
 }
@@ -6912,8 +6914,9 @@ type GetDocumentByTitleInWorkspaceRow struct {
 	DeletedAt   pgtype.Timestamptz
 }
 
-// Live library row only. Archived overwrite snapshots must not collide with
-// replace / exists checks or resurrect on re-upload.
+// Do not call from business code. LIMIT 1 is ambiguous after partitioned
+// live-title uniques (same filename may exist as general and deal_room).
+// Use GetDocumentByTitleInWorkspaceCategory or GetLiveDealRoomDocumentByTitle.
 func (q *Queries) GetDocumentByTitleInWorkspace(ctx context.Context, arg GetDocumentByTitleInWorkspaceParams) (GetDocumentByTitleInWorkspaceRow, error) {
 	row := q.db.QueryRow(ctx, getDocumentByTitleInWorkspace, arg.WorkspaceID, arg.Title)
 	var i GetDocumentByTitleInWorkspaceRow
@@ -6970,6 +6973,61 @@ type GetDocumentByTitleInWorkspaceAnyRow struct {
 func (q *Queries) GetDocumentByTitleInWorkspaceAny(ctx context.Context, arg GetDocumentByTitleInWorkspaceAnyParams) (GetDocumentByTitleInWorkspaceAnyRow, error) {
 	row := q.db.QueryRow(ctx, getDocumentByTitleInWorkspaceAny, arg.WorkspaceID, arg.Title)
 	var i GetDocumentByTitleInWorkspaceAnyRow
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.CreatedBy,
+		&i.Title,
+		&i.SourceType,
+		&i.Status,
+		&i.StorageKey,
+		&i.FileSize,
+		&i.Category,
+		&i.PageCount,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return i, err
+}
+
+const getDocumentByTitleInWorkspaceCategory = `-- name: GetDocumentByTitleInWorkspaceCategory :one
+SELECT id, tenant_id, workspace_id, created_by, COALESCE(title, ''::text) as title, source_type, status, storage_key, COALESCE(file_size, 0::bigint) as file_size, category, page_count, created_at, updated_at, deleted_at
+FROM documents
+WHERE workspace_id = $1 AND title = $2 AND category = $3 AND deleted_at IS NULL
+  AND status IS DISTINCT FROM 'archived'
+ORDER BY created_at DESC
+LIMIT 1
+`
+
+type GetDocumentByTitleInWorkspaceCategoryParams struct {
+	WorkspaceID pgtype.UUID
+	Title       string
+	Category    string
+}
+
+type GetDocumentByTitleInWorkspaceCategoryRow struct {
+	ID          pgtype.UUID
+	TenantID    pgtype.UUID
+	WorkspaceID pgtype.UUID
+	CreatedBy   pgtype.UUID
+	Title       string
+	SourceType  string
+	Status      string
+	StorageKey  string
+	FileSize    pgtype.Int8
+	Category    string
+	PageCount   pgtype.Int4
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
+	DeletedAt   pgtype.Timestamptz
+}
+
+// Live row in one category. Archived overwrite snapshots must not collide.
+func (q *Queries) GetDocumentByTitleInWorkspaceCategory(ctx context.Context, arg GetDocumentByTitleInWorkspaceCategoryParams) (GetDocumentByTitleInWorkspaceCategoryRow, error) {
+	row := q.db.QueryRow(ctx, getDocumentByTitleInWorkspaceCategory, arg.WorkspaceID, arg.Title, arg.Category)
+	var i GetDocumentByTitleInWorkspaceCategoryRow
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
@@ -10371,6 +10429,91 @@ func (q *Queries) GetLinkPageViewMetricsBatch(ctx context.Context, dollar_1 []pg
 		return nil, err
 	}
 	return items, nil
+}
+
+const getLiveDealRoomDocumentByTitle = `-- name: GetLiveDealRoomDocumentByTitle :one
+SELECT d.id, d.tenant_id, d.workspace_id, d.created_by, COALESCE(d.title, ''::text) as title, d.source_type, d.status, d.storage_key, COALESCE(d.file_size, 0::bigint) as file_size, d.category, d.page_count, d.created_at, d.updated_at, d.deleted_at
+FROM deal_room_documents drd
+INNER JOIN documents d ON d.id = drd.document_id
+    AND d.deleted_at IS NULL
+    AND d.status IS DISTINCT FROM 'archived'
+INNER JOIN deal_rooms r ON r.id = drd.room_id AND r.deleted_at IS NULL
+WHERE drd.room_id = $1 AND d.title = $2
+ORDER BY d.created_at DESC
+LIMIT 1
+`
+
+type GetLiveDealRoomDocumentByTitleParams struct {
+	RoomID pgtype.UUID
+	Title  string
+}
+
+type GetLiveDealRoomDocumentByTitleRow struct {
+	ID          pgtype.UUID
+	TenantID    pgtype.UUID
+	WorkspaceID pgtype.UUID
+	CreatedBy   pgtype.UUID
+	Title       string
+	SourceType  string
+	Status      string
+	StorageKey  string
+	FileSize    pgtype.Int8
+	Category    string
+	PageCount   pgtype.Int4
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
+	DeletedAt   pgtype.Timestamptz
+}
+
+// Live (non-archived, non-deleted) document attached to a non-deleted room.
+func (q *Queries) GetLiveDealRoomDocumentByTitle(ctx context.Context, arg GetLiveDealRoomDocumentByTitleParams) (GetLiveDealRoomDocumentByTitleRow, error) {
+	row := q.db.QueryRow(ctx, getLiveDealRoomDocumentByTitle, arg.RoomID, arg.Title)
+	var i GetLiveDealRoomDocumentByTitleRow
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.CreatedBy,
+		&i.Title,
+		&i.SourceType,
+		&i.Status,
+		&i.StorageKey,
+		&i.FileSize,
+		&i.Category,
+		&i.PageCount,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return i, err
+}
+
+const getLiveDealRoomMembershipByDocument = `-- name: GetLiveDealRoomMembershipByDocument :one
+SELECT drd.id, drd.tenant_id, drd.workspace_id, drd.room_id, drd.document_id, drd.folder_path, drd.sort_order, drd.created_at, drd.locked
+FROM deal_room_documents drd
+INNER JOIN deal_rooms r ON r.id = drd.room_id AND r.deleted_at IS NULL
+WHERE drd.document_id = $1
+ORDER BY drd.created_at ASC
+LIMIT 1
+`
+
+// Membership in a non-deleted data room. Soft-deleted rooms must not occupy
+// live titles or hide files from both the library and every visible room.
+func (q *Queries) GetLiveDealRoomMembershipByDocument(ctx context.Context, documentID pgtype.UUID) (DealRoomDocument, error) {
+	row := q.db.QueryRow(ctx, getLiveDealRoomMembershipByDocument, documentID)
+	var i DealRoomDocument
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.RoomID,
+		&i.DocumentID,
+		&i.FolderPath,
+		&i.SortOrder,
+		&i.CreatedAt,
+		&i.Locked,
+	)
+	return i, err
 }
 
 const getNDATemplateByID = `-- name: GetNDATemplateByID :one
@@ -23078,6 +23221,23 @@ type UpdateDocumentStatusParams struct {
 
 func (q *Queries) UpdateDocumentStatus(ctx context.Context, arg UpdateDocumentStatusParams) error {
 	_, err := q.db.Exec(ctx, updateDocumentStatus, arg.Status, arg.PageCount, arg.ID)
+	return err
+}
+
+const updateDocumentTitle = `-- name: UpdateDocumentTitle :exec
+UPDATE documents
+SET title = $1, updated_at = now()
+WHERE id = $2 AND workspace_id = $3
+`
+
+type UpdateDocumentTitleParams struct {
+	Title       string
+	ID          pgtype.UUID
+	WorkspaceID pgtype.UUID
+}
+
+func (q *Queries) UpdateDocumentTitle(ctx context.Context, arg UpdateDocumentTitleParams) error {
+	_, err := q.db.Exec(ctx, updateDocumentTitle, arg.Title, arg.ID, arg.WorkspaceID)
 	return err
 }
 

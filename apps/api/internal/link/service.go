@@ -5874,10 +5874,14 @@ func (s *Service) ApproveUploadedFile(ctx context.Context, fileID pgtype.UUID, r
 	}
 
 	workspaceID := uuid.UUID(file.WorkspaceID.Bytes).String()
-	// Pre-lock delta from committed state; re-checked inside the promote tx if title state changes.
-	existingPeek, peekErr := s.queries.GetDocumentByTitleInWorkspace(ctx, db.GetDocumentByTitleInWorkspaceParams{
-		WorkspaceID: file.WorkspaceID,
-		Title:       file.OriginalFilename,
+	title := upload.NormalizeUploadFilename(file.OriginalFilename)
+	if title == "" {
+		title = file.OriginalFilename
+	}
+	// Pre-lock delta from committed this-room title; library same-name is a new copy.
+	existingPeek, peekErr := s.queries.GetLiveDealRoomDocumentByTitle(ctx, db.GetLiveDealRoomDocumentByTitleParams{
+		RoomID: link.DealRoomID,
+		Title:  title,
 	})
 	additionalBytes := file.FileSize
 	switch {
@@ -5888,7 +5892,7 @@ func (s *Service) ApproveUploadedFile(ctx context.Context, fileID pgtype.UUID, r
 		}
 		additionalBytes = file.FileSize - oldSize
 	case errors.Is(peekErr, pgx.ErrNoRows):
-		// new library document — charge full size
+		// new deal_room document — charge full size
 	default:
 		return fmt.Errorf("lookup existing document: %w", peekErr)
 	}
@@ -5941,10 +5945,18 @@ func (s *Service) approveUploadedFileTx(
 		folderPath = "/Uploads"
 	}
 
+	title := upload.NormalizeUploadFilename(file.OriginalFilename)
+	if title == "" {
+		title = file.OriginalFilename
+	}
+	if err := upload.LockRoomTitle(ctx, qtx, link.DealRoomID, title); err != nil {
+		return err
+	}
+
 	var docID pgtype.UUID
-	existing, lookupErr := qtx.GetDocumentByTitleInWorkspace(ctx, db.GetDocumentByTitleInWorkspaceParams{
-		WorkspaceID: link.WorkspaceID,
-		Title:       file.OriginalFilename,
+	existing, lookupErr := qtx.GetLiveDealRoomDocumentByTitle(ctx, db.GetLiveDealRoomDocumentByTitleParams{
+		RoomID: link.DealRoomID,
+		Title:  title,
 	})
 	delta := file.FileSize
 	switch {
@@ -5955,7 +5967,7 @@ func (s *Service) approveUploadedFileTx(
 		}
 		delta = file.FileSize - oldSize
 	case errors.Is(lookupErr, pgx.ErrNoRows):
-		// new library document — charge full size
+		// new deal_room document — charge full size
 	default:
 		return fmt.Errorf("lookup existing document: %w", lookupErr)
 	}
@@ -5969,11 +5981,10 @@ func (s *Service) approveUploadedFileTx(
 	}
 	switch {
 	case lookupErr == nil:
-		// Owner approved a file that collides with an existing library title —
-		// replace in place so deal-room memberships and share links stay valid.
+		// This-room title collision — rebind that id so memberships stay valid.
 		category := existing.Category
 		if category == "" {
-			category = "uploaded"
+			category = upload.CategoryDealRoom
 		}
 		rebinding, rebindErr := upload.RebindDocumentContent(ctx, qtx, upload.RebindDocumentContentParams{
 			DocumentID:  existing.ID,
@@ -6000,12 +6011,12 @@ func (s *Service) approveUploadedFileTx(
 			TenantID:    link.TenantID,
 			WorkspaceID: link.WorkspaceID,
 			CreatedBy:   reviewerID,
-			Title:       file.OriginalFilename,
+			Title:       title,
 			SourceType:  sourceType,
 			Status:      "uploaded",
 			StorageKey:  file.StorageKey,
 			FileSize:    pgtype.Int8{Int64: file.FileSize, Valid: true},
-			Category:    "uploaded",
+			Category:    upload.CategoryDealRoom,
 		}); createErr != nil {
 			return fmt.Errorf("create document: %w", createErr)
 		}

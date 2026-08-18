@@ -1681,6 +1681,9 @@ func TestBillingApproveUploadedFileStorage_Integration(t *testing.T) {
 		t.Fatalf("create room: %v", err)
 	}
 	roomID := uuid.UUID(room.ID.Bytes).String()
+	if _, err := drSvc.AddDocument(f.ctx, roomID, wsID, userID, uuid.UUID(f.doc.ID.Bytes).String(), "/general", 0); err != nil {
+		t.Fatalf("attach library doc to room for in-room replace: %v", err)
+	}
 
 	frLink, err := f.linkSvc.CreateLink(f.ctx, userID, wsID, link.CreateLinkRequest{
 		DealRoomID:       roomID,
@@ -1739,6 +1742,192 @@ func TestBillingApproveUploadedFileStorage_Integration(t *testing.T) {
 	}
 	if approved.Status != "approved" {
 		t.Fatalf("expected approved, got %q", approved.Status)
+	}
+}
+
+// Library same-name is a new deal_room copy: charge full size, never library delta.
+func TestBillingApproveUploadedFileLibrarySameNameChargesFull_Integration(t *testing.T) {
+	f := newBillingFixture(t)
+	userID, wsID, _ := f.ids()
+
+	if _, err := f.q.UpsertWorkspaceBilling(f.ctx, db.UpsertWorkspaceBillingParams{
+		WorkspaceID: f.workspace.ID,
+		PlanCode:    plan.CodeFree,
+		Period:      plan.PeriodMonthly,
+	}); err != nil {
+		t.Fatalf("upsert free: %v", err)
+	}
+	if _, err := f.tx.Exec(f.ctx, `UPDATE documents SET file_size = $1 WHERE id = $2`, int64(2<<30), f.doc.ID); err != nil {
+		t.Fatalf("fill free storage: %v", err)
+	}
+
+	drSvc := dealroom.NewService(f.q, f.tx, &config.Config{}, dealroom.WithPlanChecker(f.wsSvc))
+	room, err := drSvc.CreateRoom(f.ctx, userID, wsID, dealroom.CreateRoomRequest{
+		Slug: "lib-copy-cap-" + uuid.NewString()[:8],
+		Name: "Library Copy Cap Room",
+	})
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	roomID := uuid.UUID(room.ID.Bytes).String()
+	frLink, err := f.linkSvc.CreateLink(f.ctx, userID, wsID, link.CreateLinkRequest{
+		DealRoomID:       roomID,
+		Name:             "lib-copy-req-" + uuid.NewString()[:8],
+		PermissionType:   "public",
+		LinkType:         "file_request",
+		TargetFolderPath: "/Uploads",
+	})
+	if err != nil {
+		t.Fatalf("create file_request link: %v", err)
+	}
+
+	pending, err := f.q.CreateUploadedFile(f.ctx, db.CreateUploadedFileParams{
+		TenantID:         f.workspace.TenantID,
+		WorkspaceID:      f.workspace.ID,
+		LinkID:           frLink.ID,
+		OriginalFilename: f.doc.Title,
+		StorageKey:       "pending/lib-same-name.pdf",
+		FileSize:         1,
+		MimeType:         "application/pdf",
+	})
+	if err != nil {
+		t.Fatalf("seed pending library-same-name file: %v", err)
+	}
+	err = f.linkSvc.ApproveUploadedFile(f.ctx, pending.ID, f.user.ID)
+	if !errors.Is(err, plan.ErrLimitStorage) {
+		t.Fatalf("library same-name at cap must charge full size and fail quota, got %v", err)
+	}
+	stillPending, err := f.q.GetUploadedFileByID(f.ctx, pending.ID)
+	if err != nil {
+		t.Fatalf("reload pending: %v", err)
+	}
+	if stillPending.Status != "pending_review" {
+		t.Fatalf("plan denial must leave status pending_review, got %q", stillPending.Status)
+	}
+}
+
+// Library same-name approval creates a new deal_room row; library id stays general.
+func TestBillingApproveUploadedFileLibrarySameNameCreatesNewDoc_Integration(t *testing.T) {
+	f := newBillingFixture(t)
+	userID, wsID, libDocID := f.ids()
+
+	drSvc := dealroom.NewService(f.q, f.tx, &config.Config{}, dealroom.WithPlanChecker(f.wsSvc))
+	room, err := drSvc.CreateRoom(f.ctx, userID, wsID, dealroom.CreateRoomRequest{
+		Slug: "lib-copy-new-" + uuid.NewString()[:8],
+		Name: "Library Copy New Doc Room",
+	})
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	roomID := uuid.UUID(room.ID.Bytes).String()
+	frLink, err := f.linkSvc.CreateLink(f.ctx, userID, wsID, link.CreateLinkRequest{
+		DealRoomID:       roomID,
+		Name:             "lib-copy-new-req-" + uuid.NewString()[:8],
+		PermissionType:   "public",
+		LinkType:         "file_request",
+		TargetFolderPath: "/Uploads",
+	})
+	if err != nil {
+		t.Fatalf("create file_request link: %v", err)
+	}
+
+	pending, err := f.q.CreateUploadedFile(f.ctx, db.CreateUploadedFileParams{
+		TenantID:         f.workspace.TenantID,
+		WorkspaceID:      f.workspace.ID,
+		LinkID:           frLink.ID,
+		OriginalFilename: f.doc.Title,
+		StorageKey:       "pending/lib-copy-new.pdf",
+		FileSize:         4096,
+		MimeType:         "application/pdf",
+	})
+	if err != nil {
+		t.Fatalf("seed pending: %v", err)
+	}
+	if err := f.linkSvc.ApproveUploadedFile(f.ctx, pending.ID, f.user.ID); err != nil {
+		t.Fatalf("approve library same-name must succeed under trial quota: %v", err)
+	}
+
+	live, err := f.q.GetLiveDealRoomDocumentByTitle(f.ctx, db.GetLiveDealRoomDocumentByTitleParams{
+		RoomID: room.ID,
+		Title:  f.doc.Title,
+	})
+	if err != nil {
+		t.Fatalf("room title lookup after approve: %v", err)
+	}
+	if uuid.UUID(live.ID.Bytes).String() == libDocID {
+		t.Fatal("approve must create a new deal_room document id, not rebind library row")
+	}
+	if live.Category != upload.CategoryDealRoom {
+		t.Fatalf("approved room copy must be deal_room, got %q", live.Category)
+	}
+	library, err := f.q.GetDocumentByID(f.ctx, db.GetDocumentByIDParams{
+		ID:          f.doc.ID,
+		WorkspaceID: f.workspace.ID,
+	})
+	if err != nil {
+		t.Fatalf("reload library doc: %v", err)
+	}
+	if library.Category != upload.CategoryGeneral {
+		t.Fatalf("library row must remain general, got %q", library.Category)
+	}
+}
+
+// This-room title approval rebinds the in-room document id (size delta), not library.
+func TestBillingApproveUploadedFileThisRoomTitleRebindsSameID_Integration(t *testing.T) {
+	f := newBillingFixture(t)
+	userID, wsID, libDocID := f.ids()
+
+	drSvc := dealroom.NewService(f.q, f.tx, &config.Config{}, dealroom.WithPlanChecker(f.wsSvc))
+	room, err := drSvc.CreateRoom(f.ctx, userID, wsID, dealroom.CreateRoomRequest{
+		Slug: "rebind-" + uuid.NewString()[:8],
+		Name: "Rebind Room",
+	})
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	roomID := uuid.UUID(room.ID.Bytes).String()
+	if _, err := drSvc.AddDocument(f.ctx, roomID, wsID, userID, libDocID, "/general", 0); err != nil {
+		t.Fatalf("attach library doc for in-room rebind: %v", err)
+	}
+
+	frLink, err := f.linkSvc.CreateLink(f.ctx, userID, wsID, link.CreateLinkRequest{
+		DealRoomID:       roomID,
+		Name:             "rebind-req-" + uuid.NewString()[:8],
+		PermissionType:   "public",
+		LinkType:         "file_request",
+		TargetFolderPath: "/Uploads",
+	})
+	if err != nil {
+		t.Fatalf("create file_request link: %v", err)
+	}
+	pending, err := f.q.CreateUploadedFile(f.ctx, db.CreateUploadedFileParams{
+		TenantID:         f.workspace.TenantID,
+		WorkspaceID:      f.workspace.ID,
+		LinkID:           frLink.ID,
+		OriginalFilename: f.doc.Title,
+		StorageKey:       "pending/rebind-smaller.pdf",
+		FileSize:         256,
+		MimeType:         "application/pdf",
+	})
+	if err != nil {
+		t.Fatalf("seed pending rebind: %v", err)
+	}
+	if err := f.linkSvc.ApproveUploadedFile(f.ctx, pending.ID, f.user.ID); err != nil {
+		t.Fatalf("in-room title rebind approve: %v", err)
+	}
+
+	live, err := f.q.GetLiveDealRoomDocumentByTitle(f.ctx, db.GetLiveDealRoomDocumentByTitleParams{
+		RoomID: room.ID,
+		Title:  f.doc.Title,
+	})
+	if err != nil {
+		t.Fatalf("room lookup: %v", err)
+	}
+	if uuid.UUID(live.ID.Bytes).String() != libDocID {
+		t.Fatalf("this-room hit must rebind same document id, got %q want %q", uuid.UUID(live.ID.Bytes), libDocID)
+	}
+	if !live.FileSize.Valid || live.FileSize.Int64 != 256 {
+		t.Fatalf("rebind must update file size to pending bytes, got %+v", live.FileSize)
 	}
 }
 
@@ -4404,6 +4593,9 @@ func TestBillingHTTPApproveUploadedFileStorage_Integration(t *testing.T) {
 		t.Fatalf("create room: %v", err)
 	}
 	roomID := uuid.UUID(room.ID.Bytes).String()
+	if _, err := drSvc.AddDocument(f.ctx, roomID, wsID, userID, uuid.UUID(f.doc.ID.Bytes).String(), "/general", 0); err != nil {
+		t.Fatalf("attach library doc to room for in-room replace: %v", err)
+	}
 	frLink, err := f.linkSvc.CreateLink(f.ctx, userID, wsID, link.CreateLinkRequest{
 		DealRoomID:       roomID,
 		Name:             "http-file-req-" + uuid.NewString()[:8],
@@ -4483,6 +4675,77 @@ func TestBillingHTTPApproveUploadedFileStorage_Integration(t *testing.T) {
 	}
 	if approved.Status != "approved" {
 		t.Fatalf("expected approved, got %q", approved.Status)
+	}
+}
+
+func TestBillingHTTPApproveUploadedFileLibrarySameNameChargesFull_Integration(t *testing.T) {
+	f := newBillingFixture(t)
+	userID, wsID, _ := f.ids()
+
+	if _, err := f.q.UpsertWorkspaceBilling(f.ctx, db.UpsertWorkspaceBillingParams{
+		WorkspaceID: f.workspace.ID,
+		PlanCode:    plan.CodeFree,
+		Period:      plan.PeriodMonthly,
+	}); err != nil {
+		t.Fatalf("upsert free: %v", err)
+	}
+	if _, err := f.tx.Exec(f.ctx, `UPDATE documents SET file_size = $1 WHERE id = $2`, int64(2<<30), f.doc.ID); err != nil {
+		t.Fatalf("fill free storage: %v", err)
+	}
+
+	drSvc := dealroom.NewService(f.q, f.tx, &config.Config{}, dealroom.WithPlanChecker(f.wsSvc))
+	room, err := drSvc.CreateRoom(f.ctx, userID, wsID, dealroom.CreateRoomRequest{
+		Slug: "http-lib-copy-cap-" + uuid.NewString()[:8],
+		Name: "HTTP Library Copy Cap Room",
+	})
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	roomID := uuid.UUID(room.ID.Bytes).String()
+	frLink, err := f.linkSvc.CreateLink(f.ctx, userID, wsID, link.CreateLinkRequest{
+		DealRoomID:       roomID,
+		Name:             "http-lib-copy-req-" + uuid.NewString()[:8],
+		PermissionType:   "public",
+		LinkType:         "file_request",
+		TargetFolderPath: "/Uploads",
+	})
+	if err != nil {
+		t.Fatalf("create file_request link: %v", err)
+	}
+	linkID := uuid.UUID(frLink.ID.Bytes).String()
+	pending, err := f.q.CreateUploadedFile(f.ctx, db.CreateUploadedFileParams{
+		TenantID:         f.workspace.TenantID,
+		WorkspaceID:      f.workspace.ID,
+		LinkID:           frLink.ID,
+		OriginalFilename: f.doc.Title,
+		StorageKey:       "pending/http-lib-same-name.pdf",
+		FileSize:         1,
+		MimeType:         "application/pdf",
+	})
+	if err != nil {
+		t.Fatalf("seed pending library-same-name file: %v", err)
+	}
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(withBillingAuth(userID, wsID))
+	h := link.NewHandler(f.linkSvc, nil, nil, nil, &config.Config{ViewerBaseURL: "http://viewer.example.com"})
+	h.RegisterWorkspaceRoutes(router.Group(""))
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/links/"+linkID+"/uploaded-files/"+uuid.UUID(pending.ID.Bytes).String()+"/approve",
+		nil,
+	)
+	router.ServeHTTP(w, req)
+	assertPlanLimitHTTP(t, w, plan.CodeLimitStorage)
+	stillPending, err := f.q.GetUploadedFileByID(f.ctx, pending.ID)
+	if err != nil {
+		t.Fatalf("reload pending: %v", err)
+	}
+	if stillPending.Status != "pending_review" {
+		t.Fatalf("plan denial must leave pending_review, got %q", stillPending.Status)
 	}
 }
 

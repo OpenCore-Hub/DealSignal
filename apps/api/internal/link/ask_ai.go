@@ -251,6 +251,9 @@ func (s *Service) preparePublicAskStream(
 		Query:  turn.Question,
 		Answer: true,
 	})
+	if errors.Is(qerr, knowledge.ErrCorpusNotReady) {
+		return knowledge.VisitorAskStreamResult{}, qerr
+	}
 	answer, hits, refused, status, refusal := knowledge.ClassifyVisitorAskResult(res, qerr)
 	finalStatus := askStatusAIAnswered
 	streamRefused := refused || status == "refused" || status == "no_hits" || status == "error"

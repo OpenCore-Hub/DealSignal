@@ -24,7 +24,7 @@ import (
 )
 
 func testCfg() *config.Config {
-	return &config.Config{IPHashKey: "test-key"}
+	return &config.Config{IPHashKey: "test-key", InviteTokenHashKey: "test-invite-token-hash-key"}
 }
 
 func TestNormalizeRole(t *testing.T) {
@@ -610,13 +610,7 @@ func TestFolderCRUD(t *testing.T) {
 }
 
 type recordingKnowledgeEnqueuer struct {
-	ingests []string
 	deletes []string
-}
-
-func (r *recordingKnowledgeEnqueuer) EnqueueIngestDocument(_ context.Context, _, _, documentID string) error {
-	r.ingests = append(r.ingests, documentID)
-	return nil
 }
 
 func (r *recordingKnowledgeEnqueuer) EnqueueDeleteDocument(_ context.Context, _, _, documentID string) error {
@@ -655,15 +649,14 @@ func TestResourceLocksBlockStructureEdits(t *testing.T) {
 	}
 
 	kb.deletes = nil
-	kb.ingests = nil
 	if err := svc.SetResourceLocks(context.Background(), roomID, wsID, ownerID, SetResourceLocksRequest{
 		FolderPaths: []string{"/locked-folder"},
 	}, true); err != nil {
 		t.Fatalf("lock folder: %v", err)
 	}
 	// Empty folder lock should not enqueue knowledge jobs.
-	if len(kb.deletes) != 0 || len(kb.ingests) != 0 {
-		t.Fatalf("expected no knowledge jobs for empty locked folder, got deletes=%v ingests=%v", kb.deletes, kb.ingests)
+	if len(kb.deletes) != 0 {
+		t.Fatalf("expected no knowledge jobs for empty locked folder, got deletes=%v", kb.deletes)
 	}
 
 	if _, err := svc.RenameFolder(context.Background(), roomID, wsID, ownerID, "/locked-folder", "Nope"); !errors.Is(err, ErrResourceLocked) {
@@ -686,10 +679,9 @@ func TestResourceLocksBlockStructureEdits(t *testing.T) {
 	if _, err := svc.AddDocument(context.Background(), roomID, wsID, ownerID, docID, "/general", 0); err != nil {
 		t.Fatalf("add document: %v", err)
 	}
-	if len(kb.ingests) != 1 || kb.ingests[0] != docID {
-		t.Fatalf("expected ingest enqueue on add, got %#v", kb.ingests)
+	if len(kb.deletes) != 0 {
+		t.Fatalf("expected no knowledge enqueue on add, got deletes=%v", kb.deletes)
 	}
-	kb.ingests = nil
 	kb.deletes = nil
 
 	if err := svc.SetResourceLocks(context.Background(), roomID, wsID, ownerID, SetResourceLocksRequest{
@@ -710,8 +702,8 @@ func TestResourceLocksBlockStructureEdits(t *testing.T) {
 	}, false); err != nil {
 		t.Fatalf("unlock resources: %v", err)
 	}
-	if len(kb.ingests) != 1 || kb.ingests[0] != docID {
-		t.Fatalf("expected ingest enqueue on unlock, got %#v", kb.ingests)
+	if len(kb.deletes) != 1 || kb.deletes[0] != docID {
+		t.Fatalf("unlock must not enqueue knowledge jobs; lock delete should remain %#v", kb.deletes)
 	}
 	if _, err := svc.RenameFolder(context.Background(), roomID, wsID, ownerID, "/locked-folder", "Unlocked Folder"); err != nil {
 		t.Fatalf("rename after unlock: %v", err)
@@ -758,7 +750,6 @@ func TestFolderLockCascadesKnowledgeDelete(t *testing.T) {
 		t.Fatalf("add document: %v", err)
 	}
 	kb.deletes = nil
-	kb.ingests = nil
 
 	if err := svc.SetResourceLocks(context.Background(), roomID, wsID, ownerID, SetResourceLocksRequest{
 		FolderPaths: []string{"/legal"},
@@ -770,14 +761,13 @@ func TestFolderLockCascadesKnowledgeDelete(t *testing.T) {
 	}
 
 	kb.deletes = nil
-	kb.ingests = nil
 	if err := svc.SetResourceLocks(context.Background(), roomID, wsID, ownerID, SetResourceLocksRequest{
 		FolderPaths: []string{"/legal"},
 	}, false); err != nil {
 		t.Fatalf("unlock folder: %v", err)
 	}
-	if len(kb.ingests) != 1 || kb.ingests[0] != docID {
-		t.Fatalf("expected folder unlock to enqueue knowledge ingest, got %#v", kb.ingests)
+	if len(kb.deletes) != 0 {
+		t.Fatalf("expected folder unlock not to enqueue knowledge jobs, got %#v", kb.deletes)
 	}
 }
 
@@ -1017,22 +1007,12 @@ func TestDocumentCategoryTransitions(t *testing.T) {
 		t.Fatalf("after add: category=%q, want deal_room", got)
 	}
 
-	if _, err := svc.AddDocument(context.Background(), roomBID, wsID, ownerID, generalID, "/general", 0); err != nil {
-		t.Fatalf("add to second room: %v", err)
-	}
-	if got := fake.findDocument(pgUUID(generalID)).Category; got != "deal_room" {
-		t.Fatalf("after second add: category=%q, want deal_room", got)
+	if _, err := svc.AddDocument(context.Background(), roomBID, wsID, ownerID, generalID, "/general", 0); !errors.Is(err, ErrDocumentExistsOutsideRoom) {
+		t.Fatalf("same id in second live room must be rejected, got %v", err)
 	}
 
 	if err := svc.RemoveDocument(context.Background(), roomAID, wsID, ownerID, generalID); err != nil {
 		t.Fatalf("remove from first room: %v", err)
-	}
-	if got := fake.findDocument(pgUUID(generalID)).Category; got != "deal_room" {
-		t.Fatalf("after remove one room: category=%q, want deal_room", got)
-	}
-
-	if err := svc.RemoveDocument(context.Background(), roomBID, wsID, ownerID, generalID); err != nil {
-		t.Fatalf("remove from last room: %v", err)
 	}
 	if got := fake.findDocument(pgUUID(generalID)).Category; got != "general" {
 		t.Fatalf("after last remove: category=%q, want general", got)
@@ -1051,6 +1031,105 @@ func TestDocumentCategoryTransitions(t *testing.T) {
 	}
 	if got := fake.findDocument(pgUUID(agreementID)).Category; got != "agreement" {
 		t.Fatalf("agreement category mutated: %q", got)
+	}
+}
+
+func TestDemoteRenamesWhenLibraryTitleOccupied(t *testing.T) {
+	fake := newFakeDB(t)
+	svc := NewService(db.New(fake), nil, testCfg())
+	ownerID := uuid.NewString()
+	wsID := uuid.NewString()
+	fake.workspace = db.Workspace{
+		ID:       pgUUID(wsID),
+		TenantID: pgUUID(uuid.NewString()),
+		Name:     "Test Workspace",
+		Slug:     "test-workspace",
+	}
+	room, err := svc.CreateRoom(context.Background(), ownerID, wsID, CreateRoomRequest{Slug: "rename-room", Name: "Rename Room"})
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	roomID := uuid.UUID(room.ID.Bytes).String()
+	libraryID := uuid.NewString()
+	copyID := uuid.NewString()
+	fake.documents = append(fake.documents,
+		db.Document{
+			ID:          pgUUID(libraryID),
+			WorkspaceID: pgUUID(wsID),
+			TenantID:    fake.workspace.TenantID,
+			Title:       "foo.pdf",
+			Status:      "ready",
+			Category:    "general",
+		},
+		db.Document{
+			ID:          pgUUID(copyID),
+			WorkspaceID: pgUUID(wsID),
+			TenantID:    fake.workspace.TenantID,
+			Title:       "foo.pdf",
+			Status:      "ready",
+			Category:    "deal_room",
+		},
+	)
+	if _, err := svc.AddDocument(context.Background(), roomID, wsID, ownerID, copyID, "/general", 0); err != nil {
+		t.Fatalf("AddDocument: %v", err)
+	}
+	if err := svc.RemoveDocument(context.Background(), roomID, wsID, ownerID, copyID); err != nil {
+		t.Fatalf("RemoveDocument: %v", err)
+	}
+	got := fake.findDocument(pgUUID(copyID))
+	if got.Category != "general" {
+		t.Fatalf("demoted category=%q", got.Category)
+	}
+	if got.Title == "foo.pdf" {
+		t.Fatal("demote must rename when library already holds foo.pdf")
+	}
+	lib := fake.findDocument(pgUUID(libraryID))
+	if lib.Title != "foo.pdf" {
+		t.Fatalf("library title mutated: %q", lib.Title)
+	}
+}
+
+func TestAddDocumentRejectsSameRoomTitleDifferentID(t *testing.T) {
+	fake := newFakeDB(t)
+	svc := NewService(db.New(fake), nil, testCfg())
+	ownerID := uuid.NewString()
+	wsID := uuid.NewString()
+	fake.workspace = db.Workspace{
+		ID:       pgUUID(wsID),
+		TenantID: pgUUID(uuid.NewString()),
+		Name:     "Test Workspace",
+		Slug:     "test-workspace",
+	}
+	room, err := svc.CreateRoom(context.Background(), ownerID, wsID, CreateRoomRequest{Slug: "title-room", Name: "Title Room"})
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	roomID := uuid.UUID(room.ID.Bytes).String()
+	inRoom := uuid.NewString()
+	library := uuid.NewString()
+	fake.documents = append(fake.documents,
+		db.Document{
+			ID:          pgUUID(inRoom),
+			WorkspaceID: pgUUID(wsID),
+			TenantID:    fake.workspace.TenantID,
+			Title:       "foo.pdf",
+			Status:      "ready",
+			Category:    "deal_room",
+		},
+		db.Document{
+			ID:          pgUUID(library),
+			WorkspaceID: pgUUID(wsID),
+			TenantID:    fake.workspace.TenantID,
+			Title:       "foo.pdf",
+			Status:      "ready",
+			Category:    "general",
+		},
+	)
+	if _, err := svc.AddDocument(context.Background(), roomID, wsID, ownerID, inRoom, "/general", 0); err != nil {
+		t.Fatalf("add in-room copy: %v", err)
+	}
+	if _, err := svc.AddDocument(context.Background(), roomID, wsID, ownerID, library, "/general", 0); !errors.Is(err, ErrDocumentTitleExistsInRoom) {
+		t.Fatalf("expected ErrDocumentTitleExistsInRoom, got %v", err)
 	}
 }
 
@@ -1800,7 +1879,8 @@ func TestGetRoomDetailPendingMemberNdaGateAndSign(t *testing.T) {
 	if len(mail.jobs) != 1 || mail.jobs[0].EmailType != mailer.EmailTypeRoomInvite {
 		t.Fatalf("expected room invite email, got %+v", mail.jobs)
 	}
-	if !strings.Contains(mail.jobs[0].TemplateVariables["InvitationLink"], "/acme/deal-rooms/"+roomID) {
+	inviteLink := mail.jobs[0].TemplateVariables["InvitationLink"]
+	if !strings.Contains(inviteLink, "/room-invitations/") || !strings.Contains(inviteLink, "dsr1.") {
 		t.Fatalf("invite link: %+v", mail.jobs[0].TemplateVariables)
 	}
 
@@ -1817,8 +1897,11 @@ func TestGetRoomDetailPendingMemberNdaGateAndSign(t *testing.T) {
 	if _, err := svc.GetRoomDocuments(context.Background(), roomID, wsID, inviteeID); !errors.Is(err, ErrApprovalRequired) {
 		t.Fatalf("pending must not list documents, got %v", err)
 	}
+	if _, err := svc.SignMemberNDA(context.Background(), roomID, wsID, inviteeID, false, ""); !errors.Is(err, ErrNDAConsentRequired) {
+		t.Fatalf("sign without consent: %v", err)
+	}
 
-	signed, err := svc.SignMemberNDA(context.Background(), roomID, wsID, inviteeID)
+	signed, err := svc.SignMemberNDA(context.Background(), roomID, wsID, inviteeID, true, "")
 	if err != nil {
 		t.Fatalf("sign nda: %v", err)
 	}
@@ -1882,7 +1965,7 @@ func TestSignMemberNDARejectsSuspended(t *testing.T) {
 		CreatedAt:   nowTs(),
 		UpdatedAt:   nowTs(),
 	})
-	if _, err := svc.SignMemberNDA(context.Background(), uuid.UUID(room.ID.Bytes).String(), wsID, inviteeID); !errors.Is(err, ErrMemberNotFound) {
+	if _, err := svc.SignMemberNDA(context.Background(), uuid.UUID(room.ID.Bytes).String(), wsID, inviteeID, false, ""); !errors.Is(err, ErrMemberNotFound) {
 		t.Fatalf("suspended must not self-activate, got %v", err)
 	}
 }
@@ -2050,7 +2133,7 @@ func TestSignMemberNDAMatchesGmailAliasRow(t *testing.T) {
 		CreatedAt:   nowTs(),
 		UpdatedAt:   nowTs(),
 	})
-	signed, err := svc.SignMemberNDA(context.Background(), uuid.UUID(room.ID.Bytes).String(), wsID, inviteeID)
+	signed, err := svc.SignMemberNDA(context.Background(), uuid.UUID(room.ID.Bytes).String(), wsID, inviteeID, false, "")
 	if err != nil {
 		t.Fatalf("sign: %v", err)
 	}
@@ -2241,18 +2324,20 @@ func TestSetFolderPermissionNormalizesEmail(t *testing.T) {
 
 // fakeDB is an in-memory DBTX implementation for dealroom service tests.
 type fakeDB struct {
-	t                *testing.T
-	tenant           db.Tenant
-	workspace        db.Workspace
-	workspaceMembers []db.WorkspaceMember
-	rooms            []db.DealRoom
-	members          []db.RoomMember
-	documents        []db.Document
-	roomDocs         []db.DealRoomDocument
-	requests         []db.RoomAccessRequest
-	perms            []db.RoomMemberFolderPermission
-	ndaTemplates     []db.NdaTemplate
-	users            []db.User
+	t                 *testing.T
+	tenant            db.Tenant
+	workspace         db.Workspace
+	workspaceMembers  []db.WorkspaceMember
+	rooms             []db.DealRoom
+	members           []db.RoomMember
+	documents         []db.Document
+	roomDocs          []db.DealRoomDocument
+	requests          []db.RoomAccessRequest
+	perms             []db.RoomMemberFolderPermission
+	ndaTemplates      []db.NdaTemplate
+	pages             []db.ListPagesByDocumentRow
+	users             []db.User
+	lastNDAContentSHA string
 }
 
 func newFakeDB(t *testing.T) *fakeDB {
@@ -2298,6 +2383,15 @@ func (f *fakeDB) Exec(ctx context.Context, sql string, arguments ...interface{})
 			}
 		}
 		f.roomDocs = filtered
+	case strings.Contains(sqlLower, "update documents") && strings.Contains(sqlLower, "set title"):
+		title := argString(arguments, 0)
+		id := argUUID(arguments, 1)
+		wsID := argUUID(arguments, 2)
+		for i := range f.documents {
+			if f.documents[i].ID == id && f.documents[i].WorkspaceID == wsID {
+				f.documents[i].Title = title
+			}
+		}
 	case strings.Contains(sqlLower, "update documents") && strings.Contains(sqlLower, "set category"):
 		category := argString(arguments, 0)
 		id := argUUID(arguments, 1)
@@ -2413,7 +2507,9 @@ func (f *fakeDB) Exec(ctx context.Context, sql string, arguments ...interface{})
 			}
 		}
 	case strings.Contains(sqlLower, "insert into room_nda_agreements"):
-		// Idempotent agreement insert; fake stores nothing beyond success.
+		if len(arguments) >= 6 {
+			f.lastNDAContentSHA = argString(arguments, 5)
+		}
 	case strings.Contains(sqlLower, "update room_members") && strings.Contains(sqlLower, "set user_id"):
 		userID := argUUID(arguments, 0)
 		wsID := argUUID(arguments, 1)
@@ -2656,6 +2752,19 @@ func (f *fakeDB) Query(ctx context.Context, sql string, args ...interface{}) (pg
 			}
 		}
 		return &fakeRows{rows: rows}, nil
+
+	case strings.Contains(sqlLower, "from pages") && strings.Contains(sqlLower, "where document_id"):
+		docID := argUUID(args, 0)
+		rows := make([][]interface{}, 0)
+		for _, p := range f.pages {
+			if p.DocumentID == docID {
+				rows = append(rows, []interface{}{
+					p.ID, p.TenantID, p.WorkspaceID, p.DocumentID, p.PageNumber,
+					p.ImageObjectKey, p.Width, p.Height, p.CreatedAt,
+				})
+			}
+		}
+		return &fakeRows{rows: rows}, nil
 	}
 
 	f.t.Logf("unexpected Query: %s", sql)
@@ -2766,6 +2875,16 @@ func (f *fakeDB) QueryRow(ctx context.Context, sql string, args ...interface{}) 
 		}
 		return fakeRow{err: pgx.ErrNoRows}
 
+	case strings.Contains(sqlLower, "insert into workspace_members"):
+		m := db.WorkspaceMember{
+			WorkspaceID: argUUID(args, 0),
+			UserID:      argUUID(args, 1),
+			Role:        argString(args, 2),
+			JoinedAt:    nowTs(),
+		}
+		f.workspaceMembers = append(f.workspaceMembers, m)
+		return fakeRow{values: []interface{}{m.WorkspaceID, m.UserID, m.Role, m.JoinedAt}}
+
 	case strings.Contains(sqlLower, "insert into room_members"):
 		member := db.RoomMember{
 			ID:          newPGUUID(),
@@ -2875,6 +2994,50 @@ func (f *fakeDB) QueryRow(ctx context.Context, sql string, args ...interface{}) 
 		f.roomDocs = append(f.roomDocs, doc)
 		return fakeRow{values: roomDocRow(doc)}
 
+	case strings.Contains(sqlLower, "from deal_room_documents drd") && strings.Contains(sqlLower, "join documents") && strings.Contains(sqlLower, "d.title"):
+		roomID := argUUID(args, 0)
+		title := argString(args, 1)
+		for _, d := range f.roomDocs {
+			if d.RoomID != roomID {
+				continue
+			}
+			liveRoom := false
+			for _, r := range f.rooms {
+				if r.ID == d.RoomID && !r.DeletedAt.Valid {
+					liveRoom = true
+					break
+				}
+			}
+			if !liveRoom {
+				continue
+			}
+			doc := f.findDocument(d.DocumentID)
+			if doc.ID == (pgtype.UUID{}) || doc.DeletedAt.Valid || doc.Status == "archived" || doc.Title != title {
+				continue
+			}
+			return fakeRow{values: documentRow(doc)}
+		}
+		return fakeRow{err: pgx.ErrNoRows}
+
+	case strings.Contains(sqlLower, "from deal_room_documents drd") && strings.Contains(sqlLower, "join deal_rooms"):
+		docID := argUUID(args, 0)
+		for _, d := range f.roomDocs {
+			if d.DocumentID != docID {
+				continue
+			}
+			liveRoom := false
+			for _, r := range f.rooms {
+				if r.ID == d.RoomID && !r.DeletedAt.Valid {
+					liveRoom = true
+					break
+				}
+			}
+			if liveRoom {
+				return fakeRow{values: roomDocRow(d)}
+			}
+		}
+		return fakeRow{err: pgx.ErrNoRows}
+
 	case strings.Contains(sqlLower, "from deal_room_documents") && strings.Contains(sqlLower, "where id = $1 and room_id"):
 		id := argUUID(args, 0)
 		roomID := argUUID(args, 1)
@@ -2891,6 +3054,37 @@ func (f *fakeDB) QueryRow(ctx context.Context, sql string, args ...interface{}) 
 		for _, d := range f.roomDocs {
 			if d.RoomID == roomID && d.DocumentID == docID {
 				return fakeRow{values: roomDocRow(d)}
+			}
+		}
+		return fakeRow{err: pgx.ErrNoRows}
+
+	case strings.Contains(sqlLower, "from documents") && strings.Contains(sqlLower, "where workspace_id = $1 and title = $2") && strings.Contains(sqlLower, "and category"):
+		wsID := argUUID(args, 0)
+		title := argString(args, 1)
+		category := argString(args, 2)
+		for _, d := range f.documents {
+			if d.WorkspaceID == wsID && d.Title == title && d.Category == category && !d.DeletedAt.Valid && d.Status != "archived" {
+				return fakeRow{values: documentRow(d)}
+			}
+		}
+		return fakeRow{err: pgx.ErrNoRows}
+
+	case strings.Contains(sqlLower, "from documents") && strings.Contains(sqlLower, "where workspace_id = $1 and title = $2") && strings.Contains(sqlLower, "status is distinct from"):
+		wsID := argUUID(args, 0)
+		title := argString(args, 1)
+		for _, d := range f.documents {
+			if d.WorkspaceID == wsID && d.Title == title && !d.DeletedAt.Valid && d.Status != "archived" {
+				return fakeRow{values: documentRow(d)}
+			}
+		}
+		return fakeRow{err: pgx.ErrNoRows}
+
+	case strings.Contains(sqlLower, "from documents") && strings.Contains(sqlLower, "where workspace_id = $1 and title = $2") && strings.Contains(sqlLower, "deleted_at is null"):
+		wsID := argUUID(args, 0)
+		title := argString(args, 1)
+		for _, d := range f.documents {
+			if d.WorkspaceID == wsID && d.Title == title && !d.DeletedAt.Valid {
+				return fakeRow{values: documentRow(d)}
 			}
 		}
 		return fakeRow{err: pgx.ErrNoRows}

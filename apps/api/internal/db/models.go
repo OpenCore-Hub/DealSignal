@@ -846,6 +846,7 @@ type RoomNdaAgreement struct {
 	UserAgent     pgtype.Text
 	AgreedAt      pgtype.Timestamptz
 	NdaTemplateID pgtype.UUID
+	ContentSha256 string
 }
 
 type SecurityEvent struct {

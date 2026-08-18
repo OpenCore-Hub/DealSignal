@@ -16,7 +16,9 @@ import (
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/action"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/httpx"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/logger"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/middleware"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/upload"
 )
 
 // Handler exposes deal room endpoints.
@@ -47,6 +49,9 @@ func (h *Handler) RegisterWorkspaceRoutes(r *gin.RouterGroup) {
 	g.DELETE("/:roomId/documents/:docId", h.RemoveDocument)
 	g.PATCH("/:roomId/documents/:docId", h.UpdateDocument)
 
+	g.GET("/:roomId/uploads/exists", h.CheckUploadExists)
+	g.POST("/:roomId/uploads", h.UploadDocument)
+
 	g.POST("/:roomId/resources/lock", h.LockResources)
 	g.POST("/:roomId/resources/unlock", h.UnlockResources)
 
@@ -55,6 +60,7 @@ func (h *Handler) RegisterWorkspaceRoutes(r *gin.RouterGroup) {
 	g.PATCH("/:roomId/members/:memberId", h.UpdateMemberRole)
 	g.DELETE("/:roomId/members/:memberId", h.RemoveMember)
 	g.PATCH("/:roomId/nda-agreement", h.SetMemberNDAAgreement)
+	g.GET("/:roomId/nda-preview", h.PreviewMemberNDA)
 	g.POST("/:roomId/sign-nda", h.SignMemberNDA)
 
 	g.GET("/:roomId/access-requests", h.ListAccessRequests)
@@ -73,6 +79,47 @@ func (h *Handler) RegisterPublicRoutes(r *gin.RouterGroup) {
 	r.GET("/deal-rooms/:slug", h.PublicView)
 	r.POST("/deal-rooms/:slug/access-requests", h.CreateAccessRequest)
 	r.POST("/deal-rooms/:slug/nda", h.RecordNDA)
+}
+
+// RegisterInviteRoutes mounts mailbox-locked room invite preview/accept.
+// Preview is public; accept requires the same auth middleware as workspace invites.
+func (h *Handler) RegisterInviteRoutes(r *gin.RouterGroup, auth gin.HandlerFunc) {
+	r.GET("/deal-room-invites/:token", h.PreviewRoomInvite)
+	r.POST("/deal-room-invites/:token/accept", auth, h.AcceptRoomInvite)
+}
+
+// PreviewRoomInvite returns public data-room invitation details for the accept page.
+func (h *Handler) PreviewRoomInvite(c *gin.Context) {
+	preview, err := h.service.PreviewRoomInvite(c.Request.Context(), c.Param("token"))
+	if err != nil {
+		if errors.Is(err, ErrRoomInviteNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"code": "invitation_not_found", "message": httpx.SafeMessage("invitation_not_found", err)})
+			return
+		}
+		httpx.Internal(c, err, "preview room invite")
+		return
+	}
+	c.JSON(http.StatusOK, preview)
+}
+
+// AcceptRoomInvite binds the authenticated user to the invited mailbox.
+func (h *Handler) AcceptRoomInvite(c *gin.Context) {
+	userID := middleware.UserIDFrom(c)
+	result, err := h.service.AcceptRoomInvite(c.Request.Context(), c.Param("token"), userID)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrRoomInviteNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"code": "invitation_not_found", "message": httpx.SafeMessage("invitation_not_found", err)})
+		case errors.Is(err, ErrRoomInviteUsed):
+			c.JSON(http.StatusConflict, gin.H{"code": "invitation_used", "message": httpx.SafeMessage("invitation_used", err)})
+		case errors.Is(err, ErrRoomInviteEmailMismatch):
+			c.JSON(http.StatusForbidden, gin.H{"code": "invitation_email_mismatch", "message": httpx.SafeMessage("invitation_email_mismatch", err)})
+		default:
+			httpx.Internal(c, err, "accept room invite")
+		}
+		return
+	}
+	c.JSON(http.StatusOK, result)
 }
 
 // CreateRequest is the JSON body for creating a room.
@@ -397,30 +444,70 @@ func (h *Handler) SetMemberNDAAgreement(c *gin.Context) {
 	c.JSON(http.StatusOK, roomResponse(room))
 }
 
-// SignMemberNDA records the caller's NDA and activates their pending membership.
-func (h *Handler) SignMemberNDA(c *gin.Context) {
-	detail, err := h.service.SignMemberNDA(
+// SignMemberNDARequest is the informed-consent body for member NDA signing.
+type SignMemberNDARequest struct {
+	Agreed        bool   `json:"agreed"`
+	ContentSHA256 string `json:"content_sha256"`
+}
+
+// PreviewMemberNDA returns the bound agreement a pending member must read.
+func (h *Handler) PreviewMemberNDA(c *gin.Context) {
+	preview, err := h.service.PreviewMemberNDA(
 		c.Request.Context(),
 		c.Param("roomId"),
 		middleware.WorkspaceIDFrom(c),
 		middleware.UserIDFrom(c),
 	)
 	if err != nil {
-		switch {
-		case errors.Is(err, ErrRoomNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"code": "room_not_found", "message": httpx.SafeMessage("room_not_found", err)})
-		case errors.Is(err, ErrMemberNotFound):
-			c.JSON(http.StatusForbidden, gin.H{"code": "member_not_found", "message": httpx.SafeMessage("member_not_found", err)})
-		case errors.Is(err, ErrNDANotRequired):
-			c.JSON(http.StatusBadRequest, gin.H{"code": "nda_not_required", "message": httpx.SafeMessage("nda_not_required", err)})
-		case errors.Is(err, ErrApprovalRequired):
-			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", err)})
-		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
-		}
+		h.writeMemberNDAError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, preview)
+}
+
+// SignMemberNDA records the caller's NDA and activates their pending membership.
+func (h *Handler) SignMemberNDA(c *gin.Context) {
+	var req SignMemberNDARequest
+	if err := c.ShouldBindJSON(&req); err != nil && c.Request.ContentLength != 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
+		return
+	}
+	detail, err := h.service.SignMemberNDA(
+		c.Request.Context(),
+		c.Param("roomId"),
+		middleware.WorkspaceIDFrom(c),
+		middleware.UserIDFrom(c),
+		req.Agreed,
+		req.ContentSHA256,
+	)
+	if err != nil {
+		h.writeMemberNDAError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, roomDetailResponse(detail, h.memberEmails(c)))
+}
+
+func (h *Handler) writeMemberNDAError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, ErrRoomNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"code": "room_not_found", "message": httpx.SafeMessage("room_not_found", err)})
+	case errors.Is(err, ErrMemberNotFound):
+		c.JSON(http.StatusForbidden, gin.H{"code": "member_not_found", "message": httpx.SafeMessage("member_not_found", err)})
+	case errors.Is(err, ErrNDANotRequired):
+		c.JSON(http.StatusNotFound, gin.H{"code": "nda_not_required", "message": httpx.SafeMessage("nda_not_required", err)})
+	case errors.Is(err, ErrNDAAgreementRequired):
+		c.JSON(http.StatusNotFound, gin.H{"code": "nda_agreement_required", "message": httpx.SafeMessage("nda_agreement_required", err)})
+	case errors.Is(err, ErrNDAConsentRequired):
+		c.JSON(http.StatusBadRequest, gin.H{"code": "nda_consent_required", "message": httpx.SafeMessage("nda_consent_required", err)})
+	case errors.Is(err, ErrNDAContentMismatch):
+		c.JSON(http.StatusConflict, gin.H{"code": "nda_content_mismatch", "message": httpx.SafeMessage("nda_content_mismatch", err)})
+	case errors.Is(err, ErrNDAPreviewUnavailable):
+		c.JSON(http.StatusServiceUnavailable, gin.H{"code": "nda_preview_unavailable", "message": httpx.SafeMessage("nda_preview_unavailable", err)})
+	case errors.Is(err, ErrApprovalRequired):
+		c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", err)})
+	default:
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+	}
 }
 
 // ApproveRequest handles access request approval.
@@ -558,22 +645,20 @@ func (h *Handler) AddDocument(c *gin.Context) {
 		return
 	}
 	if req.FolderPath == "" || req.FolderPath == "/" {
-		folders, ferr := h.service.ListFolders(c.Request.Context(), c.Param("roomId"), middleware.WorkspaceIDFrom(c))
+		folderPath, ferr := h.firstRoomFolderPath(c)
 		if ferr != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", ferr)})
+			writeFolderDefaultError(c, ferr)
 			return
 		}
-		if len(folders) == 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": "no target folder available"})
-			return
-		}
-		req.FolderPath = folders[0].Path
+		req.FolderPath = folderPath
 	}
 	doc, err := h.service.AddDocument(c.Request.Context(), c.Param("roomId"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c), req.DocumentID, req.FolderPath, req.SortOrder)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrNotRoomAdmin):
 			httpx.WriteNotRoomAdmin(c, err)
+		case errors.Is(err, ErrFolderPathRequired):
+			writeInvalidInput(c)
 		case errors.Is(err, ErrFolderNotFound):
 			c.JSON(http.StatusNotFound, gin.H{"code": "folder_not_found", "message": httpx.SafeMessage("folder_not_found", err)})
 		case errors.Is(err, ErrResourceLocked):
@@ -582,12 +667,272 @@ func (h *Handler) AddDocument(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"code": "agreement_not_allowed_in_deal_room", "message": httpx.SafeMessage("agreement_not_allowed_in_deal_room", err)})
 		case errors.Is(err, ErrArchivedDocumentNotAllowed):
 			c.JSON(http.StatusBadRequest, gin.H{"code": "archived_document_not_allowed", "message": httpx.SafeMessage("archived_document_not_allowed", err)})
+		case errors.Is(err, ErrDocumentExistsOutsideRoom):
+			c.JSON(http.StatusConflict, gin.H{"code": "document_exists_outside_room", "message": httpx.SafeMessage("document_exists_outside_room", err)})
+		case errors.Is(err, ErrDocumentTitleExistsInRoom):
+			c.JSON(http.StatusConflict, gin.H{"code": "document_exists", "message": httpx.SafeMessage("document_exists", err)})
 		default:
 			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		}
 		return
 	}
 	c.JSON(http.StatusCreated, documentResponse(doc))
+}
+
+// CheckUploadExists reports whether a live title collides in this room.
+func (h *Handler) CheckUploadExists(c *gin.Context) {
+	result, err := h.service.CheckRoomUpload(c.Request.Context(), c.Param("roomId"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c), c.Query("filename"))
+	if err != nil {
+		h.writeUploadError(c, err, "")
+		return
+	}
+	body := gin.H{"exists": result.Exists, "replaceable": result.Replaceable}
+	if result.Reason != "" {
+		body["reason"] = result.Reason
+	}
+	if result.DocumentID != "" {
+		body["document"] = gin.H{"id": result.DocumentID, "title": result.Title}
+	}
+	c.JSON(http.StatusOK, body)
+}
+
+// UploadDocument handles room-scoped multipart upload (guest RBAC passthrough + NeedContribute).
+func (h *Handler) UploadDocument(c *gin.Context) {
+	fileHeader, err := c.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_file", "message": httpx.SafeMessage("invalid_file", err)})
+		return
+	}
+	req := RoomUploadRequest{
+		FolderPath: c.PostForm("folder_path"),
+		Replace:    upload.ParseTruthyForm(c.PostForm("replace")),
+	}
+	if raw := strings.TrimSpace(c.PostForm("sort_order")); raw != "" {
+		n, convErr := strconv.Atoi(raw)
+		if convErr != nil {
+			writeInvalidInput(c)
+			return
+		}
+		req.SortOrder = int32(n)
+	}
+	if req.FolderPath == "" || req.FolderPath == "/" {
+		folderPath, ferr := h.firstRoomFolderPath(c)
+		if ferr != nil {
+			writeFolderDefaultError(c, ferr)
+			return
+		}
+		req.FolderPath = folderPath
+	}
+	doc, err := h.service.UploadDocument(
+		c.Request.Context(),
+		c.Param("roomId"),
+		middleware.WorkspaceIDFrom(c),
+		middleware.UserIDFrom(c),
+		middleware.TenantIDFrom(c),
+		fileHeader,
+		req,
+	)
+	if err != nil {
+		h.writeUploadError(c, err, fileHeader.Filename)
+		return
+	}
+	tenantID := middleware.TenantIDFrom(c)
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	view, viewErr := h.service.loadUploadedDocument(c.Request.Context(), tenantID, workspaceID, doc.ID)
+	if viewErr != nil {
+		logger.ErrorCtx(c.Request.Context(), "deal-room document upload reload failed", viewErr,
+			logger.Attr("document_id", doc.ID),
+		)
+		c.JSON(http.StatusCreated, uploadedLibraryDocumentResponse(doc))
+		return
+	}
+	c.JSON(http.StatusCreated, uploadedDocumentJSON(view))
+}
+
+func (h *Handler) writeUploadError(c *gin.Context, err error, filename string) {
+	if httpx.WriteIfPlanLimit(c, err) {
+		return
+	}
+	switch {
+	case errors.Is(err, ErrNotRoomAdmin):
+		httpx.WriteNotRoomAdmin(c, err)
+		return
+	case errors.Is(err, ErrFolderNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"code": "folder_not_found", "message": httpx.SafeMessage("folder_not_found", err)})
+		return
+	case errors.Is(err, ErrResourceLocked):
+		c.JSON(http.StatusConflict, gin.H{"code": "resource_locked", "message": httpx.SafeMessage("resource_locked", err)})
+		return
+	case errors.Is(err, ErrDocumentExistsOutsideRoom):
+		c.JSON(http.StatusConflict, gin.H{"code": "document_exists_outside_room", "message": httpx.SafeMessage("document_exists_outside_room", err)})
+		return
+	case errors.Is(err, ErrRoomNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"code": "room_not_found", "message": httpx.SafeMessage("room_not_found", err)})
+		return
+	case errors.Is(err, ErrDocumentUploadNotConfigured):
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+		return
+	case errors.Is(err, ErrFolderPathRequired), errors.Is(err, errNoUploadFolder):
+		writeInvalidInput(c)
+		return
+	}
+	status, code, existsErr := upload.ClassifyCreateDocumentError(err)
+	if code == "internal_error" && filename != "" {
+		logger.ErrorCtx(c.Request.Context(), "deal-room document upload failed", err,
+			logger.Attr("filename", filename),
+		)
+	}
+	body := gin.H{"code": code, "message": httpx.SafeMessage(code, err)}
+	if existsErr != nil {
+		body["document"] = gin.H{"id": existsErr.ID, "title": existsErr.Title}
+	}
+	c.JSON(status, body)
+}
+
+var errNoUploadFolder = errors.New("no target folder available")
+
+func (h *Handler) firstRoomFolderPath(c *gin.Context) (string, error) {
+	folders, err := h.service.ListFolders(c.Request.Context(), c.Param("roomId"), middleware.WorkspaceIDFrom(c))
+	if err != nil {
+		return "", err
+	}
+	if len(folders) == 0 {
+		return "", errNoUploadFolder
+	}
+	return folders[0].Path, nil
+}
+
+func writeFolderDefaultError(c *gin.Context, err error) {
+	if errors.Is(err, errNoUploadFolder) {
+		writeInvalidInput(c)
+		return
+	}
+	c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+}
+
+func writeInvalidInput(c *gin.Context) {
+	c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", nil)})
+}
+
+func uploadedLibraryDocumentResponse(doc upload.Document) gin.H {
+	status := doc.Status
+	if status == "" {
+		status = "processing"
+	}
+	progress := 25
+	switch status {
+	case "ready":
+		progress = 100
+	case "failed":
+		progress = 0
+	case "processing":
+		progress = 50
+	}
+	resp := gin.H{
+		"id":         doc.ID,
+		"title":      doc.Title,
+		"sourceType": doc.SourceType,
+		"fileType":   doc.SourceType,
+		"fileName":   doc.Title,
+		"fileSize":   0,
+		"category":   upload.CategoryDealRoom,
+		"status":     status,
+		"progress":   progress,
+		"createdAt":  doc.CreatedAt,
+		"updatedAt":  doc.CreatedAt,
+	}
+	if doc.PageCount != nil {
+		resp["pageCount"] = *doc.PageCount
+	}
+	return resp
+}
+
+func uploadedDocumentJSON(view uploadedDocumentView) gin.H {
+	row := view.row
+	status := row.Status
+	progressStatus := row.Status
+	if view.hasJob {
+		progressStatus = view.job.Status
+		switch {
+		case row.Status == "archived":
+			status = "archived"
+		case row.Status == "failed" || view.job.Status == "failed":
+			status = "failed"
+		case row.Status == "ready" || view.job.Status == "completed":
+			status = "ready"
+		case view.job.Status == "processing":
+			status = "processing"
+		default:
+			status = "processing"
+		}
+	} else if status == "" {
+		status = "processing"
+	}
+	created := ""
+	if row.CreatedAt.Valid {
+		created = row.CreatedAt.Time.UTC().Format(time.RFC3339)
+	}
+	updated := created
+	if row.UpdatedAt.Valid {
+		updated = row.UpdatedAt.Time.UTC().Format(time.RFC3339)
+	}
+	var fileSize int64
+	if row.FileSize.Valid {
+		fileSize = row.FileSize.Int64
+	}
+	fileType := strings.ToLower(row.SourceType)
+	fileName := row.Title
+	if fileType != "" {
+		ext := fileType
+		if !strings.HasPrefix(ext, ".") {
+			ext = "." + ext
+		}
+		if !strings.HasSuffix(strings.ToLower(row.Title), ext) {
+			fileName = row.Title + ext
+		}
+	}
+	resp := gin.H{
+		"id":         uuid.UUID(row.ID.Bytes).String(),
+		"title":      row.Title,
+		"sourceType": row.SourceType,
+		"fileType":   fileType,
+		"fileName":   fileName,
+		"fileSize":   fileSize,
+		"category":   row.Category,
+		"status":     status,
+		"progress":   roomUploadProgress(progressStatus),
+		"createdAt":  created,
+		"updatedAt":  updated,
+	}
+	if row.PageCount.Valid {
+		resp["pageCount"] = row.PageCount.Int32
+	}
+	if view.hasJob {
+		var errMsg interface{}
+		if view.job.ErrorMessage.Valid {
+			errMsg = view.job.ErrorMessage.String
+		}
+		resp["ingestionJob"] = gin.H{
+			"id":           uuid.UUID(view.job.ID.Bytes).String(),
+			"status":       view.job.Status,
+			"attempts":     view.job.Attempts.Int32,
+			"errorMessage": errMsg,
+		}
+	}
+	return resp
+}
+
+func roomUploadProgress(status string) int {
+	switch status {
+	case "completed", "ready":
+		return 100
+	case "failed":
+		return 0
+	case "processing":
+		return 50
+	default:
+		return 25
+	}
 }
 
 // SetFolderPermissionRequest sets folder permission.

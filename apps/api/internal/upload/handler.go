@@ -950,6 +950,11 @@ func shouldLoadDealRoomMembershipExclude(excludeDealRoom bool, category string) 
 }
 
 func parseTruthyForm(v string) bool {
+	return ParseTruthyForm(v)
+}
+
+// ParseTruthyForm accepts 1/true/yes/on for multipart and query flags.
+func ParseTruthyForm(v string) bool {
 	switch strings.ToLower(strings.TrimSpace(v)) {
 	case "1", "true", "yes", "on":
 		return true
@@ -958,8 +963,12 @@ func parseTruthyForm(v string) bool {
 	}
 }
 
-// classifyCreateDocumentError maps service-layer upload failures to HTTP status/code.
 func classifyCreateDocumentError(err error) (status int, code string, exists *ExistingDocumentError) {
+	return ClassifyCreateDocumentError(err)
+}
+
+// ClassifyCreateDocumentError maps service-layer upload failures to HTTP status/code.
+func ClassifyCreateDocumentError(err error) (status int, code string, exists *ExistingDocumentError) {
 	var existsErr *ExistingDocumentError
 	switch {
 	case errors.As(err, &existsErr):

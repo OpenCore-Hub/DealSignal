@@ -4041,6 +4041,10 @@ func (h *Handler) PublicStreamAskTurn(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
 			return
 		}
+		if errors.Is(err, knowledge.ErrCorpusNotReady) {
+			c.JSON(http.StatusConflict, gin.H{"code": "knowledge_corpus_not_ready", "message": "knowledge corpus is not ready for questions"})
+			return
+		}
 		if errors.Is(err, knowledge.ErrUnavailable) {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"code": "ai_unavailable", "message": "AI Ask is temporarily unavailable"})
 			return

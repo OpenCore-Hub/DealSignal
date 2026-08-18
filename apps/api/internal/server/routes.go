@@ -414,6 +414,7 @@ func (s *Server) registerRoutes() error {
 				dealroom.WithKnowledgeEnqueuer(knowledgeSvc),
 				dealroom.WithPlanChecker(workspaceSvc),
 				dealroom.WithMailer(appMailer),
+				dealroom.WithDocuments(uploadSvc),
 			}
 			if s.redisClient != nil {
 				dealroomOpts = append(dealroomOpts, dealroom.WithListCache(dealroom.NewRedisListCache(s.redisClient)))
@@ -451,6 +452,7 @@ func (s *Server) registerRoutes() error {
 			ws.GET("/reverse-funnel", linkHandler.ReverseFunnel)
 			ws.GET("/events", sseHandler.StreamEvents)
 			dealroomHandler.RegisterWorkspaceRoutes(ws)
+			dealroomHandler.RegisterInviteRoutes(api, middleware.Auth(authSvc))
 			knowledgeHandler.RegisterWorkspaceRoutes(ws)
 			complianceHandler.RegisterRoutes(ws)
 			suggestionHandler.RegisterRoutes(ws)

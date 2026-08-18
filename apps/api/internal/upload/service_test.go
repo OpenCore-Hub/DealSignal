@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"mime/multipart"
+	"strings"
 	"testing"
 	"time"
 
@@ -31,6 +32,40 @@ func TestCreateDocument_RejectsDealRoomCategory(t *testing.T) {
 	_, err := s.CreateDocument(t.Context(), uuid.NewString(), uuid.NewString(), uuid.NewString(), "deal_room", h, false)
 	if !errors.Is(err, ErrCategoryDealRoomViaAPI) {
 		t.Fatalf("expected ErrCategoryDealRoomViaAPI, got %v", err)
+	}
+}
+
+func TestCreateDealRoomDocument_RequiresPersistHook(t *testing.T) {
+	s := NewService(nil, nil, nil)
+	h := &multipart.FileHeader{Filename: "room.pdf", Size: 1024}
+	_, err := s.CreateDealRoomDocument(t.Context(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), h, nil)
+	if !errors.Is(err, errDealRoomPersistHookRequired) {
+		t.Fatalf("expected errDealRoomPersistHookRequired, got %v", err)
+	}
+}
+
+func TestLockRoomTitleRejectsEmptyKey(t *testing.T) {
+	err := LockRoomTitle(t.Context(), nil, pgtype.UUID{}, "")
+	if err == nil {
+		t.Fatal("expected invalid key error")
+	}
+}
+
+func TestRoomTitleLockKeyIsValidUTF8(t *testing.T) {
+	id := uuid.MustParse("54a0b790-517b-4593-9f88-b1cec2d392f8")
+	key := roomTitleLockKey(pgtype.UUID{Bytes: id, Valid: true}, "02_近12个月月度损益表_Monthly_P&L.xlsx")
+	if strings.ContainsRune(key, 0) {
+		t.Fatal("lock key must not contain NUL; PostgreSQL UTF8 rejects 0x00")
+	}
+	if !strings.Contains(key, id.String()) {
+		t.Fatalf("lock key missing room id: %q", key)
+	}
+}
+
+func TestLockLiveDealRoomDocumentRejectsEmptyKey(t *testing.T) {
+	err := LockLiveDealRoomDocument(t.Context(), nil, pgtype.UUID{})
+	if err == nil {
+		t.Fatal("expected invalid key error")
 	}
 }
 

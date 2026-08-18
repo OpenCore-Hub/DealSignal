@@ -312,7 +312,7 @@ If you were not expecting this invitation, you can safely ignore this email.
       <p>Hello,</p>
       <p>{{if .InviterEmail}}<strong>{{.InviterEmail}}</strong> added you{{else}}You have been added{{end}} to the <strong>{{.RoomName}}</strong> data room{{if .WorkspaceName}} in <strong>{{.WorkspaceName}}</strong>{{end}}.</p>
       <p>Open the data room to continue. If an NDA is required, you will be asked to sign it there.</p>
-      <p style="text-align:center;"><a class="button" href="{{.InvitationLink}}">Open data room</a></p>
+      <p style="text-align:center;"><a class="button" href="{{.InvitationLink}}">Accept invitation</a></p>
       <p>Or copy and paste this link into your browser:</p>
       <p style="word-break:break-all;"><a href="{{.InvitationLink}}">{{.InvitationLink}}</a></p>
       <p>If you were not expecting this, you can safely ignore this email.</p>
@@ -364,7 +364,7 @@ If you were not expecting this, you can safely ignore this email.
       <p>你好，</p>
       <p>{{if .InviterEmail}}<strong>{{.InviterEmail}}</strong> 已将你加入{{else}}你已被加入{{end}}数据室 <strong>{{.RoomName}}</strong>{{if .WorkspaceName}}（工作区 <strong>{{.WorkspaceName}}</strong>）{{end}}。</p>
       <p>打开数据室即可继续。如需签署 NDA，会在进入后提示。</p>
-      <p style="text-align:center;"><a class="button" href="{{.InvitationLink}}">打开数据室</a></p>
+      <p style="text-align:center;"><a class="button" href="{{.InvitationLink}}">接受邀请</a></p>
       <p>或复制以下链接到浏览器：</p>
       <p style="word-break:break-all;"><a href="{{.InvitationLink}}">{{.InvitationLink}}</a></p>
       <p>如非本人操作，请忽略此邮件。</p>

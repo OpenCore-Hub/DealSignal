@@ -161,14 +161,41 @@ WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL
 LIMIT 1;
 
 -- name: GetDocumentByTitleInWorkspace :one
--- Live library row only. Archived overwrite snapshots must not collide with
--- replace / exists checks or resurrect on re-upload.
+-- Do not call from business code. LIMIT 1 is ambiguous after partitioned
+-- live-title uniques (same filename may exist as general and deal_room).
+-- Use GetDocumentByTitleInWorkspaceCategory or GetLiveDealRoomDocumentByTitle.
 SELECT id, tenant_id, workspace_id, created_by, COALESCE(title, ''::text) as title, source_type, status, storage_key, COALESCE(file_size, 0::bigint) as file_size, category, page_count, created_at, updated_at, deleted_at
 FROM documents
 WHERE workspace_id = $1 AND title = $2 AND deleted_at IS NULL
   AND status IS DISTINCT FROM 'archived'
 ORDER BY created_at DESC
 LIMIT 1;
+
+-- name: GetDocumentByTitleInWorkspaceCategory :one
+-- Live row in one category. Archived overwrite snapshots must not collide.
+SELECT id, tenant_id, workspace_id, created_by, COALESCE(title, ''::text) as title, source_type, status, storage_key, COALESCE(file_size, 0::bigint) as file_size, category, page_count, created_at, updated_at, deleted_at
+FROM documents
+WHERE workspace_id = $1 AND title = $2 AND category = $3 AND deleted_at IS NULL
+  AND status IS DISTINCT FROM 'archived'
+ORDER BY created_at DESC
+LIMIT 1;
+
+-- name: GetLiveDealRoomDocumentByTitle :one
+-- Live (non-archived, non-deleted) document attached to a non-deleted room.
+SELECT d.id, d.tenant_id, d.workspace_id, d.created_by, COALESCE(d.title, ''::text) as title, d.source_type, d.status, d.storage_key, COALESCE(d.file_size, 0::bigint) as file_size, d.category, d.page_count, d.created_at, d.updated_at, d.deleted_at
+FROM deal_room_documents drd
+INNER JOIN documents d ON d.id = drd.document_id
+    AND d.deleted_at IS NULL
+    AND d.status IS DISTINCT FROM 'archived'
+INNER JOIN deal_rooms r ON r.id = drd.room_id AND r.deleted_at IS NULL
+WHERE drd.room_id = $1 AND d.title = $2
+ORDER BY d.created_at DESC
+LIMIT 1;
+
+-- name: UpdateDocumentTitle :exec
+UPDATE documents
+SET title = $1, updated_at = now()
+WHERE id = $2 AND workspace_id = $3;
 
 -- name: GetDocumentByTitleInWorkspaceAny :one
 -- Any non-deleted row, including archived. Used to mint unique snapshot/restore titles.
@@ -3310,6 +3337,16 @@ SELECT id, tenant_id, workspace_id, room_id, document_id, folder_path, sort_orde
 FROM deal_room_documents
 WHERE room_id = $1 AND document_id = $2;
 
+-- name: GetLiveDealRoomMembershipByDocument :one
+-- Membership in a non-deleted data room. Soft-deleted rooms must not occupy
+-- live titles or hide files from both the library and every visible room.
+SELECT drd.id, drd.tenant_id, drd.workspace_id, drd.room_id, drd.document_id, drd.folder_path, drd.sort_order, drd.created_at, drd.locked
+FROM deal_room_documents drd
+INNER JOIN deal_rooms r ON r.id = drd.room_id AND r.deleted_at IS NULL
+WHERE drd.document_id = $1
+ORDER BY drd.created_at ASC
+LIMIT 1;
+
 -- name: SetDealRoomDocumentsLocked :exec
 UPDATE deal_room_documents
 SET locked = sqlc.arg(locked)
@@ -3437,8 +3474,8 @@ FROM room_member_folder_permissions
 WHERE room_id = $1 AND email = $2;
 
 -- name: CreateNDAAgreement :exec
-INSERT INTO room_nda_agreements (room_id, email, ip, user_agent, nda_template_id)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO room_nda_agreements (room_id, email, ip, user_agent, nda_template_id, content_sha256)
+VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (room_id, email) DO NOTHING;
 
 -- name: HasNDAAgreement :one

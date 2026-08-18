@@ -56,6 +56,61 @@ func (e *ExistingDocumentError) Error() string {
 	return "a document with this filename already exists"
 }
 
+// PersistHook runs inside the document-create transaction after the documents
+// row and ingestion job exist. Used to attach deal-room membership so a
+// deal_room row cannot commit without membership.
+type PersistHook func(ctx context.Context, q *db.Queries, doc db.CreateDocumentRow) error
+
+var errDealRoomPersistHookRequired = errors.New("deal-room persist hook required")
+
+type createDocumentOpts struct {
+	skipValidateCreateCategory bool
+	skipTitleLookup            bool
+	persistCategory            string
+	afterPersist               PersistHook
+	roomID                     pgtype.UUID
+}
+
+// RoomTitleLockNamespace is pg_advisory_xact_lock key1 for same-room filename
+// creates (upload + visitor approve + AddDocument). key2 is hashtext of
+// roomTitleLockKey. Do not put 0x00 in the text argument — PostgreSQL UTF8
+// rejects it (SQLSTATE 22021).
+const RoomTitleLockNamespace int32 = 881727
+
+// LiveDealRoomDocumentLockNamespace serializes attaching one document_id to a
+// live room so two rooms cannot both pass the occupancy check.
+const LiveDealRoomDocumentLockNamespace int32 = 881728
+
+// roomTitleLockSep is ASCII unit separator. It cannot appear in a UUID string
+// and is valid UTF-8, unlike NUL.
+const roomTitleLockSep = "\x1f"
+
+func roomTitleLockKey(roomID pgtype.UUID, title string) string {
+	return uuid.UUID(roomID.Bytes).String() + roomTitleLockSep + title
+}
+
+// LockRoomTitle serializes same-room same-title creates inside the caller's transaction.
+func LockRoomTitle(ctx context.Context, q *db.Queries, roomID pgtype.UUID, title string) error {
+	if q == nil || !roomID.Valid || title == "" {
+		return fmt.Errorf("room title lock: invalid key")
+	}
+	return q.LockUserWriterCap(ctx, db.LockUserWriterCapParams{
+		LockNs: RoomTitleLockNamespace,
+		UserID: roomTitleLockKey(roomID, title),
+	})
+}
+
+// LockLiveDealRoomDocument serializes live-room occupancy for one document id.
+func LockLiveDealRoomDocument(ctx context.Context, q *db.Queries, documentID pgtype.UUID) error {
+	if q == nil || !documentID.Valid {
+		return fmt.Errorf("document occupancy lock: invalid key")
+	}
+	return q.LockUserWriterCap(ctx, db.LockUserWriterCapParams{
+		LockNs: LiveDealRoomDocumentLockNamespace,
+		UserID: uuid.UUID(documentID.Bytes).String(),
+	})
+}
+
 // Document is the public view of a db.Document.
 type Document struct {
 	ID         string `json:"id"`
@@ -170,9 +225,9 @@ func NormalizeUploadFilename(name string) string {
 	return base
 }
 
-// LookupLiveByTitle reports whether a live (non-archived, non-deleted) document
-// already uses this filename in the workspace. Archived overwrite snapshots
-// and library-archived rows do not count. It does not read or write object storage.
+// LookupLiveByTitle reports whether a live (non-archived, non-deleted) library
+// document already uses this filename (category=general). Archived overwrite
+// snapshots and data-room copies do not count. It does not read or write object storage.
 func (s *Service) LookupLiveByTitle(ctx context.Context, workspaceID, filename string) (exists bool, id, title string, err error) {
 	title = NormalizeUploadFilename(filename)
 	if title == "" {
@@ -182,9 +237,10 @@ func (s *Service) LookupLiveByTitle(ctx context.Context, workspaceID, filename s
 	if !ws.Valid {
 		return false, "", "", fmt.Errorf("invalid id")
 	}
-	row, err := s.queries.GetDocumentByTitleInWorkspace(ctx, db.GetDocumentByTitleInWorkspaceParams{
+	row, err := s.queries.GetDocumentByTitleInWorkspaceCategory(ctx, db.GetDocumentByTitleInWorkspaceCategoryParams{
 		WorkspaceID: ws,
 		Title:       title,
+		Category:    CategoryGeneral,
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, "", title, nil
@@ -241,6 +297,86 @@ func ValidateFileHeader(fileHeader *multipart.FileHeader) (string, error) {
 // row (counts toward document + storage inventory) and the live document is
 // rebound in place so share links / room memberships stay on the same id.
 func (s *Service) CreateDocument(ctx context.Context, userID, tenantID, workspaceID, category string, fileHeader *multipart.FileHeader, replace bool) (Document, error) {
+	return s.createDocument(ctx, userID, tenantID, workspaceID, category, fileHeader, replace, createDocumentOpts{})
+}
+
+// CreateDealRoomDocument persists category=deal_room and runs afterPersist in
+// the same transaction as the documents row. POST /documents still rejects
+// category=deal_room; only the room upload path may call this.
+func (s *Service) CreateDealRoomDocument(ctx context.Context, userID, tenantID, workspaceID, roomID string, fileHeader *multipart.FileHeader, after PersistHook) (Document, error) {
+	if after == nil {
+		return Document{}, errDealRoomPersistHookRequired
+	}
+	roomUUID := pgUUID(roomID)
+	if !roomUUID.Valid {
+		return Document{}, fmt.Errorf("invalid id")
+	}
+	return s.createDocument(ctx, userID, tenantID, workspaceID, "", fileHeader, false, createDocumentOpts{
+		skipValidateCreateCategory: true,
+		skipTitleLookup:            true,
+		persistCategory:            CategoryDealRoom,
+		afterPersist:               after,
+		roomID:                     roomUUID,
+	})
+}
+
+// ReplaceDocument overwrites a live document by id (archived snapshot + rebind).
+// Room upload must use this instead of CreateDocument(replace=true) so a
+// same-name file in another room is not rebound.
+func (s *Service) ReplaceDocument(ctx context.Context, workspaceID, documentID string, fileHeader *multipart.FileHeader) (Document, error) {
+	sourceType, err := ValidateFileHeader(fileHeader)
+	if err != nil {
+		return Document{}, err
+	}
+	workspaceUUID := pgUUID(workspaceID)
+	docUUID := pgUUID(documentID)
+	if !workspaceUUID.Valid || !docUUID.Valid {
+		return Document{}, fmt.Errorf("invalid id")
+	}
+	existing, err := s.queries.GetDocumentByID(ctx, db.GetDocumentByIDParams{
+		ID:          docUUID,
+		WorkspaceID: workspaceUUID,
+	})
+	if err != nil {
+		return Document{}, err
+	}
+	if err := errIfAgreementNotPDF(existing.Category, sourceType); err != nil {
+		return Document{}, err
+	}
+	file, err := fileHeader.Open()
+	if err != nil {
+		return Document{}, fmt.Errorf("%w: open uploaded file: %w", ErrUnsupportedUpload, err)
+	}
+	defer file.Close()
+	if err := validateFileContent(file, sourceType); err != nil {
+		return Document{}, err
+	}
+	title := NormalizeUploadFilename(fileHeader.Filename)
+	if title == "" {
+		title = existing.Title
+	}
+	return s.replaceExistingDocument(ctx, liveRowFromID(existing), workspaceUUID, sourceType, "", title, fileHeader, file)
+}
+
+func liveRowFromCategory(r db.GetDocumentByTitleInWorkspaceCategoryRow) db.GetDocumentByTitleInWorkspaceRow {
+	return db.GetDocumentByTitleInWorkspaceRow{
+		ID: r.ID, TenantID: r.TenantID, WorkspaceID: r.WorkspaceID, CreatedBy: r.CreatedBy,
+		Title: r.Title, SourceType: r.SourceType, Status: r.Status, StorageKey: r.StorageKey,
+		FileSize: r.FileSize, Category: r.Category, PageCount: r.PageCount,
+		CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt, DeletedAt: r.DeletedAt,
+	}
+}
+
+func liveRowFromID(r db.GetDocumentByIDRow) db.GetDocumentByTitleInWorkspaceRow {
+	return db.GetDocumentByTitleInWorkspaceRow{
+		ID: r.ID, TenantID: r.TenantID, WorkspaceID: r.WorkspaceID, CreatedBy: r.CreatedBy,
+		Title: r.Title, SourceType: r.SourceType, Status: r.Status, StorageKey: r.StorageKey,
+		FileSize: r.FileSize, Category: r.Category, PageCount: r.PageCount,
+		CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt, DeletedAt: r.DeletedAt,
+	}
+}
+
+func (s *Service) createDocument(ctx context.Context, userID, tenantID, workspaceID, category string, fileHeader *multipart.FileHeader, replace bool, opts createDocumentOpts) (Document, error) {
 	sourceType, err := ValidateFileHeader(fileHeader)
 	if err != nil {
 		return Document{}, err
@@ -248,8 +384,10 @@ func (s *Service) CreateDocument(ctx context.Context, userID, tenantID, workspac
 	if err := errIfAgreementNotPDF(category, sourceType); err != nil {
 		return Document{}, err
 	}
-	if err := ValidateCreateCategory(category); err != nil {
-		return Document{}, err
+	if !opts.skipValidateCreateCategory {
+		if err := ValidateCreateCategory(category); err != nil {
+			return Document{}, err
+		}
 	}
 
 	title := NormalizeUploadFilename(fileHeader.Filename)
@@ -258,14 +396,26 @@ func (s *Service) CreateDocument(ctx context.Context, userID, tenantID, workspac
 	workspaceUUID := pgUUID(workspaceID)
 	userUUID := pgUUID(userID)
 
-	existing, err := s.queries.GetDocumentByTitleInWorkspace(ctx, db.GetDocumentByTitleInWorkspaceParams{
-		WorkspaceID: workspaceUUID,
-		Title:       title,
-	})
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return Document{}, fmt.Errorf("lookup existing document: %w", err)
+	var existing db.GetDocumentByTitleInWorkspaceRow
+	exists := false
+	if !opts.skipTitleLookup {
+		lookupCategory := NormalizeCreateCategory(category)
+		if opts.persistCategory != "" {
+			lookupCategory = opts.persistCategory
+		}
+		row, lookupErr := s.queries.GetDocumentByTitleInWorkspaceCategory(ctx, db.GetDocumentByTitleInWorkspaceCategoryParams{
+			WorkspaceID: workspaceUUID,
+			Title:       title,
+			Category:    lookupCategory,
+		})
+		if lookupErr != nil && !errors.Is(lookupErr, pgx.ErrNoRows) {
+			return Document{}, fmt.Errorf("lookup existing document: %w", lookupErr)
+		}
+		if lookupErr == nil {
+			exists = true
+			existing = liveRowFromCategory(row)
+		}
 	}
-	exists := err == nil
 	if exists && !replace {
 		return Document{}, &ExistingDocumentError{
 			ID:    uuid.UUID(existing.ID.Bytes).String(),
@@ -321,6 +471,9 @@ func (s *Service) CreateDocument(ctx context.Context, userID, tenantID, workspac
 	}
 
 	docCategory := NormalizeCreateCategory(category)
+	if opts.persistCategory != "" {
+		docCategory = opts.persistCategory
+	}
 
 	var created db.CreateDocumentRow
 	persist := func(ctx context.Context) error {
@@ -330,6 +483,24 @@ func (s *Service) CreateDocument(ctx context.Context, userID, tenantID, workspac
 			}
 		}
 		return s.withTx(ctx, func(q *db.Queries) error {
+			if opts.roomID.Valid {
+				if lockErr := LockRoomTitle(ctx, q, opts.roomID, title); lockErr != nil {
+					return lockErr
+				}
+				live, liveErr := q.GetLiveDealRoomDocumentByTitle(ctx, db.GetLiveDealRoomDocumentByTitleParams{
+					RoomID: opts.roomID,
+					Title:  title,
+				})
+				if liveErr == nil {
+					return &ExistingDocumentError{
+						ID:    uuid.UUID(live.ID.Bytes).String(),
+						Title: live.Title,
+					}
+				}
+				if !errors.Is(liveErr, pgx.ErrNoRows) {
+					return fmt.Errorf("lookup room title: %w", liveErr)
+				}
+			}
 			d, createErr := q.CreateDocument(ctx, db.CreateDocumentParams{
 				ID:          pgUUID(docID.String()),
 				TenantID:    tenantUUID,
@@ -359,6 +530,11 @@ func (s *Service) CreateDocument(ctx context.Context, userID, tenantID, workspac
 			}); jobErr != nil {
 				return fmt.Errorf("create ingestion job: %w", jobErr)
 			}
+			if opts.afterPersist != nil {
+				if hookErr := opts.afterPersist(ctx, q, d); hookErr != nil {
+					return hookErr
+				}
+			}
 			created = d
 			return nil
 		})
@@ -372,11 +548,25 @@ func (s *Service) CreateDocument(ctx context.Context, userID, tenantID, workspac
 		_ = s.storage.DeleteObject(ctx, storageKey)
 		var existsErr *ExistingDocumentError
 		if errors.As(err, &existsErr) {
-			// Race: another upload won the unique title. Surface as conflict so
-			// the client can offer replace with the surviving row's id.
-			if surviving, lookupErr := s.queries.GetDocumentByTitleInWorkspace(ctx, db.GetDocumentByTitleInWorkspaceParams{
+			// Race: another upload won the title. Room creates must resolve
+			// this-room id only — a workspace-wide deal_room LIMIT 1 can point
+			// at another room's copy.
+			if opts.roomID.Valid {
+				if live, liveErr := s.queries.GetLiveDealRoomDocumentByTitle(ctx, db.GetLiveDealRoomDocumentByTitleParams{
+					RoomID: opts.roomID,
+					Title:  title,
+				}); liveErr == nil {
+					return Document{}, &ExistingDocumentError{
+						ID:    uuid.UUID(live.ID.Bytes).String(),
+						Title: live.Title,
+					}
+				}
+				return Document{}, existsErr
+			}
+			if surviving, lookupErr := s.queries.GetDocumentByTitleInWorkspaceCategory(ctx, db.GetDocumentByTitleInWorkspaceCategoryParams{
 				WorkspaceID: workspaceUUID,
 				Title:       title,
+				Category:    docCategory,
 			}); lookupErr == nil {
 				return Document{}, &ExistingDocumentError{
 					ID:    uuid.UUID(surviving.ID.Bytes).String(),
@@ -431,6 +621,11 @@ func uniqueRestoredTitle(ctx context.Context, q documentTitleAnyLookup, workspac
 		restoredDocumentTitle(original, now, ""),
 		restoredDocumentTitle(original, now, uuid.NewString()[:8]),
 	}, restoredDocumentTitle(original, now, uuid.NewString()))
+}
+
+// UniqueRestoredTitle mints a title that does not collide with any non-deleted row.
+func UniqueRestoredTitle(ctx context.Context, q documentTitleAnyLookup, workspaceID pgtype.UUID, original string) (string, error) {
+	return uniqueRestoredTitle(ctx, q, workspaceID, original)
 }
 
 type documentTitleAnyLookup interface {
@@ -710,19 +905,22 @@ func (s *Service) UnarchiveDocument(ctx context.Context, workspaceID, tenantID, 
 		}
 
 		title := doc.Title
-		_, liveErr := q.GetDocumentByTitleInWorkspace(ctx, db.GetDocumentByTitleInWorkspaceParams{
-			WorkspaceID: ws,
-			Title:       doc.Title,
-		})
-		switch {
-		case liveErr == nil:
-			renamed, renameErr := uniqueRestoredTitle(ctx, q, ws, doc.Title)
-			if renameErr != nil {
-				return renameErr
+		if strings.EqualFold(doc.Category, CategoryGeneral) || strings.EqualFold(doc.Category, CategoryAgreement) {
+			_, liveErr := q.GetDocumentByTitleInWorkspaceCategory(ctx, db.GetDocumentByTitleInWorkspaceCategoryParams{
+				WorkspaceID: ws,
+				Title:       doc.Title,
+				Category:    doc.Category,
+			})
+			switch {
+			case liveErr == nil:
+				renamed, renameErr := uniqueRestoredTitle(ctx, q, ws, doc.Title)
+				if renameErr != nil {
+					return renameErr
+				}
+				title = renamed
+			case !errors.Is(liveErr, pgx.ErrNoRows):
+				return fmt.Errorf("lookup live title: %w", liveErr)
 			}
-			title = renamed
-		case !errors.Is(liveErr, pgx.ErrNoRows):
-			return fmt.Errorf("lookup live title: %w", liveErr)
 		}
 
 		if err := q.UnarchiveDocument(ctx, db.UnarchiveDocumentParams{
