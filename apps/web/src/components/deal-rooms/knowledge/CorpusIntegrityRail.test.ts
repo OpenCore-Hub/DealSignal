@@ -20,6 +20,19 @@ describe("resolveCorpusAttentionStage", () => {
     ).toBe("empty");
   });
 
+  it("treats never-synced corpus as empty even when room files exist", () => {
+    expect(
+      resolveCorpusAttentionStage(
+        corpus({
+          status: "none",
+          documents: [
+            { documentId: "d1", status: "pending", chunkCount: 0 },
+          ],
+        }),
+      ),
+    ).toBe("empty");
+  });
+
   it("marks building while documents are still in flight", () => {
     expect(
       resolveCorpusAttentionStage(

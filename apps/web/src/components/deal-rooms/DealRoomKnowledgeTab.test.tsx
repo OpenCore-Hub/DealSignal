@@ -82,7 +82,11 @@ void i18nInstance.use(initReactI18next).init({
           disabledDescription: "Configure DOCLING_RAG_BASE_URL.",
           loadFailed: "Failed to load knowledge base",
           sync: "Sync",
+          syncCreate: "Create index",
+          syncRebuild: "Rebuild",
           syncing: "Syncing…",
+          syncingCreate: "Creating…",
+          syncingRebuild: "Rebuilding…",
           syncQueued: "Knowledge sync queued",
           syncFailed: "Failed to queue knowledge sync",
           unavailable: "Knowledge base is unavailable",
@@ -360,6 +364,28 @@ describe("DealRoomKnowledgeTab", () => {
     expect(
       await screen.findByText("Knowledge base is not enabled"),
     ).toBeInTheDocument();
+  });
+
+  it("queues knowledge sync from the corpus Sync button", async () => {
+    vi.mocked(api.getDealRoomKnowledge).mockResolvedValue({
+      enabled: true,
+      status: "none",
+      documents: [],
+    });
+    vi.mocked(api.syncDealRoomKnowledge).mockResolvedValue({ status: "queued" });
+    render(
+      <MemoryRouter>
+        <I18nextProvider i18n={i18nInstance}>
+          <DealRoomKnowledgeTab roomId="room-1" canContribute />
+        </I18nextProvider>
+      </MemoryRouter>,
+    );
+    const syncBtn = await screen.findByTestId("deal-room-knowledge-sync");
+    expect(syncBtn).toHaveTextContent("Create index");
+    fireEvent.click(syncBtn);
+    await waitFor(() => {
+      expect(api.syncDealRoomKnowledge).toHaveBeenCalledWith("room-1");
+    });
   });
 
   it("renders corpus docs and runs a query", async () => {

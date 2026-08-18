@@ -62,13 +62,17 @@ export function resolveCorpusAttentionStage(
     corpus.documents.some((d) => d.status === "failed");
   if (hasFailed) return "attention";
 
+  if (status === "none") {
+    return "empty";
+  }
+
   const docsInFlight = corpus.documents.some(
     (d) => d.status === "pending" || d.status === "syncing",
   );
   const busy =
     docsInFlight ||
     (status !== "ready" && isKnowledgeBusy(status, corpus.progress?.jobStatus));
-  if (busy || status === "none" || status === "provisioning") {
+  if (busy || status === "provisioning") {
     return "building";
   }
 
@@ -155,6 +159,13 @@ export function CorpusIntegrityRail({
   });
   const spinning = syncing || busy;
   const ready = stage === "ready";
+  const syncActionLabel = spinning
+    ? ready
+      ? t("knowledge.syncingRebuild")
+      : t("knowledge.syncingCreate")
+    : ready
+      ? t("knowledge.syncRebuild")
+      : t("knowledge.syncCreate");
 
   const stageCopy =
     stage === "empty"
@@ -322,6 +333,22 @@ export function CorpusIntegrityRail({
         }
         footerActions={
           <>
+            {onSync ? (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8"
+                disabled={syncing}
+                onClick={onSync}
+                data-testid="deal-room-knowledge-sync"
+              >
+                <ArrowsClockwise
+                  size={14}
+                  className={cn("mr-1.5", spinning && "animate-spin")}
+                />
+                {syncActionLabel}
+              </Button>
+            ) : null}
             <Button
               size="sm"
               variant="outline"
@@ -337,22 +364,6 @@ export function CorpusIntegrityRail({
                 <CaretDown size={14} className="ml-1.5" weight="bold" />
               )}
             </Button>
-            {onSync ? (
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-8"
-              disabled={syncing}
-              onClick={onSync}
-              data-testid="deal-room-knowledge-sync"
-            >
-              <ArrowsClockwise
-                size={14}
-                className={cn("mr-1.5", spinning && "animate-spin")}
-              />
-              {syncing ? t("knowledge.syncing") : t("knowledge.sync")}
-            </Button>
-            ) : null}
             <Button
               size="sm"
               variant="outline"

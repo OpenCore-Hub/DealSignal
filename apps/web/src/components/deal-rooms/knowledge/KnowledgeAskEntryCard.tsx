@@ -1,4 +1,5 @@
 import { MagnifyingGlass } from "@phosphor-icons/react";
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { DealRoomMetricCard } from "@/components/deal-rooms/DealRoomMetricCard";
@@ -10,6 +11,8 @@ export interface KnowledgeAskEntryCardProps {
    * When false, the start CTA stays visible but disabled.
    */
   ready?: boolean;
+  /** Optional actions aligned with the start CTA (e.g. session history). */
+  footerExtra?: ReactNode;
 }
 
 /**
@@ -19,6 +22,7 @@ export interface KnowledgeAskEntryCardProps {
 export function KnowledgeAskEntryCard({
   onStartAsk,
   ready = false,
+  footerExtra,
 }: KnowledgeAskEntryCardProps) {
   const { t } = useTranslation("dealRooms");
 
@@ -44,17 +48,20 @@ export function KnowledgeAskEntryCard({
         ready ? t("knowledge.askEntryNoteReady") : t("knowledge.askEntryBuilding")
       }
       footerActions={
-        <Button
-          size="sm"
-          className="h-8"
-          disabled={!ready}
-          onClick={onStartAsk}
-          data-testid="deal-room-knowledge-ask-entry-start"
-          aria-disabled={!ready}
-        >
-          <MagnifyingGlass size={14} className="mr-1.5" weight="bold" />
-          {t("knowledge.askEntryAction")}
-        </Button>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <Button
+            size="sm"
+            className="h-8"
+            disabled={!ready}
+            onClick={onStartAsk}
+            data-testid="deal-room-knowledge-ask-entry-start"
+            aria-disabled={!ready}
+          >
+            <MagnifyingGlass size={14} className="mr-1.5" weight="bold" />
+            {t("knowledge.askEntryAction")}
+          </Button>
+          {footerExtra}
+        </div>
       }
       data-testid="deal-room-knowledge-ask-entry"
     />

@@ -280,6 +280,14 @@ export function DealRoomKnowledgeTab({ roomId, canContribute = false }: DealRoom
           <KnowledgeAskEntryCard
             ready={corpusReady && sessionHydrated}
             onStartAsk={() => setChatOpen(true)}
+            footerExtra={
+              <KnowledgeSessionHistoryMenu
+                roomId={roomId}
+                activeSessionId={activeSessionId}
+                onOpenSession={onOpenSession}
+                className="h-8 rounded-md px-3 text-xs"
+              />
+            }
           />
           ) : null}
         </div>
@@ -299,13 +307,6 @@ export function DealRoomKnowledgeTab({ roomId, canContribute = false }: DealRoom
           refreshKey={opsRefreshKey}
           className="max-w-4xl"
         />
-        <div className="flex max-w-4xl justify-end">
-          <KnowledgeSessionHistoryMenu
-            roomId={roomId}
-            activeSessionId={activeSessionId}
-            onOpenSession={onOpenSession}
-          />
-        </div>
       </div>
     );
   }

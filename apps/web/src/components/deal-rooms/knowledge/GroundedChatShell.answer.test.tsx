@@ -16,6 +16,10 @@ const dealRooms = {
   "knowledge.followUpLabel": "Follow-ups",
   "knowledge.ask": "Ask",
   "knowledge.askPlaceholder": "Ask…",
+  "knowledge.queryLabel": "Question",
+  "knowledge.queryPlaceholder": "Ask…",
+  "knowledge.stop": "Stop",
+  "knowledge.querying": "Asking…",
   "knowledge.phaseRetrieving": "Retrieving",
   "knowledge.phaseGenerating": "Generating",
   "knowledge.sheetLabel": "Sheet",
@@ -65,5 +69,24 @@ describe("GroundedChatShell answer B path", () => {
       </I18nextProvider>,
     );
     expect(screen.getByTestId("knowledge-answer-markdown")).toHaveTextContent("ok");
+  });
+
+  it("disables the query input while asking", async () => {
+    const i18n = await createTestI18n({ dealRooms });
+    render(
+      <I18nextProvider i18n={i18n}>
+        <GroundedChatShell
+          query="年营收多少？"
+          onQueryChange={vi.fn()}
+          turns={[]}
+          asking
+          onAsk={vi.fn()}
+          onStop={vi.fn()}
+          onActiveCite={vi.fn()}
+          onOpenViewer={vi.fn()}
+        />
+      </I18nextProvider>,
+    );
+    expect(screen.getByLabelText("Question")).toBeDisabled();
   });
 });

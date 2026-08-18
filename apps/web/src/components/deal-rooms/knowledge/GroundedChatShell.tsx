@@ -512,10 +512,11 @@ export function GroundedChatShell({
               value={query}
               onChange={(e) => onQueryChange(e.target.value)}
               placeholder={t("knowledge.queryPlaceholder")}
+              disabled={!canAsk}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && canAsk && query.trim()) onAsk();
               }}
-              className="h-11 border-0 bg-transparent px-3 text-[15px] shadow-none focus-visible:ring-0"
+              className="h-11 border-0 bg-transparent px-3 text-[15px] shadow-none focus-visible:ring-0 disabled:cursor-not-allowed disabled:opacity-60"
             />
             {asking && onStop ? (
               <Button
