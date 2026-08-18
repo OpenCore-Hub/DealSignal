@@ -334,6 +334,7 @@
     "followUpLabel": "Suggested follow-ups · this room’s docs",
     "followUpUpgrading": "Refining from evidence…",
     "followUpSourceEvidence": "Evidence-grounded",
+    "followUpSourceGap": "This-turn gap",
     "followUpSourceMission": "Mission checklist",
     "feedback": {
       "label": "Turn feedback",
@@ -346,6 +347,13 @@
     "followUp": {
       "narrowScope": "Try a more specific file name or clause title?",
       "nameClause": "Ask about a named clause in a room document?",
+      "verifyQuestion": "What in this room’s docs supports “{{anchor}}”?",
+      "verifyClaim": "What in this room’s docs supports “{{preview}}”?",
+      "verifyClaimInSource": "How does “{{sourceName}}” support “{{preview}}”? Any exception or definitional limit?",
+      "conflictUnresolved": "Verify in this room’s docs: {{prompt}}",
+      "conflictCrossFile": "Do “{{sourceA}}” and “{{sourceB}}” agree on the point just answered?",
+      "consequenceAnchor": "If “{{anchor}}” holds, what do this room’s terms imply for value or obligations?",
+      "coverRewrite": "Given {{anchor}}, how do this room’s docs treat {{topic}}?",
       "liabilityInSource": "Ask about liability terms in “{{sourceName}}”?",
       "definitionsInSource": "How does “{{sourceName}}” define the key terms?",
       "exceptionsInSource": "What exceptions does “{{sourceName}}” list?",

@@ -33,13 +33,15 @@ const dealRooms = {
   "knowledge.noPageLocus": "No page",
   "knowledge.followUp.narrowScope": "Narrow?",
   "knowledge.followUp.nameClause": "Name clause?",
+  "knowledge.followUp.verifyQuestion": "Support “{{anchor}}”?",
+  "knowledge.followUp.verifyClaim": "Support “{{preview}}”?",
+  "knowledge.followUp.verifyClaimInSource": "How does “{{sourceName}}” support “{{preview}}”?",
+  "knowledge.followUp.conflictUnresolved": "Verify: {{prompt}}",
+  "knowledge.followUp.conflictCrossFile": "{{sourceA}} vs {{sourceB}}?",
+  "knowledge.followUp.consequenceAnchor": "If “{{anchor}}” holds?",
+  "knowledge.followUp.coverRewrite": "Given {{anchor}}, treat {{topic}}?",
   "knowledge.followUp.specificClause": "Clause?",
   "knowledge.followUp.partyObligations": "Obligations?",
-  "knowledge.followUp.liabilityInSource": "Liability in {{sourceName}}?",
-  "knowledge.followUp.definitionsInSource": "Defs in {{sourceName}}?",
-  "knowledge.followUp.exceptionsInSource": "Exceptions in {{sourceName}}?",
-  "knowledge.followUp.exceptionsInSecondSource": "Exceptions in {{sourceName}}?",
-  "knowledge.followUp.crossFileConsistency": "{{sourceA}} vs {{sourceB}}?",
 };
 
 describe("GroundedChatShell answer B path", () => {

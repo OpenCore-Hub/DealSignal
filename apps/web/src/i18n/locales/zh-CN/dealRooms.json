@@ -331,6 +331,7 @@
     "followUpLabel": "建议追问 · 基于本室文档",
     "followUpUpgrading": "正在根据出处优化…",
     "followUpSourceEvidence": "证据锚定",
+    "followUpSourceGap": "本轮缺口",
     "followUpSourceMission": "任务清单",
     "feedback": {
       "label": "本轮反馈",
@@ -343,6 +344,13 @@
     "followUp": {
       "narrowScope": "换个更具体的文件名或条款标题再问？",
       "nameClause": "直接问本室某份文件里的具体条款名称？",
+      "verifyQuestion": "本室文档如何支持刚才问的「{{anchor}}」？",
+      "verifyClaim": "本室文档如何支持「{{preview}}」？出处和口径是什么？",
+      "verifyClaimInSource": "《{{sourceName}}》里如何支持「{{preview}}」？有无例外或口径限定？",
+      "conflictUnresolved": "请在本室文档中核对：{{prompt}}",
+      "conflictCrossFile": "《{{sourceA}}》与《{{sourceB}}》对刚才这一点是否一致？",
+      "consequenceAnchor": "若「{{anchor}}」成立，本室条款对估值或义务意味着什么？",
+      "coverRewrite": "刚提到的{{anchor}}，与本室文档中的{{topic}}如何对得上？",
       "liabilityInSource": "继续问《{{sourceName}}》里的责任条款？",
       "definitionsInSource": "《{{sourceName}}》里关键定义是怎么写的？",
       "exceptionsInSource": "《{{sourceName}}》有哪些例外或除外情形？",

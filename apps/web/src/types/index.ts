@@ -962,9 +962,11 @@ export interface DealRoomKnowledgeSessionQueryResult {
 export interface DealRoomKnowledgeFollowUpSuggestion {
   id: string;
   text: string;
+  kind?: "verify" | "conflict" | "consequence" | "cover" | "narrow" | string;
+  slot?: number;
 }
 
-export type DealRoomKnowledgeFollowUpSource = "llm" | "mission" | "template";
+export type DealRoomKnowledgeFollowUpSource = "llm" | "gap" | "template";
 
 export interface DealRoomKnowledgeFollowUpsResult {
   items: DealRoomKnowledgeFollowUpSuggestion[];

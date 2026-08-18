@@ -37,7 +37,48 @@ describe("useKnowledgeFollowUpChips", () => {
     vi.clearAllMocks();
   });
 
-  it("upgrades to mission checklist chips", async () => {
+  it("first-paints two narrow chips for mixed GMV answers", () => {
+    vi.mocked(api.suggestDealRoomKnowledgeFollowUps).mockReturnValue(
+      new Promise(() => {}),
+    );
+    const { result } = renderHook(() =>
+      useKnowledgeFollowUpChips(
+        "room-1",
+        turn({
+          id: "t-gmv",
+          question: "年增长GMV多少？",
+          answer:
+            "材料可见 Managed Ad Spend 约 4.8 亿元，但未给出 GMV 年增长。",
+          hits: [
+            {
+              chunkId: "h1",
+              text: "4.8 亿",
+              score: 0.9,
+              sourceName: "口径.pdf",
+            },
+          ],
+          claims: [
+            {
+              text: "Managed Ad Spend 约 4.8 亿元",
+              hitIds: ["h1"],
+              confidence: "grounded",
+            },
+          ],
+        }),
+        t,
+      ),
+    );
+    expect(result.current.chips?.map((c) => c.id)).toEqual([
+      "narrow-scope",
+      "name-clause",
+    ]);
+    expect(result.current.source).toBe("template");
+    expect(result.current.chips?.some((c) => /4\.8|Ad Spend/i.test(c.text))).toBe(
+      false,
+    );
+  });
+
+  it("rejects mission checklist chips and keeps local split", async () => {
     vi.mocked(api.suggestDealRoomKnowledgeFollowUps).mockResolvedValue({
       source: "mission",
       items: [{ id: "mission-option_pool", text: "How is the option pool sized?" }],
@@ -49,12 +90,39 @@ describe("useKnowledgeFollowUpChips", () => {
 
     await waitFor(() => {
       expect(result.current.upgrading).toBe(false);
-      expect(result.current.source).toBe("mission");
-      expect(result.current.chips?.[0]?.id).toBe("mission-option_pool");
+    });
+    expect(result.current.source).not.toBe("mission");
+    expect(result.current.chips?.some((c) => c.id === "mission-option_pool")).toBe(
+      false,
+    );
+    expect(result.current.chips?.length).toBeGreaterThan(0);
+  });
+
+  it("upgrades to gap split chips", async () => {
+    vi.mocked(api.suggestDealRoomKnowledgeFollowUps).mockResolvedValue({
+      source: "gap",
+      items: [
+        {
+          id: "gap-verify-claim",
+          text: "How does NDA.pdf support the liability cap?",
+          kind: "verify",
+          slot: 0,
+        },
+      ],
+    });
+
+    const { result } = renderHook(() =>
+      useKnowledgeFollowUpChips("room-1", turn({ id: "t1" }), t),
+    );
+
+    await waitFor(() => {
+      expect(result.current.upgrading).toBe(false);
+      expect(result.current.source).toBe("gap");
+      expect(result.current.chips?.[0]?.id).toBe("gap-verify-claim");
     });
   });
 
-  it("shows templates upgrading then upgrades to llm items", async () => {
+  it("shows local split upgrading then upgrades to llm items", async () => {
     let resolve!: (v: {
       source: string;
       items: { id: string; text: string }[];
@@ -71,7 +139,7 @@ describe("useKnowledgeFollowUpChips", () => {
 
     expect(result.current.upgrading).toBe(true);
     expect(result.current.chips?.length).toBeGreaterThan(0);
-    expect(result.current.source).toBe("template");
+    expect(result.current.source).toBe("gap");
 
     await act(async () => {
       resolve({
@@ -164,7 +232,7 @@ describe("useKnowledgeFollowUpChips", () => {
     expect(result.current.source).toBe("llm");
   });
 
-  it("keeps templates on empty/error soft-fail", async () => {
+  it("keeps local split on empty/error soft-fail", async () => {
     vi.mocked(api.suggestDealRoomKnowledgeFollowUps).mockResolvedValue({
       source: "template",
       items: [],
@@ -178,7 +246,7 @@ describe("useKnowledgeFollowUpChips", () => {
       expect(result.current.upgrading).toBe(false);
     });
     expect(result.current.chips?.length).toBeGreaterThan(0);
-    expect(result.current.source).toBe("template");
+    expect(result.current.source).toBe("gap");
   });
 
   it("records followups_upgrade_failed on network soft-fail", async () => {
@@ -215,6 +283,6 @@ describe("useKnowledgeFollowUpChips", () => {
     expect(result.current.chips?.some((c) => c.text.includes("HARDCODED"))).toBe(
       false,
     );
-    expect(result.current.source).toBe("template");
+    expect(result.current.source).toBe("gap");
   });
 });

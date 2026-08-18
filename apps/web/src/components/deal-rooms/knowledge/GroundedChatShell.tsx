@@ -128,6 +128,10 @@ export function GroundedChatShell({
           refused: lastTerminal.refused,
           resultStatus: lastTerminal.resultStatus,
           hits: lastTerminal.results,
+          answer: lastTerminal.answer,
+          question: lastTerminal.query,
+          claims: lastTerminal.claims,
+          unresolved: lastTerminal.unresolved,
         })
       : [];
   const followUps: DealRoomKnowledgeFollowUpSuggestion[] =
@@ -468,13 +472,13 @@ export function GroundedChatShell({
                   <CircleNotch size={11} className="animate-spin" weight="bold" />
                   {t("knowledge.followUpUpgrading")}
                 </span>
-              ) : followUpSource === "llm" || followUpSource === "mission" ? (
+              ) : followUpSource === "llm" || followUpSource === "gap" ? (
                 <span
                   className="font-mono text-[10px] uppercase tracking-[0.1em] text-muted-foreground/80"
                   data-testid="grounded-chat-follow-ups-source"
                 >
-                  {followUpSource === "mission"
-                    ? t("knowledge.followUpSourceMission")
+                  {followUpSource === "gap"
+                    ? t("knowledge.followUpSourceGap")
                     : t("knowledge.followUpSourceEvidence")}
                 </span>
               ) : null}

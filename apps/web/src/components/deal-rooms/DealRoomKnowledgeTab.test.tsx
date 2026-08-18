@@ -125,6 +125,7 @@ void i18nInstance.use(initReactI18next).init({
           followUpLabel: "Suggested follow-ups · this room’s docs",
           followUpUpgrading: "Refining from evidence…",
           followUpSourceEvidence: "Evidence-grounded",
+          followUpSourceGap: "This-turn gap",
           missionProgressTitle: "Mission progress",
           missionProgressHint: "Checklist coverage from audited session state.",
           missionProgressCount: "{{covered}} / {{total}} covered",
@@ -146,6 +147,13 @@ void i18nInstance.use(initReactI18next).init({
           followUp: {
             narrowScope: "Try a more specific file name or clause title?",
             nameClause: "Ask about a named clause in a room document?",
+            verifyQuestion: "What in this room’s docs supports “{{anchor}}”?",
+            verifyClaim: "What in this room’s docs supports “{{preview}}”?",
+            verifyClaimInSource: "How does “{{sourceName}}” support “{{preview}}”? Any exception or definitional limit?",
+            conflictUnresolved: "Verify in this room’s docs: {{prompt}}",
+            conflictCrossFile: "Do “{{sourceA}}” and “{{sourceB}}” agree on the point just answered?",
+            consequenceAnchor: "If “{{anchor}}” holds, what do this room’s terms imply for value or obligations?",
+            coverRewrite: "Given {{anchor}}, how do this room’s docs treat {{topic}}?",
             liabilityInSource: "Ask about liability terms in “{{sourceName}}”?",
             definitionsInSource: "How does “{{sourceName}}” define the key terms?",
             exceptionsInSource: "What exceptions does “{{sourceName}}” list?",
@@ -425,6 +433,13 @@ describe("DealRoomKnowledgeTab", () => {
         refused: false,
         resultStatus: "answered",
         hits: [hitPayload],
+        claims: [
+          {
+            text: "The valuation cap is $10M",
+            hitIds: ["c1"],
+            confidence: "grounded",
+          },
+        ],
         createdAt: "2026-08-03T00:00:00Z",
       },
     });
@@ -488,12 +503,12 @@ describe("DealRoomKnowledgeTab", () => {
     expect(hit).toHaveTextContent("valuation cap $10M");
     expect(hit).toHaveTextContent("Memo.pdf · p.3–4");
     expect(await screen.findByTestId("grounded-chat-follow-ups")).toBeInTheDocument();
-    fireEvent.click(screen.getByTestId("grounded-chat-follow-up-liability-in-source"));
+    fireEvent.click(screen.getByTestId("grounded-chat-follow-up-gap-verify-claim"));
     await waitFor(() => {
       expect(api.streamDealRoomKnowledgeSession).toHaveBeenCalledWith(
         "room-1",
         expect.objectContaining({
-          query: "Ask about liability terms in “Memo.pdf”?",
+          query: expect.stringMatching(/valuation|10m|cap/i),
           answer: true,
         }),
         expect.objectContaining({ onEvent: expect.any(Function) }),
@@ -525,6 +540,83 @@ describe("DealRoomKnowledgeTab", () => {
     fireEvent.click(screen.getByTestId("deal-room-knowledge-jump"));
     expect(screen.getByTestId("location-display")).toHaveTextContent(
       "/viewer/doc-1?page=3&roomId=room-1",
+    );
+  });
+
+  it("first-paints two narrow chips for mixed GMV answers (no 4.8 slot0)", async () => {
+    vi.mocked(api.getDealRoomKnowledge).mockResolvedValue({
+      enabled: true,
+      status: "ready",
+      documents: [
+        {
+          documentId: "doc-1",
+          title: "口径.pdf",
+          status: "synced",
+          chunkCount: 4,
+        },
+      ],
+    });
+    const hitPayload = {
+      chunkId: "h1",
+      documentId: "doc-1",
+      text: "Managed Ad Spend 4.8 亿",
+      score: 0.9,
+      sourceName: "口径.pdf",
+    };
+    mockStreamQueryResult({
+      sessionId: "sess-gmv",
+      query: "年增长GMV多少？",
+      mode: "hybrid",
+      answer:
+        "材料可见 Managed Ad Spend 约 4.8 亿元，但未给出 GMV 年增长。",
+      results: [hitPayload],
+      turn: {
+        id: "turn-gmv",
+        sessionId: "sess-gmv",
+        sequence: 1,
+        question: "年增长GMV多少？",
+        answer:
+          "材料可见 Managed Ad Spend 约 4.8 亿元，但未给出 GMV 年增长。",
+        refused: false,
+        resultStatus: "answered",
+        hits: [hitPayload],
+        claims: [
+          {
+            text: "Managed Ad Spend 约 4.8 亿元",
+            hitIds: ["h1"],
+            confidence: "grounded",
+          },
+        ],
+        createdAt: "2026-08-03T00:00:00Z",
+      },
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/deal-rooms/room-1"]}>
+        <I18nextProvider i18n={i18nInstance}>
+          <DealRoomKnowledgeTab roomId="room-1" canContribute />
+        </I18nextProvider>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("deal-room-knowledge-ask-entry-start")).toBeEnabled();
+    });
+    fireEvent.click(screen.getByTestId("deal-room-knowledge-ask-entry-start"));
+    expect(await screen.findByTestId("deal-room-knowledge-desk")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Question"), {
+      target: { value: "年增长GMV多少？" },
+    });
+    fireEvent.click(screen.getByTestId("deal-room-knowledge-ask"));
+    expect(
+      await screen.findByTestId("grounded-chat-follow-ups"),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("grounded-chat-follow-up-narrow-scope")).toBeInTheDocument();
+    expect(screen.getByTestId("grounded-chat-follow-up-name-clause")).toBeInTheDocument();
+    expect(screen.queryByTestId("grounded-chat-follow-up-gap-verify-claim")).not.toBeInTheDocument();
+    expect(screen.getByTestId("grounded-chat-follow-ups").textContent).not.toMatch(
+      /4\.8|Ad Spend/i,
     );
   });
 

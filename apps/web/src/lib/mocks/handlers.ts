@@ -602,6 +602,10 @@ const mockKnowledgeMissionCatalog: Array<{
         id: "valuation_cap",
         prompt: "What valuation cap or pre-money valuation appears in this room’s financing docs?",
       },
+      {
+        id: "option_pool",
+        prompt: "How is the employee option pool sized in this room’s financing docs?",
+      },
     ],
   },
   {
@@ -3465,7 +3469,9 @@ export const handlers = [
           coverage.push(n);
           if (coverage.length >= 3) break;
         }
+        const question = (turn.question || "").trim();
         const source = coverage[0] || "room document";
+        const anchor = question.slice(0, 24) || "this answer";
         if (turn.refused || turn.resultStatus === "no_hits" || turn.resultStatus === "error") {
           return HttpResponse.json({
             source: "template",
@@ -3473,51 +3479,43 @@ export const handlers = [
               {
                 id: "narrow-scope",
                 text: "Try a more specific file name or clause title?",
+                kind: "narrow",
+                slot: 0,
               },
               {
                 id: "name-clause",
                 text: "Ask about a named clause in a room document?",
+                kind: "narrow",
+                slot: 1,
               },
             ],
           });
         }
+        const items = [
+          {
+            id: "gap-verify-question",
+            kind: "verify",
+            slot: 0,
+            text: `What in this room’s docs supports “${anchor}”?`,
+          },
+        ];
         if (coverage.length >= 2) {
           const top2 = coverage[1]!;
-          return HttpResponse.json({
-            source: "llm",
-            items: [
-              {
-                id: "llm-1",
-                text: `What liability terms appear in “${source}”?`,
-              },
-              {
-                id: "llm-2",
-                text: `What exceptions does “${top2}” list?`,
-              },
-              {
-                id: "llm-3",
-                text: `Do “${source}” and “${top2}” agree on the same point?`,
-              },
-            ],
+          items.push({
+            id: "gap-cross-file",
+            kind: "conflict",
+            slot: 1,
+            text: `Do “${source}” and “${top2}” agree on the point just answered?`,
+          });
+        } else {
+          items.push({
+            id: "cover-option_pool",
+            kind: "cover",
+            slot: 1,
+            text: `Given ${anchor}, how do this room’s docs treat the option pool?`,
           });
         }
-        return HttpResponse.json({
-          source: "template",
-          items: [
-            {
-              id: "liability-in-source",
-              text: `What liability terms appear in “${source}”?`,
-            },
-            {
-              id: "definitions-in-source",
-              text: `How does “${source}” define the key obligations?`,
-            },
-            {
-              id: "exceptions-in-source",
-              text: `What exceptions does “${source}” list?`,
-            },
-          ],
-        });
+        return HttpResponse.json({ source: "gap", items });
       }
       return new HttpResponse(null, { status: 404 });
     },

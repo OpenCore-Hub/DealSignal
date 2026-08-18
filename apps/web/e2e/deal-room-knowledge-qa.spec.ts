@@ -179,14 +179,34 @@ test.describe("Deal room knowledge Q&A (MSW)", () => {
 
     await openKnowledgeDesk(page);
     await askOnDesk(page, "What is the valuation cap?");
-    const chip = page.getByTestId("grounded-chat-follow-up-liability-in-source");
-    await expect(chip).toBeVisible();
-    await expect(chip).toContainText(/Acme Seed Round Pitch Deck/i);
+    await expect(page.getByTestId("grounded-chat-follow-ups")).toBeVisible();
+    const chips = page.locator('[data-testid^="grounded-chat-follow-up-"]');
+    await expect(chips.first()).toBeVisible();
+    const sameDomain = chips.filter({ hasText: /valuation|cap/i });
+    await expect(sameDomain.first()).toBeVisible();
+    const chipText = (await sameDomain.first().innerText()).trim();
+    expect(chipText).not.toMatch(/option pool sized/i);
+    expect(chipText).not.toMatch(/责任条款/);
 
-    await chip.click();
-    // Chip auto-asks — same session gains a second turn without clicking Ask.
+    await sameDomain.first().click();
     await expect(page.getByTestId("grounded-chat-turn")).toHaveCount(2, { timeout: 15000 });
-    await expect(page.getByTestId("grounded-chat-turn").nth(1)).toContainText(/liability/i);
+    await expect(page.getByTestId("grounded-chat-turn").nth(1)).toContainText(chipText);
+
+    await page.getByTestId("deal-room-knowledge-mission-progress-toggle").click();
+    const rail = page.getByTestId("knowledge-mission-progress-rail");
+    await expect(rail).toBeVisible();
+    await expect(async () => {
+      if (!(await rail.getByText(/employee option pool sized/i).isVisible())) {
+        await page.getByTestId("knowledge-mission-progress-toggle").click();
+      }
+      await expect(rail.getByText(/employee option pool sized/i)).toBeVisible();
+    }).toPass({ timeout: 10000 });
+    const optionRow = rail.locator("li").filter({ hasText: /employee option pool sized/i });
+    await optionRow.getByRole("button", { name: /ask this/i }).click();
+    await expect(page.getByTestId("grounded-chat-turn")).toHaveCount(3, { timeout: 15000 });
+    await expect(page.getByTestId("grounded-chat-turn").nth(2)).toContainText(
+      /employee option pool sized/i,
+    );
   });
 
   test("surfaces answer-quota 429 before SSE opens", async ({ page }) => {

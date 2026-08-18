@@ -17,6 +17,14 @@ describe("trustGates", () => {
     expect(
       looksLikeNonRoomFactMeta("现有材料不足以确定该问题。"),
     ).toBe(true);
+    expect(
+      looksLikeNonRoomFactMeta("提供的上下文未包含2025年GMV年增长数据。"),
+    ).toBe(true);
+    expect(
+      isUngroundedKnowledgeAnswer(
+        "提供的上下文未包含2025年GMV年增长数据。材料中可见 Managed Ad Spend 约 4.8 亿元。",
+      ),
+    ).toBe(false);
   });
 
   it("blocks industry trivia from desk promotion", () => {

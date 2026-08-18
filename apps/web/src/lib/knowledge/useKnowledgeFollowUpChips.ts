@@ -17,8 +17,8 @@ export type KnowledgeFollowUpChipState = {
 type Translate = (key: string, params?: Record<string, string>) => string;
 
 /**
- * Progressive follow-up chips: local templates immediately, then evidence-grounded
- * API upgrade. Defers chip replacement while the dock is engaged (hover/focus)
+ * Progressive follow-up chips: local split immediately, then llm/gap API upgrade.
+ * Defers chip replacement while the dock is engaged (hover/focus)
  * so a mid-click swap cannot ask the wrong question.
  */
 export function useKnowledgeFollowUpChips(
@@ -64,15 +64,21 @@ export function useKnowledgeFollowUpChips(
       resultStatus: turn.resultStatus,
       hits: turn.hits,
       answer: turn.answer,
+      question: turn.question,
+      claims: turn.claims,
+      unresolved: turn.unresolved,
     });
     const templateItems = tips.map((tip) => ({
       id: tip.id,
       text: t(tip.messageKey, tip.params),
+      kind: tip.kind,
+      slot: tip.slot,
     }));
+    const localSource = tips.some((tip) => tip.kind === "narrow") ? "template" : "gap";
     setState({
       turnId,
       items: templateItems,
-      source: "template",
+      source: localSource,
       upgrading: true,
     });
 
@@ -86,11 +92,11 @@ export function useKnowledgeFollowUpChips(
         if (ac.signal.aborted) return;
         const source = (res.source || "template").trim() || "template";
         // Template payloads may carry server-locale strings; keep FE i18n chips (§9).
-        // Upgrade only for evidence LLM or mission task-engine chips.
-        if (!res.items?.length || (source !== "llm" && source !== "mission")) {
+        // Upgrade only for LLM or deterministic gap split — never mission checklist dumps.
+        if (!res.items?.length || (source !== "llm" && source !== "gap")) {
           setState((prev) =>
             prev?.turnId === requestedTurnId
-              ? { ...prev, upgrading: false, source: "template" }
+              ? { ...prev, upgrading: false }
               : prev,
           );
           return;
@@ -102,7 +108,7 @@ export function useKnowledgeFollowUpChips(
         if (!safeItems.length) {
           setState((prev) =>
             prev?.turnId === requestedTurnId
-              ? { ...prev, upgrading: false, source: "template" }
+              ? { ...prev, upgrading: false }
               : prev,
           );
           return;
