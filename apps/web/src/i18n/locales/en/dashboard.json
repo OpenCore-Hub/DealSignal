@@ -42,9 +42,11 @@
         "review": "Review sharing"
       },
       "buying_window": {
-        "email": "Email {{contact}}",
         "confirmRecipient": "Confirm who to email"
       }
+    },
+    "suggestion": {
+      "email": "Suggested: email {{contact}}"
     },
     "evidence": "Evidence",
     "snooze": "Snooze",

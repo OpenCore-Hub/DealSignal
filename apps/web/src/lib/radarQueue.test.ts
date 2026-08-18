@@ -185,9 +185,7 @@ describe("radarQueue", () => {
     );
     expect(radarCtaKey("diligence_gate", "approve")).toBe("radar.cta.approve");
     expect(radarCtaKey("abuse_guard", "review")).toBe("radar.cta.review");
-    expect(radarCtaKey("buying_window", "email")).toBe(
-      "radar.ctaByProduct.buying_window.email",
-    );
+    expect(radarCtaKey("buying_window", "email")).toBe("radar.suggestion.email");
     expect(radarCtaKey("buying_window", "open")).toBe(
       "radar.ctaByProduct.buying_window.confirmRecipient",
     );

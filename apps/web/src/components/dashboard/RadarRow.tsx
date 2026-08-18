@@ -78,7 +78,8 @@ export function RadarRow({
   const completeDirectly = outcomes.length === 1;
   const identities = radarRowIdentities(item);
   const emailContact = radarEmailContactLabel(item);
-  const showPrimary = item.verb !== "email" || Boolean(emailContact);
+  const emailSuggestion = item.verb === "email" ? emailContact : null;
+  const showPrimary = item.verb !== "email";
 
   return (
     <div
@@ -186,7 +187,14 @@ export function RadarRow({
       </button>
 
       <div className="flex shrink-0 items-center gap-1">
-        {showPrimary ? (
+        {emailSuggestion ? (
+          <span
+            className="max-w-[12rem] text-right text-caption text-muted-foreground"
+            data-testid="radar-email-suggestion"
+          >
+            {t("radar.suggestion.email", { contact: emailSuggestion })}
+          </span>
+        ) : showPrimary ? (
           <Button
             size="sm"
             variant="default"

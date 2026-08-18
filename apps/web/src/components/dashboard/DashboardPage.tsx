@@ -122,6 +122,11 @@ export function DashboardPage() {
 
   const handlePrimary = (item: RadarWorkItem) => {
     setSelectedId(item.id);
+    // Warm-card email is a suggestion, not an in-app send. Do not open a
+    // compose demo or fall through to the document evidence tab.
+    if (item.verb === "email") {
+      return;
+    }
     const path = item.navigatePath || item.evidencePath;
     if (path) {
       navigate(path, {

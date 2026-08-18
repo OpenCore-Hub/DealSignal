@@ -41,7 +41,7 @@ async function renderRow(
       "radar.products.diligence_gate": "Diligence gate",
       "radar.cta.approve": "Approve",
       "radar.cta.email": "Email",
-      "radar.ctaByProduct.buying_window.email": "Email {{contact}}",
+      "radar.suggestion.email": "Suggested: email {{contact}}",
       "radar.ctaByProduct.buying_window.confirmRecipient": "Confirm who to email",
       "radar.cta.review": "Review",
       "radar.ctaByProduct.diligence_gate.review": "See this hold",
@@ -91,13 +91,16 @@ async function renderRow(
 }
 
 describe("RadarRow", () => {
-  it("names the email CTA after the known contact and selects on row click", async () => {
+  it("names the email suggestion after the known contact and does not offer a write-email ACT", async () => {
     const { onPrimary, onSelect } = await renderRow(makeItem());
 
-    fireEvent.click(
-      screen.getByRole("button", { name: /^Email buyer@acme.test$/i }),
+    expect(screen.getByTestId("radar-email-suggestion")).toHaveTextContent(
+      "Suggested: email buyer@acme.test",
     );
-    expect(onPrimary).toHaveBeenCalledTimes(1);
+    expect(
+      screen.queryByRole("button", { name: /email/i }),
+    ).not.toBeInTheDocument();
+    expect(onPrimary).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByText("Follow up with buyer"));
     expect(onSelect).toHaveBeenCalledTimes(1);

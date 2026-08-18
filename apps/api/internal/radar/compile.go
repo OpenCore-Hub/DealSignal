@@ -660,7 +660,10 @@ func buildItem(in CompileInput, a db.ActionItem, sig *db.Signal, product Product
 	if nav == "" && product == ProductDiligenceGate {
 		nav = diligenceRemediationPath(in.WorkspaceSlug, dealRoomID, linkID)
 	}
-	if nav == "" {
+	// Email ACT is in-radar compose. Do not copy EvidencePath (document
+	// content/analytics) onto NavigatePath — that path is for the evidence rail.
+	emailAct := verb == VerbEmail && strings.TrimSpace(email) != ""
+	if nav == "" && !emailAct {
 		nav = ev
 	}
 	if verb == VerbEmail && email == "" {

@@ -35,7 +35,7 @@ import type {
   RadarVerb,
   RadarWorkItem,
 } from "@/lib/radarQueue";
-import { groupIntoStrands } from "@/lib/radarQueue";
+import { groupIntoStrands, radarEmailContactLabel } from "@/lib/radarQueue";
 
 export const mockWorkspaces: Workspace[] = [
   { id: "ws_1", slug: "acme-capital", name: "mock.workspaces.acme.name", role: "owner" },
@@ -1203,13 +1203,21 @@ export function getMockRadarFeed(workspaceSlug = "acme-capital"): RadarFeed {
     // Match API Compile: uploaded_file is host ops, not a radar product.
     if (action.sourceType === "uploaded_file") continue;
     const { product, verb } = mockClassify(action, signal);
-    const navigatePath =
-      actionNavigatePath(workspaceSlug, action) ||
-      documentEvidencePath(workspaceSlug, {
-        documentId: signal?.documentId,
-        linkId: signal?.linkId,
-        metadata: signal?.metadata,
-      });
+    const actor =
+      signal?.context?.contactName ||
+      signal?.context?.contactEmail ||
+      undefined;
+    const contactEmail =
+      signal?.context?.contactEmail || signal?.context?.visitorEmail;
+    const operationalNav = actionNavigatePath(workspaceSlug, action);
+    const evidenceDest = documentEvidencePath(workspaceSlug, {
+      documentId: signal?.documentId,
+      linkId: signal?.linkId,
+      metadata: signal?.metadata,
+    });
+    const dest = operationalNav || evidenceDest;
+    const emailAct = verb === "email" && Boolean(radarEmailContactLabel({ actor, contactEmail }));
+    const navigatePath = emailAct ? operationalNav : dest;
     const confidence =
       product === "leak_watch"
         ? signal?.subtype === "forward" || signal?.subtype === "download"
@@ -1221,10 +1229,7 @@ export function getMockRadarFeed(workspaceSlug = "acme-capital"): RadarFeed {
       product,
       headline: action.title,
       subtitle: signal?.suggestion || signal?.description || "",
-      actor:
-        signal?.context?.contactName ||
-        signal?.context?.contactEmail ||
-        undefined,
+      actor,
       verb,
       priority: (action.impact || signal?.priority || "medium") as RadarWorkItem["priority"],
       confidence,
@@ -1255,9 +1260,8 @@ export function getMockRadarFeed(workspaceSlug = "acme-capital"): RadarFeed {
       actionId: action.id,
       signalId: signal?.id,
       navigatePath: navigatePath ?? undefined,
-      evidencePath: navigatePath ?? undefined,
-      contactEmail:
-        signal?.context?.contactEmail || signal?.context?.visitorEmail,
+      evidencePath: dest ?? undefined,
+      contactEmail,
       documentTitle: signal?.context?.documentTitle,
     });
   }

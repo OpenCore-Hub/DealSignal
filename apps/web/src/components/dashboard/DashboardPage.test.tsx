@@ -93,7 +93,7 @@ async function renderPage(waitForLoad = true, entry = "/acme/dashboard") {
       "radar.cta.approve": "Approve",
       "radar.cta.reply": "Reply",
       "radar.cta.email": "Email",
-      "radar.ctaByProduct.buying_window.email": "Email {{contact}}",
+      "radar.suggestion.email": "Suggested: email {{contact}}",
       "radar.cta.renew": "Renew",
       "radar.cta.review": "Review",
       "radar.cta.open": "Open",
@@ -173,6 +173,8 @@ async function renderPage(waitForLoad = true, entry = "/acme/dashboard") {
       retry: "Retry",
       back: "Back",
       complete: "Complete",
+      copy: "Copy",
+      close: "Close",
       dueDate: "Due",
       "overdue.days_one": "{{count}} day overdue",
       "overdue.days_other": "{{count}} days overdue",
@@ -391,7 +393,7 @@ describe("DashboardPage inbox", () => {
     );
   });
 
-  it("names the Hot intent email CTA after the contact and never opens mailto", async () => {
+  it("shows a named email suggestion without compose, mailto, or the document tab", async () => {
     const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
     const item = makeItem({
       id: "act-hot",
@@ -399,9 +401,11 @@ describe("DashboardPage inbox", () => {
       product: "buying_window",
       verb: "email",
       headline: "Follow up with buyer",
+      actor: "张总",
       contactEmail: "buyer@acme.test",
-      navigatePath: "/acme/links/l1",
-      evidencePath: "/acme/links/l1",
+      documentTitle: "Deck",
+      navigatePath: "/acme/documents/doc-1?tab=content&page=8",
+      evidencePath: "/acme/documents/doc-1?tab=content&page=8",
     });
     mockFns.getRadar.mockResolvedValue(
       makeFeed([item, makeItem({ id: "act-2", actionId: "act-2" })]),
@@ -409,14 +413,14 @@ describe("DashboardPage inbox", () => {
 
     await renderPage();
     const nextUp = await screen.findByTestId("radar-next-up");
-
-    fireEvent.click(
-      within(nextUp).getByRole("button", { name: /^Email buyer@acme.test$/i }),
+    expect(within(nextUp).getByTestId("radar-email-suggestion")).toHaveTextContent(
+      "Suggested: email 张总",
     );
-    expect(mockFns.navigate).toHaveBeenCalledWith(
-      "/acme/links/l1",
-      expect.objectContaining({ state: expect.any(Object) }),
-    );
+    expect(
+      within(nextUp).queryByRole("button", { name: /email/i }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByTestId("radar-follow-up-dialog")).not.toBeInTheDocument();
+    expect(mockFns.navigate).not.toHaveBeenCalled();
     expect(openSpy).not.toHaveBeenCalled();
 
     openSpy.mockRestore();

@@ -241,13 +241,13 @@ export function outcomesForProduct(
   }
 }
 
-/** Primary CTA i18n key. Review means different work per product. */
+/** Copy key for the row action. Warm-card email is a suggestion, not a send CTA. */
 export function radarCtaKey(product: RadarProduct, verb: RadarVerb): string {
   if (verb === "review" && (product === "diligence_gate" || product === "leak_watch")) {
     return `radar.ctaByProduct.${product}.review`;
   }
   if (verb === "email" && product === "buying_window") {
-    return "radar.ctaByProduct.buying_window.email";
+    return "radar.suggestion.email";
   }
   if (verb === "open" && product === "buying_window") {
     return "radar.ctaByProduct.buying_window.confirmRecipient";
@@ -255,7 +255,7 @@ export function radarCtaKey(product: RadarProduct, verb: RadarVerb): string {
   return `radar.cta.${verb}`;
 }
 
-/** Named recipient for warm-card email CTA. Missing/invalid email → no Email button. */
+/** Named recipient for warm-card email suggestion. Missing/invalid email → no suggestion. */
 export function radarEmailContactLabel(item: {
   actor?: string;
   contactEmail?: string;
