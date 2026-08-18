@@ -16,26 +16,34 @@ import (
 )
 
 type deletedRoomFakeDB struct {
-	t            *testing.T
-	room         db.DealRoom
-	corpus       *db.DealRoomRagCorpora
-	doc          db.GetDocumentByIDRow
-	enqueuedType string
-	queries      []string
+	t              *testing.T
+	room           db.DealRoom
+	corpus         *db.DealRoomRagCorpora
+	doc            db.GetDocumentByIDRow
+	enqueuedType   string
+	queries        []string
+	corpusInserted bool
+	corpusStatus   string
 }
 
 func (f *deletedRoomFakeDB) Exec(_ context.Context, sql string, _ ...any) (pgconn.CommandTag, error) {
 	sqlLower := strings.ToLower(strings.Join(strings.Fields(sql), " "))
 	f.queries = append(f.queries, sqlLower)
-	if strings.Contains(sqlLower, "update knowledge_sync_jobs") {
+	if strings.Contains(sqlLower, "update knowledge_sync_jobs") ||
+		strings.Contains(sqlLower, "update deal_room_rag_documents") {
 		return pgconn.NewCommandTag("UPDATE 1"), nil
 	}
 	f.t.Fatalf("unexpected exec: %s", sqlLower)
 	return pgconn.CommandTag{}, nil
 }
 
-func (f *deletedRoomFakeDB) Query(context.Context, string, ...any) (pgx.Rows, error) {
-	f.t.Fatalf("unexpected query")
+func (f *deletedRoomFakeDB) Query(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+	sqlLower := strings.ToLower(strings.Join(strings.Fields(sql), " "))
+	f.queries = append(f.queries, sqlLower)
+	if strings.Contains(sqlLower, "from deal_room_documents") {
+		return &raFakeRows{}, nil
+	}
+	f.t.Fatalf("unexpected query: %s", sqlLower)
 	return &raFakeRows{}, nil
 }
 
@@ -50,6 +58,13 @@ func (f *deletedRoomFakeDB) QueryRow(_ context.Context, sql string, args ...any)
 			return raFakeRow{values: roomRow(f.room)}
 		}
 		return raFakeRow{err: pgx.ErrNoRows}
+	case strings.Contains(sqlLower, "insert into deal_room_rag_corpora"):
+		f.corpusInserted = true
+		return raFakeRow{values: corpusScanRow(f.room, "provisioning")}
+	case strings.Contains(sqlLower, "update deal_room_rag_corpora"):
+		status, _ := args[1].(string)
+		f.corpusStatus = status
+		return raFakeRow{values: corpusScanRow(f.room, status)}
 	case strings.Contains(sqlLower, "from deal_room_rag_corpora"):
 		if f.corpus == nil {
 			return raFakeRow{err: pgx.ErrNoRows}
@@ -91,6 +106,15 @@ func enabledKnowledgeService(t *testing.T, fake *deletedRoomFakeDB) *Service {
 	return NewService(db.New(fake), config.DoclingRAGConfig{BaseURL: "http://127.0.0.1:9"}, client, nil, "test-secret")
 }
 
+func corpusScanRow(room db.DealRoom, status string) []any {
+	now := pgtype.Timestamptz{Time: time.Now(), Valid: true}
+	return []any{
+		room.ID, room.WorkspaceID,
+		"pending-ds-ws-test", uuid.UUID(room.ID.Bytes).String(),
+		status, pgtype.Timestamptz{}, pgtype.Text{}, now, now,
+	}
+}
+
 func deletedRoom(wsID, roomID pgtype.UUID) db.DealRoom {
 	return db.DealRoom{
 		ID:          roomID,
@@ -107,6 +131,21 @@ func TestEnqueueDeleteDocument_DeletedRoomWithoutCorpusIsNoop(t *testing.T) {
 	wsID := pgUUID(uuid.NewString())
 	roomID := pgUUID(uuid.NewString())
 	fake := &deletedRoomFakeDB{t: t, room: deletedRoom(wsID, roomID)}
+	svc := enabledKnowledgeService(t, fake)
+
+	err := svc.EnqueueDeleteDocument(t.Context(), uuid.UUID(roomID.Bytes).String(), uuid.UUID(wsID.Bytes).String(), uuid.NewString())
+	if err != nil {
+		t.Fatalf("EnqueueDeleteDocument: %v", err)
+	}
+	if fake.enqueuedType != "" {
+		t.Fatalf("expected no delete job, got %s", fake.enqueuedType)
+	}
+}
+
+func TestEnqueueDeleteDocument_LiveRoomWithoutCorpusIsNoop(t *testing.T) {
+	wsID := pgUUID(uuid.NewString())
+	roomID := pgUUID(uuid.NewString())
+	fake := &deletedRoomFakeDB{t: t, room: liveRoom(wsID, roomID)}
 	svc := enabledKnowledgeService(t, fake)
 
 	err := svc.EnqueueDeleteDocument(t.Context(), uuid.UUID(roomID.Bytes).String(), uuid.UUID(wsID.Bytes).String(), uuid.NewString())

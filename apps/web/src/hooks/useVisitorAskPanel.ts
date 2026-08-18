@@ -78,6 +78,8 @@ export function useVisitorAskPanel(opts: {
         if (e instanceof DOMException && e.name === "AbortError") return;
         if (e instanceof ApiError && (e.code === "ai_unavailable" || e.code === "ai_not_enabled")) {
           setError(t("viewer.askAiUnavailable"));
+        } else if (e instanceof ApiError && e.code === "knowledge_corpus_not_ready") {
+          setError(t("viewer.askAiCorpusNotReady"));
         } else if (e instanceof ApiError && e.code === "rate_limit_exceeded") {
           setError(t("viewer.askAiRateLimited"));
         } else if (!(e instanceof ApiError && e.code === "stream_incomplete")) {

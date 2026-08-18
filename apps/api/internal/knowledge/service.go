@@ -392,71 +392,8 @@ func (s *Service) EnqueueRoomSync(ctx context.Context, roomID, workspaceID, user
 	return err
 }
 
-// EnqueueIngestDocument queues ingest for one room document (lifecycle hook).
-// Locked room documents are never enqueued for ingest.
-func (s *Service) EnqueueIngestDocument(ctx context.Context, roomID, workspaceID, documentID string) error {
-	if !s.Enabled() {
-		return nil
-	}
-	room, err := s.access.GetRoom(ctx, roomID, workspaceID)
-	if err != nil {
-		return err
-	}
-	docUUID := pgUUID(documentID)
-	binding, err := s.queries.GetDealRoomDocumentByDocumentID(ctx, db.GetDealRoomDocumentByDocumentIDParams{
-		RoomID:     room.ID,
-		DocumentID: docUUID,
-	})
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil
-		}
-		return err
-	}
-	lockedFolders := lockedFolderPathSet(room.Settings)
-	if knowledgeExcluded(binding.Locked, binding.FolderPath, lockedFolders) {
-		return nil
-	}
-	if err := s.ensureLocalCorpusRow(ctx, room); err != nil {
-		logger.ErrorCtx(ctx, "knowledge ensure local corpus", err)
-		return nil
-	}
-	doc, err := s.queries.GetDocumentByID(ctx, db.GetDocumentByIDParams{
-		ID:          docUUID,
-		WorkspaceID: room.WorkspaceID,
-	})
-	if err != nil {
-		return err
-	}
-	if dealroom.IsArchivedDocumentStatus(doc.Status) {
-		return nil
-	}
-	extName := externalDocName(documentID, doc.SourceType, doc.Title, doc.StorageKey)
-	_, err = s.queries.UpsertDealRoomRagDocument(ctx, db.UpsertDealRoomRagDocumentParams{
-		RoomID:       room.ID,
-		DocumentID:   doc.ID,
-		WorkspaceID:  room.WorkspaceID,
-		ExternalName: extName,
-		Status:       "pending",
-		LastError:    pgtype.Text{},
-	})
-	if err != nil {
-		return err
-	}
-	_, err = s.queries.EnqueueKnowledgeSyncJob(ctx, db.EnqueueKnowledgeSyncJobParams{
-		WorkspaceID: room.WorkspaceID,
-		RoomID:      room.ID,
-		DocumentID:  doc.ID,
-		JobType:     "ingest_doc",
-	})
-	return err
-}
-
-// EnqueueDeleteDocument queues deletion from the external KB.
-// Always creates/updates a local binding so the worker can resolve the remote
-// document by stable external_name even if ingest mapping was missing.
-// Soft-deleted rooms are allowed so DeleteRoom can enqueue after commit;
-// an unprovisioned deleted room is a no-op (do not mint a corpus just to delete).
+// EnqueueDeleteDocument queues deletion from the external KB when a corpus
+// already exists. Rooms that never synced are a no-op (do not mint a corpus).
 func (s *Service) EnqueueDeleteDocument(ctx context.Context, roomID, workspaceID, documentID string) error {
 	if !s.Enabled() {
 		return nil
@@ -471,17 +408,11 @@ func (s *Service) EnqueueDeleteDocument(ctx context.Context, roomID, workspaceID
 		}
 		return err
 	}
-	roomDeleted := room.DeletedAt.Valid || room.Status == "deleted"
-	if roomDeleted {
-		if _, corpusErr := s.queries.GetDealRoomRagCorpus(ctx, room.ID); corpusErr != nil {
-			if errors.Is(corpusErr, pgx.ErrNoRows) {
-				return nil
-			}
-			return corpusErr
+	if _, corpusErr := s.queries.GetDealRoomRagCorpus(ctx, room.ID); corpusErr != nil {
+		if errors.Is(corpusErr, pgx.ErrNoRows) {
+			return nil
 		}
-	} else if err := s.ensureLocalCorpusRow(ctx, room); err != nil {
-		logger.ErrorCtx(ctx, "knowledge ensure local corpus for delete", err)
-		return err
+		return corpusErr
 	}
 	docUUID := pgUUID(documentID)
 	doc, err := s.queries.GetDocumentByID(ctx, db.GetDocumentByIDParams{
@@ -536,7 +467,7 @@ func (s *Service) Query(ctx context.Context, roomID, workspaceID, userID string,
 	if err != nil {
 		return QueryResponse{}, err
 	}
-	cred, err := s.ensureProvisioned(ctx, room)
+	cred, err := s.askRagCredentials(ctx, room)
 	if err != nil {
 		return QueryResponse{}, err
 	}
@@ -787,6 +718,8 @@ func (s *Service) verifyOrReissueTenantKey(ctx context.Context, workspaceID pgty
 	return err
 }
 
+// ensureProvisioned mints a workspace tenant and per-room KB. Call only from
+// the knowledge worker after EnqueueRoomSync has queued a job — never from Ask.
 func (s *Service) ensureProvisioned(ctx context.Context, room db.DealRoom) (ragCredentials, error) {
 	wsID := uuid.UUID(room.WorkspaceID.Bytes).String()
 	roomID := uuid.UUID(room.ID.Bytes).String()
@@ -895,8 +828,22 @@ func (s *Service) ensureProvisioned(ctx context.Context, room db.DealRoom) (ragC
 	return ragCredentials{tenantSlug: tenantSlug, kbSlug: kbSlug, apiKey: apiKey}, nil
 }
 
+// askRagCredentials returns stored RAG credentials for Ask. It never mints a
+// tenant or knowledge base; Knowledge Sync (worker ensureProvisioned) is the
+// only create path.
+func (s *Service) askRagCredentials(ctx context.Context, room db.DealRoom) (ragCredentials, error) {
+	cred, ok, err := s.existingRagCredentials(ctx, room)
+	if err != nil {
+		return ragCredentials{}, err
+	}
+	if !ok {
+		return ragCredentials{}, ErrCorpusNotReady
+	}
+	return cred, nil
+}
+
 // existingRagCredentials returns already-stored RAG credentials without minting
-// a tenant, API key, or knowledge base. Used for delete_doc after room soft-delete.
+// a tenant, API key, or knowledge base. Used for Ask and delete_doc after room soft-delete.
 func (s *Service) existingRagCredentials(ctx context.Context, room db.DealRoom) (ragCredentials, bool, error) {
 	corpus, err := s.queries.GetDealRoomRagCorpus(ctx, room.ID)
 	if err != nil {

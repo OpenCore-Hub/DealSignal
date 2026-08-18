@@ -41,7 +41,7 @@ func (s *Service) QueryLinkScoped(
 	if err != nil {
 		return QueryResponse{}, err
 	}
-	cred, err := s.ensureProvisioned(ctx, room)
+	cred, err := s.askRagCredentials(ctx, room)
 	if err != nil {
 		return QueryResponse{}, err
 	}
