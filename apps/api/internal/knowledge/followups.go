@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/knowledge/missions"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/llm"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/locale"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/logger"
@@ -34,16 +35,18 @@ type followUpChatCompleter interface {
 type FollowUpSuggestion struct {
 	ID   string `json:"id"`
 	Text string `json:"text"`
+	Kind string `json:"kind,omitempty"` // verify | conflict | consequence | cover | narrow
+	Slot int    `json:"slot,omitempty"` // 0-indexed composer slot
 }
 
 // FollowUpsResponse is the suggest-follow-ups API body.
 type FollowUpsResponse struct {
 	Items  []FollowUpSuggestion `json:"items"`
-	Source string               `json:"source"` // llm | mission | template
+	Source string               `json:"source"` // llm | gap | template
 }
 
 // WithFollowUpLLM enables evidence-grounded follow-up generation.
-// When unset, SuggestFollowUps returns localized templates only.
+// When unset, SuggestFollowUps returns split gap chips or narrowing templates.
 func (s *Service) WithFollowUpLLM(c followUpChatCompleter) *Service {
 	if s != nil {
 		s.followUpLLM = c
@@ -52,7 +55,9 @@ func (s *Service) WithFollowUpLLM(c followUpChatCompleter) *Service {
 }
 
 // SuggestFollowUps returns 2–3 next questions for a persisted turn.
-// Prefer evidence-grounded LLM; fall back to room-scoped templates.
+// Narrowing stays template-only. Otherwise slot0 continues this turn;
+// remaining slots may be rewritten uncovered pack items. Mission packs
+// never occupy the composer as raw checklist prompts.
 func (s *Service) SuggestFollowUps(
 	ctx context.Context,
 	roomID, workspaceID, userID, turnID string,
@@ -75,69 +80,91 @@ func (s *Service) SuggestFollowUps(
 	coverage := coverageSourceNames(turn.Hits, followUpCoverageMax)
 	recordKnowledgeQAFollowUpsCoverage(len(coverage))
 
-	if needsFollowUpNarrowing(turn) {
-		res := FollowUpsResponse{
-			Items:  templateFollowUps(turn, loc),
-			Source: "template",
-		}
-		recordKnowledgeQAFollowUps(res.Source)
-		return res, nil
-	}
-
-	// Mission task-engine chips (pack + openQuestions + unresolved) before LLM.
-	sessionRow, sessErr := s.queries.GetKnowledgeQASession(ctx, db.GetKnowledgeQASessionParams{
-		ID:     row.SessionID,
-		RoomID: pgUUID(roomID),
-	})
 	state := SessionState{}
-	if sessErr == nil {
-		state = parseSessionState(sessionRow.State)
-	}
-	pack, _, packErr := s.resolveMissionPack(ctx, roomID, workspaceID)
-	if packErr != nil {
-		logger.InfoCtx(ctx, "knowledge follow-ups: mission pack resolve failed",
-			slog.String("error", packErr.Error()),
-		)
-	}
-	if missionItems := buildMissionFollowUps(state, turn, pack, loc); len(missionItems) > 0 {
-		res := FollowUpsResponse{Items: missionItems, Source: "mission"}
-		recordKnowledgeQAFollowUps(res.Source)
-		return res, nil
+	var pack *missions.Pack
+	if !needsFollowUpNarrowing(turn) {
+		sessionRow, sessErr := s.queries.GetKnowledgeQASession(ctx, db.GetKnowledgeQASessionParams{
+			ID:     row.SessionID,
+			RoomID: pgUUID(roomID),
+		})
+		if sessErr == nil {
+			state = parseSessionState(sessionRow.State)
+		}
+		resolved, _, packErr := s.resolveMissionPack(ctx, roomID, workspaceID)
+		if packErr != nil {
+			logger.InfoCtx(ctx, "knowledge follow-ups: mission pack resolve failed",
+				slog.String("error", packErr.Error()),
+			)
+		} else {
+			pack = resolved
+		}
 	}
 
-	if s.followUpLLM != nil {
-		items, genErr := s.generateLLMFollowUps(ctx, turn, loc)
-		if genErr == nil && len(items) > 0 {
-			res := FollowUpsResponse{Items: items, Source: "llm"}
-			recordKnowledgeQAFollowUps(res.Source)
-			return res, nil
-		}
-		if genErr != nil {
-			logger.InfoCtx(ctx, "knowledge follow-ups: llm failed, using templates",
+	var llmItems []FollowUpSuggestion
+	llmOK := false
+	if !needsFollowUpNarrowing(turn) && s.followUpLLM != nil {
+		items, genErr := s.generateLLMFollowUps(ctx, turn, loc, pack, state)
+		if genErr == nil {
+			llmItems, llmOK = items, true
+		} else {
+			logger.InfoCtx(ctx, "knowledge follow-ups: llm failed, using gap split",
 				slog.String("error", genErr.Error()),
 				slog.String("turn_id", turn.ID),
 			)
 		}
 	}
 
-	res := FollowUpsResponse{
-		Items:  templateFollowUps(turn, loc),
-		Source: "template",
-	}
+	res := composeFollowUps(turn, state, pack, loc, llmItems, llmOK)
 	recordKnowledgeQAFollowUps(res.Source)
+	recordKnowledgeQAFollowUpKinds(res.Source, res.Items)
 	return res, nil
+}
+
+// composeFollowUps is the Phase Z waterfall: narrow templates, else LLM slots,
+// else deterministic gap split, else narrow. Composer never returns source=mission.
+func composeFollowUps(
+	turn QATurn,
+	state SessionState,
+	pack *missions.Pack,
+	loc string,
+	llmItems []FollowUpSuggestion,
+	llmOK bool,
+) FollowUpsResponse {
+	if needsFollowUpNarrowing(turn) {
+		return FollowUpsResponse{Items: templateFollowUps(turn, loc), Source: "template"}
+	}
+	if llmOK && splitHasSlot0(llmItems) {
+		return FollowUpsResponse{Items: llmItems, Source: "llm"}
+	}
+	gap := buildSplitFollowUps(state, turn, pack, loc)
+	if splitHasSlot0(gap) {
+		return FollowUpsResponse{Items: gap, Source: "gap"}
+	}
+	return FollowUpsResponse{Items: templateFollowUps(turn, loc), Source: "template"}
 }
 
 func needsFollowUpNarrowing(turn QATurn) bool {
 	if turn.Refused || isUngroundedAnswer(turn.Answer) {
 		return true
 	}
+	// Composer-only: RAG “context does not include” meta is not a this-turn
+	// slot0 gap. Does not flip classifyTurnResult / hide the evidence rail.
+	if ans := strings.TrimSpace(turn.Answer); ans != "" && looksLikeNonRoomFactMeta(ans) {
+		return true
+	}
 	switch turn.ResultStatus {
 	case "refused", "no_hits", "error":
 		return true
 	default:
-		return false
 	}
+	// Asked topic not stamped by any grounded claim → narrow. Related
+	// numbers in the same answer must not open a split (or occupy slot0).
+	if strings.TrimSpace(turn.Answer) != "" &&
+		!questionTopicGrounded(turn) &&
+		!hasActionableUnresolvedTurn(turn) {
+		return true
+	}
+	return false
 }
 
 // coverageSourceNames returns ordered unique source names (retrieval order), capped.
@@ -166,71 +193,36 @@ func coverageSourceNames(hits []QueryHit, max int) []string {
 }
 
 func templateFollowUps(turn QATurn, loc string) []FollowUpSuggestion {
+	_ = turn
 	zh := loc == "zh-CN"
-	if needsFollowUpNarrowing(turn) {
-		if zh {
-			return []FollowUpSuggestion{
-				{ID: "narrow-scope", Text: "换个更具体的文件名或条款标题再问？"},
-				{ID: "name-clause", Text: "直接问本室某份文件里的具体条款名称？"},
-			}
-		}
+	if zh {
 		return []FollowUpSuggestion{
-			{ID: "narrow-scope", Text: "Try a more specific file name or clause title?"},
-			{ID: "name-clause", Text: "Ask about a named clause in a room document?"},
+			{ID: "narrow-scope", Text: "换个更具体的文件名或条款标题再问？", Kind: followUpKindNarrow, Slot: 0},
+			{ID: "name-clause", Text: "直接问本室某份文件里的具体条款名称？", Kind: followUpKindNarrow, Slot: 1},
 		}
 	}
-
-	sources := coverageSourceNames(turn.Hits, followUpCoverageMax)
-	switch {
-	case len(sources) == 0:
-		if zh {
-			return []FollowUpSuggestion{
-				{ID: "specific-clause", Text: "继续追问本室文档里的某一具体条款？"},
-				{ID: "party-obligations", Text: "本室文档里各方义务分别怎么约定？"},
-			}
-		}
-		return []FollowUpSuggestion{
-			{ID: "specific-clause", Text: "Drill into a specific clause in this room’s docs?"},
-			{ID: "party-obligations", Text: "What obligations does each party have in this room’s docs?"},
-		}
-	case len(sources) == 1:
-		source := sources[0]
-		if zh {
-			return []FollowUpSuggestion{
-				{ID: "liability-in-source", Text: fmt.Sprintf("继续问《%s》里的责任条款？", source)},
-				{ID: "definitions-in-source", Text: fmt.Sprintf("《%s》里的关键定义是怎么写的？", source)},
-				{ID: "exceptions-in-source", Text: fmt.Sprintf("《%s》里有哪些例外或排除？", source)},
-			}
-		}
-		return []FollowUpSuggestion{
-			{ID: "liability-in-source", Text: fmt.Sprintf("Ask about liability terms in “%s”?", source)},
-			{ID: "definitions-in-source", Text: fmt.Sprintf("How does “%s” define the key terms?", source)},
-			{ID: "exceptions-in-source", Text: fmt.Sprintf("What exceptions does “%s” list?", source)},
-		}
-	default:
-		top1, top2 := sources[0], sources[1]
-		if zh {
-			return []FollowUpSuggestion{
-				{ID: "liability-in-source", Text: fmt.Sprintf("继续问《%s》里的责任条款？", top1)},
-				{ID: "exceptions-in-second-source", Text: fmt.Sprintf("《%s》有哪些例外或除外情形？", top2)},
-				{ID: "cross-file-consistency", Text: fmt.Sprintf("《%s》与《%s》对同一事项是否一致？", top1, top2)},
-			}
-		}
-		return []FollowUpSuggestion{
-			{ID: "liability-in-source", Text: fmt.Sprintf("Ask about liability terms in “%s”?", top1)},
-			{ID: "exceptions-in-second-source", Text: fmt.Sprintf("What exceptions does “%s” list?", top2)},
-			{ID: "cross-file-consistency", Text: fmt.Sprintf("Do “%s” and “%s” agree on the same point?", top1, top2)},
-		}
+	return []FollowUpSuggestion{
+		{ID: "narrow-scope", Text: "Try a more specific file name or clause title?", Kind: followUpKindNarrow, Slot: 0},
+		{ID: "name-clause", Text: "Ask about a named clause in a room document?", Kind: followUpKindNarrow, Slot: 1},
 	}
 }
 
 type followUpLLMPayload struct {
-	Question     string                `json:"question"`
-	Answer       string                `json:"answer"`
-	ResultStatus string                `json:"result_status"`
-	Refused      bool                  `json:"refused"`
-	CoverageSet  []string              `json:"coverage_set"`
-	Evidence     []followUpLLMEvidence `json:"evidence"`
+	Question     string                 `json:"question"`
+	Answer       string                 `json:"answer"`
+	ResultStatus string                 `json:"result_status"`
+	Refused      bool                   `json:"refused"`
+	Unresolved   []string               `json:"unresolved,omitempty"`
+	Claims       []string               `json:"claims,omitempty"`
+	CoverageSet  []string               `json:"coverage_set"`
+	Evidence     []followUpLLMEvidence  `json:"evidence"`
+	Uncovered    []followUpLLMUncovered `json:"uncovered_pack,omitempty"`
+}
+
+type followUpLLMUncovered struct {
+	ID       string   `json:"id"`
+	Topic    string   `json:"topic"`
+	Keywords []string `json:"keywords,omitempty"`
 }
 
 type followUpLLMEvidence struct {
@@ -239,16 +231,29 @@ type followUpLLMEvidence struct {
 	Excerpt    string `json:"excerpt"`
 }
 
-type followUpLLMOutput struct {
-	Questions []string `json:"questions"`
+type followUpLLMSlot struct {
+	Slot int    `json:"slot"`
+	Kind string `json:"kind"`
+	Text string `json:"text"`
 }
 
-func (s *Service) generateLLMFollowUps(ctx context.Context, turn QATurn, loc string) ([]FollowUpSuggestion, error) {
+type followUpLLMOutput struct {
+	Questions []string          `json:"questions"`
+	Slots     []followUpLLMSlot `json:"slots"`
+}
+
+func (s *Service) generateLLMFollowUps(
+	ctx context.Context,
+	turn QATurn,
+	loc string,
+	pack *missions.Pack,
+	state SessionState,
+) ([]FollowUpSuggestion, error) {
 	if s.followUpLLM == nil {
 		return nil, errors.New("follow-up llm unset")
 	}
 	coverage := coverageSourceNames(turn.Hits, followUpCoverageMax)
-	if len(coverage) == 0 {
+	if len(coverage) == 0 && strings.TrimSpace(turn.Question) == "" {
 		return nil, errors.New("no evidence source names")
 	}
 	coverageKeys := make(map[string]struct{}, len(coverage))
@@ -265,8 +270,10 @@ func (s *Service) generateLLMFollowUps(ctx context.Context, turn QATurn, loc str
 		if name == "" {
 			continue
 		}
-		if _, ok := coverageKeys[strings.ToLower(name)]; !ok {
-			continue
+		if len(coverageKeys) > 0 {
+			if _, ok := coverageKeys[strings.ToLower(name)]; !ok {
+				continue
+			}
 		}
 		evidence = append(evidence, followUpLLMEvidence{
 			SourceName: name,
@@ -274,8 +281,26 @@ func (s *Service) generateLLMFollowUps(ctx context.Context, turn QATurn, loc str
 			Excerpt:    truncateRunes(h.Text, followUpMaxExcerptRunes),
 		})
 	}
-	if len(evidence) == 0 {
-		return nil, errors.New("no evidence excerpts")
+
+	claims := make([]string, 0, len(turn.Claims))
+	for _, c := range turn.Claims {
+		if t := strings.TrimSpace(c.Text); t != "" {
+			claims = append(claims, truncateRunes(t, followUpClaimPreviewRunes))
+		}
+	}
+	uncovered := make([]followUpLLMUncovered, 0)
+	if pack != nil {
+		covered := missionCoverageCorpus(state, turn)
+		for _, item := range pack.Items {
+			if missionItemCovered(item, covered) {
+				continue
+			}
+			uncovered = append(uncovered, followUpLLMUncovered{
+				ID:       item.ID,
+				Topic:    coverTopic(item, loc),
+				Keywords: item.Keywords,
+			})
+		}
 	}
 
 	payload, err := json.Marshal(followUpLLMPayload{
@@ -283,8 +308,11 @@ func (s *Service) generateLLMFollowUps(ctx context.Context, turn QATurn, loc str
 		Answer:       truncateRunes(turn.Answer, followUpMaxAnswerRunes),
 		ResultStatus: turn.ResultStatus,
 		Refused:      turn.Refused,
+		Unresolved:   turn.Unresolved,
+		Claims:       claims,
 		CoverageSet:  coverage,
 		Evidence:     evidence,
+		Uncovered:    uncovered,
 	})
 	if err != nil {
 		return nil, err
@@ -295,20 +323,16 @@ func (s *Service) generateLLMFollowUps(ctx context.Context, turn QATurn, loc str
 		langRule = "用简体中文写追问。"
 	}
 
-	diversityRule := "Coverage set has a single file; focus chips on that file."
-	if len(coverage) >= 2 {
-		diversityRule = "Coverage set has multiple files: the questions MUST collectively mention at least two distinct coverage_set names. Do not put every question on the first file only."
-	}
-
-	system := strings.TrimSpace(fmt.Sprintf(`You suggest next research questions for a deal-room knowledge desk.
+	system := strings.TrimSpace(fmt.Sprintf(`You fill composer follow-up slots for a deal-room knowledge desk.
+Return JSON only: {"slots":[{"slot":0,"kind":"verify|conflict|consequence","text":"..."},{"slot":1,"kind":"verify|conflict|consequence|cover","text":"..."},{"slot":2,"kind":"verify|conflict|consequence|cover","text":"..."}]}
 Hard rules:
-- Stay inside the provided evidence documents only.
-- Each question MUST mention at least one coverage_set source_name exactly as given.
-- %s
+- slot 0 MUST continue this turn (question, answer, claims, or unresolved). kind must be verify, conflict, or consequence — never cover or a checklist dump.
+- slots 1–2 MAY continue this turn OR rewrite an uncovered_pack item as kind=cover. A cover question MUST include a this-turn anchor (number, party, or file from the question/answer) AND the pack topic. Never copy uncovered_pack prompts or YAML wording verbatim.
+- Prefer mentioning a coverage_set filename when it helps retrieval. Filename-only questions are forbidden. Filename mention is not required if the question is grounded in this turn.
 - No industry trivia, competitor comparisons, or out-of-room knowledge.
-- Prefer adjacent clauses/definitions/exceptions/obligations grounded in excerpts.
-- Return JSON only: {"questions":["..."]} with 2 or 3 concise questions.
-- %s`, diversityRule, langRule))
+- Each question must be independently retrievable.
+- 2 or 3 slots.
+- %s`, langRule))
 
 	llmCtx, cancel := context.WithTimeout(ctx, followUpLLMTimeout)
 	defer cancel()
@@ -320,38 +344,171 @@ Hard rules:
 		return nil, err
 	}
 
-	questions, err := parseFollowUpLLMQuestions(raw)
+	parsed, err := parseFollowUpLLMSuggestions(raw)
 	if err != nil {
 		return nil, err
 	}
-	filtered := filterGroundedFollowUps(questions, evidence)
-	if len(filtered) == 0 {
-		return nil, errors.New("no grounded follow-ups after filter")
+	filtered := filterLLMSplitFollowUps(parsed, turn, pack)
+	if !splitHasSlot0(filtered) {
+		return nil, errors.New("no turn-grounded slot0 after filter")
 	}
-	// Drop meta / industry-trivia chips even if they named a file.
-	kept := filtered[:0]
-	for _, q := range filtered {
-		if looksLikeNonRoomFactMeta(q) || looksLikeOutOfRoomGeneralKnowledge(q) {
+	return filtered, nil
+}
+
+func normalizeFollowUpKind(kind string) string {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case followUpKindVerify, followUpKindConflict, followUpKindConsequence, followUpKindCover, followUpKindNarrow:
+		return strings.ToLower(strings.TrimSpace(kind))
+	default:
+		return followUpKindVerify
+	}
+}
+
+func parseFollowUpLLMSuggestions(raw string) ([]FollowUpSuggestion, error) {
+	raw, err := extractJSONObject(raw)
+	if err != nil {
+		return nil, err
+	}
+	var out followUpLLMOutput
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		return nil, fmt.Errorf("parse follow-up json: %w", err)
+	}
+	seen := map[string]struct{}{}
+	var items []FollowUpSuggestion
+	if len(out.Slots) > 0 {
+		for _, sl := range out.Slots {
+			text := strings.TrimSpace(sl.Text)
+			if text == "" {
+				continue
+			}
+			text = truncateRunes(text, followUpMaxQuestionRunes)
+			key := strings.ToLower(text)
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			kind := normalizeFollowUpKind(sl.Kind)
+			if sl.Slot == 0 && (kind == followUpKindCover || kind == followUpKindNarrow) {
+				continue
+			}
+			items = append(items, FollowUpSuggestion{
+				ID:   fmt.Sprintf("llm-%d", sl.Slot+1),
+				Text: text,
+				Kind: kind,
+				Slot: sl.Slot,
+			})
+			if len(items) >= followUpMaxQuestions {
+				break
+			}
+		}
+	} else {
+		questions, err := questionsFromLLMOutput(out)
+		if err != nil {
+			return nil, err
+		}
+		for i, q := range questions {
+			items = append(items, FollowUpSuggestion{
+				ID:   fmt.Sprintf("llm-%d", i+1),
+				Text: q,
+				Kind: followUpKindVerify,
+				Slot: i,
+			})
+		}
+	}
+	if len(items) == 0 {
+		return nil, errors.New("no questions in llm json")
+	}
+	return items, nil
+}
+
+func questionsFromLLMOutput(out followUpLLMOutput) ([]string, error) {
+	seen := map[string]struct{}{}
+	var questions []string
+	for _, q := range out.Questions {
+		q = strings.TrimSpace(q)
+		if q == "" {
 			continue
 		}
-		kept = append(kept, q)
+		q = truncateRunes(q, followUpMaxQuestionRunes)
+		key := strings.ToLower(q)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		questions = append(questions, q)
+		if len(questions) >= followUpMaxQuestions {
+			break
+		}
 	}
-	filtered = kept
-	if len(filtered) == 0 {
-		return nil, errors.New("no room-fact follow-ups after meta filter")
+	if len(questions) == 0 {
+		return nil, errors.New("no questions in llm json")
 	}
-	filtered = filterCoverageDiverse(filtered, coverage)
-	if len(filtered) == 0 {
-		return nil, errors.New("follow-ups failed coverage diversity (all stuck on one file)")
+	return questions, nil
+}
+
+func filterLLMSplitFollowUps(
+	items []FollowUpSuggestion,
+	turn QATurn,
+	pack *missions.Pack,
+) []FollowUpSuggestion {
+	turnTokens := followUpContinuationTokens(turn)
+	var kept []FollowUpSuggestion
+	for _, it := range items {
+		text := strings.TrimSpace(it.Text)
+		if text == "" || !isPromotableFollowUpText(text) {
+			continue
+		}
+		if looksLikePackPromptDump(text, pack) {
+			continue
+		}
+		ql := strings.ToLower(text)
+		kind := normalizeFollowUpKind(it.Kind)
+		if kind == followUpKindNarrow {
+			continue
+		}
+		if kind == followUpKindCover {
+			if !coverChipGrounded(text, turn, pack) {
+				continue
+			}
+			it.Text = text
+			it.Kind = followUpKindCover
+			kept = append(kept, it)
+			continue
+		}
+		if len(turnTokens) > 0 && !containsAnyToken(ql, turnTokens) {
+			continue
+		}
+		it.Text = text
+		it.Kind = kind
+		kept = append(kept, it)
 	}
-	out := make([]FollowUpSuggestion, 0, len(filtered))
-	for i, q := range filtered {
-		out = append(out, FollowUpSuggestion{
-			ID:   fmt.Sprintf("llm-%d", i+1),
-			Text: q,
-		})
+	return arrangeSplitSlots(kept)
+}
+
+func coverChipGrounded(text string, turn QATurn, pack *missions.Pack) bool {
+	if pack == nil {
+		return false
 	}
-	return out, nil
+	ql := strings.ToLower(text)
+	anchor := turnAnchor(turn)
+	if anchor == "" || !strings.Contains(ql, strings.ToLower(anchor)) {
+		return false
+	}
+	for _, item := range pack.Items {
+		for _, loc := range []string{"en", "zh-CN"} {
+			topic := coverTopic(item, loc)
+			if topic != "" && strings.Contains(ql, strings.ToLower(topic)) {
+				return true
+			}
+		}
+		for _, kw := range item.Keywords {
+			kw = strings.TrimSpace(kw)
+			if kw != "" && strings.Contains(ql, strings.ToLower(kw)) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func parseFollowUpLLMQuestions(raw string) ([]string, error) {
@@ -485,6 +642,10 @@ func distinctiveEvidenceTokens(corpus string) []string {
 			if len(runes) < 2 {
 				continue
 			}
+		} else if looksNumericToken(f) {
+			if len(runes) < 1 {
+				continue
+			}
 		} else if len(runes) < 3 {
 			continue
 		}
@@ -510,4 +671,42 @@ func containsAnyToken(haystack string, tokens []string) bool {
 		}
 	}
 	return false
+}
+
+// followUpContinuationTokens are question topics + numeric runs + unresolved
+// tokens. Answer prose (e.g. a related 4.8亿) must not ground a slot0 chip.
+func followUpContinuationTokens(turn QATurn) []string {
+	seen := map[string]struct{}{}
+	var out []string
+	add := func(toks []string) {
+		for _, t := range toks {
+			if t == "" {
+				continue
+			}
+			if _, ok := seen[t]; ok {
+				continue
+			}
+			seen[t] = struct{}{}
+			out = append(out, t)
+		}
+	}
+	add(questionTopicTokens(turn.Question))
+	addNumeric := func(text string) {
+		for _, t := range splitTurnAnchorTokens(strings.ToLower(text)) {
+			if looksAnchorNumberToken(t) {
+				add([]string{t})
+			}
+		}
+	}
+	addNumeric(turn.Question)
+	for _, c := range turn.Claims {
+		if c.Confidence == claimConfidenceGrounded && len(c.HitIDs) > 0 &&
+			claimOverlapsQuestion(c.Text, turn.Question) {
+			addNumeric(c.Text)
+		}
+	}
+	for _, u := range turn.Unresolved {
+		add(splitTurnAnchorTokens(strings.ToLower(u)))
+	}
+	return out
 }

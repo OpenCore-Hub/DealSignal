@@ -281,15 +281,38 @@ echo "ok turn=$REPLAY_STREAM_TURN"
 echo -n "[follow-ups] "
 FU_CODE=$(curl -sS -o /tmp/kqa-fu.json -w "%{http_code}" -c "$COOKIE_JAR" -b "$COOKIE_JAR" -X POST \
   "$BASE_URL/api/workspaces/$WS_SLUG/deal-rooms/$ROOM_ID/knowledge/turns/$TURN_ID/follow-ups")
-echo "HTTP $FU_CODE $(jq -c '{source, n:(.items|length), sample:(.items[0].text // "" | .[0:60])}' </tmp/kqa-fu.json 2>/dev/null || cat /tmp/kqa-fu.json)"
+echo "HTTP $FU_CODE $(jq -c '{source, n:(.items|length), kind:(.items[0].kind // ""), sample:(.items[0].text // "" | .[0:60])}' </tmp/kqa-fu.json 2>/dev/null || cat /tmp/kqa-fu.json)"
 if [[ "$FU_CODE" != "200" ]] || ! jq -e '.items|length>=1' >/dev/null </tmp/kqa-fu.json; then
   echo "ERROR: expected follow-ups items"
   exit 1
 fi
 FU_SOURCE=$(jq -r '.source' </tmp/kqa-fu.json)
-if [[ "$FU_SOURCE" != "llm" && "$FU_SOURCE" != "mission" && "$FU_SOURCE" != "template" ]]; then
-  echo "ERROR: unexpected follow-ups source=$FU_SOURCE"
+if [[ "$FU_SOURCE" != "llm" && "$FU_SOURCE" != "gap" && "$FU_SOURCE" != "template" ]]; then
+  echo "ERROR: unexpected follow-ups source=$FU_SOURCE (want llm|gap|template)"
   exit 1
+fi
+if [[ "$FU_SOURCE" == "mission" ]]; then
+  echo "ERROR: composer must not use source=mission"
+  exit 1
+fi
+if jq -e '[.items[].text | select(test("期权池规模如何约定|employee option pool sized"; "i"))] | length > 0' >/tmp/kqa-fu.json >/dev/null; then
+  echo "ERROR: unrewritten mission pack prompt leaked into composer chips"
+  jq -c '.items[].text' </tmp/kqa-fu.json
+  exit 1
+fi
+if [[ "$FU_SOURCE" != "template" ]]; then
+  FU_KIND=$(jq -r '.items[0].kind // empty' </tmp/kqa-fu.json)
+  if [[ -n "$FU_KIND" && "$FU_KIND" != "verify" && "$FU_KIND" != "conflict" && "$FU_KIND" != "consequence" ]]; then
+    echo "ERROR: slot0 kind=$FU_KIND want verify|conflict|consequence"
+    exit 1
+  fi
+  FU_SLOT0=$(jq -r '.items[0].text // empty' </tmp/kqa-fu.json)
+  # Same-domain with this-turn ask (smoke PDF: "Cap is ten million USD").
+  if ! grep -qiE 'valuation|cap|million|10' <<<"$FU_SLOT0"; then
+    echo "ERROR: slot0 not same-domain as question=$QUESTION"
+    echo "$FU_SLOT0"
+    exit 1
+  fi
 fi
 
 echo -n "[mission pack] "

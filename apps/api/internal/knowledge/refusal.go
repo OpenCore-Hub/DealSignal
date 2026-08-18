@@ -97,6 +97,12 @@ func looksLikeNonRoomFactMeta(text string) bool {
 		"根据现有资料无法",
 		"没有在提供的上下文",
 		"未在提供的上下文",
+		// RAG template: “provided context does not include …” — not a room-fact gap.
+		// Kept here (not in isUngroundedAnswer) so mixed answers still show citations.
+		"提供的上下文未包含",
+		"提供的上下文中未包含",
+		"the provided context does not include",
+		"provided context does not include",
 		"现有材料不足以",
 		"不足以确定",
 		"i cannot determine",

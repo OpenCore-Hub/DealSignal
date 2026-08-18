@@ -159,6 +159,7 @@ func TestIsActionableUnresolvedGap(t *testing.T) {
 		"如下：",
 		"短",
 		"因此，无法根据现有上下文回答该问题。",
+		"提供的上下文未包含2025年GMV年增长数据。",
 		"The provided context does not contain an answer to the question.",
 		"The EBITDA multiple for this sector is typically 12x.",
 		"同行一般怎么谈对赌条款？",
@@ -180,6 +181,20 @@ func TestBindAnswerClaimsRejectsSoftRefusalMetaGaps(t *testing.T) {
 	// Whole-answer ungrounded → no claims/unresolved binding at all.
 	if !bound.empty() {
 		t.Fatalf("soft refusal must not bind: %#v", bound)
+	}
+}
+
+func TestBindAnswerClaimsRejectsContextMissingGap(t *testing.T) {
+	t.Parallel()
+	hits := []QueryHit{
+		{ChunkID: "c1", SourceName: "口径.pdf", Text: "Managed Ad Spend 约 4.8 亿元人民币"},
+	}
+	answer := "提供的上下文未包含2025年GMV年增长数据。材料中可见 Managed Ad Spend 约 4.8 亿元人民币。"
+	bound := bindAnswerClaims(answer, hits, false)
+	for _, u := range bound.Unresolved {
+		if strings.Contains(u, "提供的上下文未包含") {
+			t.Fatalf("context-missing sentence must not be a desk gap: %#v", bound.Unresolved)
+		}
 	}
 }
 

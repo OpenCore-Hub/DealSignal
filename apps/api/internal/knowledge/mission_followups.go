@@ -15,7 +15,8 @@ import (
 
 const missionFollowUpMaxChips = 3
 
-// buildMissionFollowUps produces task-engine chips from open gaps + mission pack.
+// buildMissionFollowUps produces checklist prompts from open gaps + mission pack.
+// Composer chips no longer use this path (Phase Z); keep it for rail/tests/leak gates.
 // Inputs are audited session state, the current turn, and an optional pack.
 func buildMissionFollowUps(
 	state SessionState,

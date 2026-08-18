@@ -27,6 +27,16 @@ func TestIsUngroundedAnswer(t *testing.T) {
 	if !looksLikeNonRoomFactMeta("现有材料不足以确定该问题。") {
 		t.Fatal("novel chinese meta must be rejected")
 	}
+	missing := "提供的上下文未包含2025年GMV年增长数据。"
+	if isUngroundedAnswer(missing + "材料中可见 Managed Ad Spend 约 4.8 亿元。") {
+		t.Fatal("mixed missing-context answer must not flip classifyTurnResult")
+	}
+	if !looksLikeNonRoomFactMeta(missing) {
+		t.Fatal("RAG 上下文未包含 must be meta, not a room-fact gap")
+	}
+	if !looksLikeNonRoomFactMeta("提供的上下文中未包含2025年GMV年增长数据。") {
+		t.Fatal("中未包含 variant")
+	}
 }
 
 func TestLooksLikeOutOfRoomGeneralKnowledge(t *testing.T) {

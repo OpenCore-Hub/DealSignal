@@ -3,6 +3,8 @@ package knowledge
 import (
 	"strings"
 	"testing"
+
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/knowledge/missions"
 )
 
 // Out-of-room / adversarial follow-up chips must be dropped by the grounding filter.
@@ -81,6 +83,21 @@ func TestFilterGroundedFollowUpsGoldenOutOfRoom(t *testing.T) {
 	}
 	if len(leaked) > 0 {
 		t.Fatalf("out-of-room leakage: %s", strings.Join(leaked, " | "))
+	}
+}
+
+func TestLooksLikePackPromptDumpGoldenReject(t *testing.T) {
+	t.Parallel()
+	pack, ok := missions.Get(missions.FinancingDDV1)
+	if !ok {
+		t.Fatal("missing financing pack")
+	}
+	for _, item := range pack.Items {
+		for _, prompt := range []string{item.Prompts.EN, item.Prompts.ZhCN} {
+			if !looksLikePackPromptDump(prompt, &pack) {
+				t.Fatalf("pack prompt must be rejected: %s %q", item.ID, prompt)
+			}
+		}
 	}
 }
 

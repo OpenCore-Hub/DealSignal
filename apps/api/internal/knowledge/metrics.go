@@ -1,6 +1,7 @@
 package knowledge
 
 import (
+	"strings"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -88,9 +89,17 @@ var (
 	knowledgeQAFollowUpsTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "dealsignal_knowledge_qa_followups_total",
-			Help: "Suggested follow-up generations by source (llm|mission|template).",
+			Help: "Suggested follow-up generations by source (llm|gap|template).",
 		},
 		[]string{"source"},
+	)
+
+	knowledgeQAFollowUpsKindTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "dealsignal_knowledge_qa_followups_kind_total",
+			Help: "Suggested follow-up chips by source and kind (llm|gap|template × verify|conflict|consequence|cover|narrow).",
+		},
+		[]string{"source", "kind"},
 	)
 
 	knowledgeQAEvalCandidatesTotal = prometheus.NewCounterVec(
@@ -112,7 +121,7 @@ var (
 	knowledgeQAFollowUpsDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Name:    "dealsignal_knowledge_qa_followups_duration_seconds",
-			Help:    "Latency for follow-up chip generation by source (llm|template).",
+			Help:    "Latency for follow-up chip generation by source (llm|gap|template).",
 			Buckets: prometheus.DefBuckets,
 		},
 		[]string{"source"},
@@ -185,6 +194,7 @@ func init() {
 	_ = prometheus.Register(knowledgeQAFollowUpsCoverageFiles)
 	_ = prometheus.Register(knowledgeQAGateRejectsTotal)
 	_ = prometheus.Register(knowledgeQAFollowUpsTotal)
+	_ = prometheus.Register(knowledgeQAFollowUpsKindTotal)
 	_ = prometheus.Register(knowledgeQAEvalCandidatesTotal)
 	_ = prometheus.Register(knowledgeQARewriteTotal)
 	_ = prometheus.Register(knowledgeQAFollowUpsDuration)
@@ -255,6 +265,17 @@ func recordKnowledgeQAGateReject(transport, reason string) {
 
 func recordKnowledgeQAFollowUps(source string) {
 	knowledgeQAFollowUpsTotal.WithLabelValues(normalizeMetricLabel(source, "template")).Inc()
+}
+
+func recordKnowledgeQAFollowUpKinds(source string, items []FollowUpSuggestion) {
+	src := normalizeMetricLabel(source, "template")
+	for _, it := range items {
+		kind := strings.TrimSpace(it.Kind)
+		if kind == "" {
+			kind = "unknown"
+		}
+		knowledgeQAFollowUpsKindTotal.WithLabelValues(src, normalizeMetricLabel(kind, "unknown")).Inc()
+	}
 }
 
 func recordKnowledgeQAEvalCandidate(kind string) {

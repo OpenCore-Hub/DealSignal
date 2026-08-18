@@ -3,6 +3,8 @@ package knowledge
 import (
 	"strings"
 	"testing"
+
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/knowledge/missions"
 )
 
 // knowledgeLeakMaxRate is the CI release gate for out-of-room leakage across
@@ -117,6 +119,38 @@ func TestKnowledgeOutOfRoomLeakGate(t *testing.T) {
 	)
 	if len(missionChips) > 0 {
 		leaked = append(leaked, "mission-chips:"+missionChips[0].Text)
+	}
+
+	// Unrewritten mission-pack YAML must never be accepted as a composer chip.
+	pack, ok := missions.Get(missions.FinancingDDV1)
+	if !ok {
+		t.Fatal("missing financing pack")
+	}
+	var dump string
+	for _, item := range pack.Items {
+		if item.ID == "option_pool" {
+			dump = item.Prompts.ZhCN
+			break
+		}
+	}
+	total++
+	if dump == "" || !looksLikePackPromptDump(dump, &pack) {
+		leaked = append(leaked, "followup:unrewritten-pack-prompt")
+	}
+	total++
+	splitChips := buildSplitFollowUps(SessionState{}, QATurn{
+		Question:     "毛利率是多少？",
+		Answer:       "毛利率为 62%。",
+		ResultStatus: "answered",
+		Hits:         []QueryHit{{ChunkID: "h1", SourceName: "单元经济.xlsx", Text: "毛利率 62%"}},
+		Claims: []AnswerClaim{{
+			Text: "毛利率为 62%", HitIDs: []string{"h1"}, Confidence: claimConfidenceGrounded,
+		}},
+	}, &pack, "zh-CN")
+	for _, chip := range splitChips {
+		if looksLikePackPromptDump(chip.Text, &pack) || strings.Contains(chip.Text, "期权池规模如何约定") {
+			leaked = append(leaked, "followup:composer-pack-dump:"+chip.Text)
+		}
 	}
 
 	rate := float64(len(leaked)) / float64(total)
