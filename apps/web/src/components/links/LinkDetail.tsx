@@ -288,29 +288,27 @@ export function LinkDetail() {
         </div>
       </DetailLayout>
 
-      {link.dealRoomId ? (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-h2 flex items-center gap-2">
-              <ChatTeardropText size={20} />
-              {tShare("management.questionsTitle")}
-            </CardTitle>
-            <CardDescription>{tShare("management.questionsDescription")}</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <OwnerAskInboxPanel
-              scope={{ type: "link", linkId: link.id }}
-              i18nNs="linkShare"
-              initialView={askInboxView}
-              canManageAsk={canManageAskHost({
-                dealRoomId: link.dealRoomId,
-                workspaceCanManage: canManage,
-                linkCanManageAsk: link.canManageAsk,
-              })}
-            />
-          </CardContent>
-        </Card>
-      ) : null}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-h2 flex items-center gap-2">
+            <ChatTeardropText size={20} />
+            {tShare("management.questionsTitle")}
+          </CardTitle>
+          <CardDescription>{tShare("management.questionsDescription")}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <OwnerAskInboxPanel
+            scope={{ type: "link", linkId: link.id }}
+            i18nNs="linkShare"
+            initialView={askInboxView}
+            canManageAsk={canManageAskHost({
+              dealRoomId: link.dealRoomId,
+              workspaceCanManage: canManage,
+              linkCanManageAsk: link.canManageAsk,
+            })}
+          />
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>

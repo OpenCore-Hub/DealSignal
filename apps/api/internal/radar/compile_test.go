@@ -1072,6 +1072,52 @@ func TestCompileBuyingWindowEmailActDoesNotUseEvidencePath(t *testing.T) {
 	}
 }
 
+func TestCompileDealRoomAskNavigatesToQATab(t *testing.T) {
+	now := time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC)
+	roomID := "room-1"
+	linkID := "link-9"
+	feed := Compile(CompileInput{
+		WorkspaceSlug: "acme",
+		Now:           now,
+		Rooms:         map[string]RoomMeta{roomID: {Name: "Series A"}},
+		Actions: []db.ActionItem{{
+			ID: mustUUID(uuid.New()), Title: "Answer ask", Impact: "high", Status: "pending",
+			ActionType: "answer", SourceType: pgText(action.SourceTypeDealRoomLinkQuestion),
+			SourceID: pgText(uuid.New().String()), TargetID: pgText(roomID + "/" + linkID),
+			CreatedAt: pgTime(now.Add(-time.Hour)), DueAt: pgTime(now.Add(time.Hour)), UpdatedAt: pgTime(now),
+		}},
+	})
+	if len(feed.Items) != 1 {
+		t.Fatalf("items=%d", len(feed.Items))
+	}
+	want := "/acme/deal-rooms/room-1?askInbox=needs_host&linkId=link-9&tab=qa"
+	if feed.Items[0].NavigatePath != want {
+		t.Fatalf("navigatePath=%s want %s", feed.Items[0].NavigatePath, want)
+	}
+}
+
+func TestCompileLibraryAskNavigatesToLinkInbox(t *testing.T) {
+	now := time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC)
+	linkID := uuid.New().String()
+	feed := Compile(CompileInput{
+		WorkspaceSlug: "acme",
+		Now:           now,
+		Actions: []db.ActionItem{{
+			ID: mustUUID(uuid.New()), Title: "Answer ask", Impact: "high", Status: "pending",
+			ActionType: "answer", SourceType: pgText(action.SourceTypeLinkQuestion),
+			SourceID: pgText(uuid.New().String()), TargetID: pgText(linkID),
+			CreatedAt: pgTime(now.Add(-time.Hour)), DueAt: pgTime(now.Add(time.Hour)), UpdatedAt: pgTime(now),
+		}},
+	})
+	if len(feed.Items) != 1 {
+		t.Fatalf("items=%d", len(feed.Items))
+	}
+	want := "/acme/links/" + linkID + "?askInbox=needs_host"
+	if feed.Items[0].NavigatePath != want {
+		t.Fatalf("navigatePath=%s want %s", feed.Items[0].NavigatePath, want)
+	}
+}
+
 func TestMetadataDocumentID(t *testing.T) {
 	if got := metadataDocumentID(nil); got != "" {
 		t.Fatalf("empty => %q", got)

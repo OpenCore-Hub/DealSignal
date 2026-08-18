@@ -104,6 +104,8 @@ func dealRoomAccessPath(slug, roomID, linkID string) string {
 
 func dealRoomAskPath(slug, roomID, linkID string, formalQueue bool) string {
 	q := url.Values{}
+	// DealRoomQATab mounts only when tab=qa. Missing tab defaults to documents.
+	q.Set("tab", "qa")
 	if formalQueue {
 		q.Set("askInbox", "formal_queue")
 	} else {

@@ -24,7 +24,21 @@ func TestNavigatePathRoomNDAUsesTargetRoom(t *testing.T) {
 
 func TestNavigatePathFormalAsk(t *testing.T) {
 	got := navigatePath("acme", "deal_room_link_question", "turn-1", "room-1/link-9", true)
-	if got != "/acme/deal-rooms/room-1?askInbox=formal_queue&linkId=link-9" {
+	if got != "/acme/deal-rooms/room-1?askInbox=formal_queue&linkId=link-9&tab=qa" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestNavigatePathHostAsk(t *testing.T) {
+	got := navigatePath("acme", "deal_room_link_question", "turn-1", "room-1/link-9", false)
+	if got != "/acme/deal-rooms/room-1?askInbox=needs_host&linkId=link-9&tab=qa" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestNavigatePathLibraryAsk(t *testing.T) {
+	got := navigatePath("acme", "link_question", "turn-1", "link-lib", false)
+	if got != "/acme/links/link-lib?askInbox=needs_host" {
 		t.Fatalf("got %q", got)
 	}
 }

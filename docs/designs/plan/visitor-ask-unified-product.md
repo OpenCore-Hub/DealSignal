@@ -408,6 +408,7 @@ const (
 - Host pending → 现有 action item / notification 管道（`action/syncer`）。  
 - `target_surface` 区分 `ask_host` / `ask_ai_review`（可选）。  
 - Slack webhook：仅 `host_pending` 与 Formal 事件。
+- 雷达「回复」深链必须落到 Inbox，不能停在资料 Tab：数据室 `dealRoomAskPath` 带 `tab=qa`（与 `apps/web/src/lib/dealRoomAskPath.ts` 对齐）；文档库 `/links/:id?askInbox=` 在 `LinkDetail` 挂载 `OwnerAskInboxPanel`（不要求 `dealRoomId`）。真正关卡仍是 `AnswerAskTurnHostAnswer` → `resolveLinkQuestion`。
 
 ---
 
