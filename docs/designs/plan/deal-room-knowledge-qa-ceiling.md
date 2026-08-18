@@ -3,7 +3,7 @@
 > 承接 [Grounded Chat 产品哲学](./deal-room-grounded-chat-philosophy.md) 与 [会话/审计里程碑](./deal-room-knowledge-qa-session-audit.md)。  
 > 今日 A/B/C 是**契约内生产级**；本文定义相对本产品的**行业绝对天花板**——不是全网 Perplexity，而是机构级「可证明的本室判断系统」。
 
-状态：**冻结（Phase Y）**；**D→H / I–I3 / J–X 已落地**；L1–L4 主刀完成；不再新增产品 Phase（再开须新里程碑）  
+状态：**Phase Z（拆位追问）**；Y 冻结的 L0–L4 契约仍有效；追问主职从「任务包占满 chip」改为 **slot0 接续本轮 + slot1–2 可改写清单**  
 
 范围：数据室 Knowledge 研究台（owner/editor）；组件可复用到 Viewer，**通道契约分离**  
 非范围：全网搜索、人格化助手、A2UI 任意生成 UI、Visitor Ask 复辟、docling **原生** token 流
@@ -24,7 +24,7 @@
 | 信任  | 范围文案 + 拒答藏轨 + 页级打开       | **语料指纹 + 句子↔hit 绑定 + 可导出审计包**           |
 | 检索  | hybrid + rewrite 门禁      | **检索图**（条款→定义→附件）+ 表/数字专路 + 冲突集         |
 | 多轮  | 审计原文 + rewrite           | **可证明会话状态机**（实体/缺口），禁止闲聊记忆污染检索          |
-| 追问  | top-1 模板 → 证据 LLM chips  | **任务包驱动** + 多文件 coverage + **出室 CI 门禁** |
+| 追问  | top-1 模板 → mission 短路 → LLM | **拆位**：slot0 接续本轮 Q+A；slot1–2 接续或改写未覆盖 pack；**出室 CI 门禁** |
 | 闭环  | 三选一反馈                    | 反馈→金标→发布门禁；错引抽样人审                       |
 | 运维  | RPM/配额/FE 幂等/kill-switch | **强制幂等**、SLO/成本归因、多副本一致性说明              |
 
@@ -135,11 +135,16 @@ Rewrite **只许**消费：`state` + 上一 turn 的 question/answer/hits。
 
 UI：悬停/点击句子 ↔ 证据卡；无 `hitIds` 的断言不得使用「事实句」强样式（可降级为综合叙述）。
 
-### 3.5 追问 = 任务引擎
+### 3.5 追问 = 本轮 EVI 拆位（Phase Z）
 
-- 输入：coverage set + `openQuestions` + 可选 room job pack（融资 DD / 红旗等）。  
-- 输出：2–3 chips；收窄路径仍不走 LLM。  
-- **发布门禁**：出室/对抗 golden 泄漏率超过阈值 → CI 失败（不止单测存在）。
+Composer 2–3 条 chip **不是纯接续，也不是纯清单**：
+
+- **slot0（硬）**：verify / conflict / consequence，必须与本轮 `question` + `answer` + `claims` + `unresolved` 同源。  
+- **slot1–2（可）**：继续接续，或取未覆盖 mission 项并 **改写成贴着本轮锚点** 的问句。禁止 YAML 原文进 composer。  
+- 清单原文只留在 MissionProgressRail。  
+- 拒答 / `no_hits` / 未接地：两条 narrow，不拆位、不走 LLM。  
+- `source` ∈ `llm | gap | template`（composer 不再使用 `mission`）。  
+- **发布门禁**：出室/对抗 golden 泄漏率超过阈值 → CI 失败；「未改写的清单原文」golden 必拒。
 
 ### 3.6 语料指纹与导出
 
@@ -153,7 +158,8 @@ UI：悬停/点击句子 ↔ 证据卡；无 `hitIds` 的断言不得使用「�
 | 信号                                         | 用途                                  |
 | ------------------------------------------ | ----------------------------------- |
 | `rewrite_total{rejected|disabled|applied}` | 已有；补 FE follow-up soft-fail counter |
-| follow-ups leak rate（CI）                   | 发版门禁                                |
+| `followups_total{source}` / `followups_kind_total{source,kind}` | composer 拆位：`llm\|gap\|template` × `verify\|conflict\|consequence\|cover\|narrow` |
+| follow-ups leak rate（CI）                   | 发版门禁；未改写清单原文 golden 必拒              |
 | ask latency / token cost per workspace     | 成本归因                                |
 | Redis admission key `scope`                | 滚动发布说明（混部双轨窗口）                      |
 
@@ -189,6 +195,7 @@ UI：悬停/点击句子 ↔ 证据卡；无 `hitIds` 的断言不得使用「�
 | **W**  | L4 · 冷归档恢复契约门禁             | U/H        | `loadSessionArchiveDetail` 单测；e2e：404 / restored_readonly / pack |
 | **X**  | L3 · Owner Viewer continuity 门禁 | T/V/W      | `roomId`+`ws`；persist；desk/ops 单测；rail e2e ±roomId；conflicts soft assert |
 | **Y**  | Freeze / closeout               | X          | 产品 Phase 冻结；验收矩阵与门禁命令定稿；明确延后债；哲学/里程碑文档对齐 |
+| **Z**  | L3 · 拆位追问（EVI + 改写 cover） | Y / G / N  | slot0 同源本轮；cover 必带锚点；YAML 原文禁进 chip；leak 仍 0；source≠mission |
 
 
 ---
@@ -446,6 +453,7 @@ UI：悬停/点击句子 ↔ 证据卡；无 `hitIds` 的断言不得使用「�
 | 2026-08-04 | Phase X 落地：Owner Viewer continuity（`roomId`+`ws`、persist、desk/ops 单测、rail e2e、conflicts soft assert） |
 | 2026-08-04 | Phase Y 冻结：产品 Phase 收官；§9 验收矩阵；开放项/哲学非目标对齐 |
 | 2026-08-04 | Freeze 审查修复：P4 藏证、冲突禁选边、冷归档 fail-closed、CI 接线 MSW knowledge e2e |
+| 2026-08-18 | Phase Z：composer 拆位追问（slot0 接续本轮；slot1–2 可改写 cover；mission 退出 chip） |
 
 
 ---
@@ -491,7 +499,7 @@ REAL_API_BASE_URL=http://localhost:8090 ./e2e-knowledge-real.sh
 
 ### 9.3 冻结规则
 
-1. **不再新增** Phase Z/AA… 作为本文件产品刀；缺陷修复与观测微调除外。  
+1. Y 冻结后的产品刀以 **新里程碑** 登记（本文件 Phase Z 为追问拆位）。缺陷修复与观测微调除外。  
 2. 新能力（含 Visitor Ask 并入、原生 docling 流、全网检索）→ **新里程碑文档**，不回写本天花板为「未完成」。  
 3. 出室评测集可继续加压，但属 **G 门禁运维**，不构成新 Phase。  
 4. 哲学 **P1–P5** 与 §1.3 非目标在冻结后仍不可妥协。

@@ -220,7 +220,7 @@ Rewrite **只许**消费：`state` + 上一 turn 的 question/answer/hits。
 | `POST` | `/deal-rooms/:roomId/knowledge/sessions/query` | JSON：执行检索/生成，**原子追加 turn**，返回 `{ sessionId, turn, … }`；**`clientRequestId` 必填**（缺省/空白 → `400 invalid_input`） |
 | `POST` | `/deal-rooms/:roomId/knowledge/sessions/query/stream` | SSE（Phase-2）：`phase(retrieving)` → `phase(generating)?` → `sources?` → `token*` → `done`；token 由已审计答案切分（上游仍阻塞）；拒答不发 grounded sources；落库规则同 JSON；同样要求 `clientRequestId` |
 | `POST` | `/deal-rooms/:roomId/knowledge/query` | **保留**无会话探测（`answer=false`）；`answer=true` → `400 answer_requires_session`；产品主路径走 session query/stream |
-| `POST` | `/deal-rooms/:roomId/knowledge/turns/:turnId/follow-ups` | 建议追问：收窄→模板；否则 mission（pack+openQuestions）→ LLM → 模板；`source` ∈ `mission\|llm\|template` |
+| `POST` | `/deal-rooms/:roomId/knowledge/turns/:turnId/follow-ups` | 建议追问：收窄→`template`；否则 split gap（slot0 接续）→ LLM 填槽 → `gap`；`source` ∈ `llm\|gap\|template`；item 可含 `kind`/`slot` |
 | `GET` | `/deal-rooms/:roomId/knowledge/missions` | 内置 mission pack 目录 |
 | `GET` | `/deal-rooms/:roomId/knowledge/sessions/:sessionId/export` | diligence 审计包 JSON（session+turns+hits+fingerprint） |
 | `GET` | `/deal-rooms/:roomId/knowledge/archives` | 冷归档墓碑列表 |
@@ -310,17 +310,18 @@ Get session 时附带当前用户的 `feedback?: { kind, note? }`。
 - 证据轨规则不变（哲学 P3/P4）。  
 - 「返回向量库」与信任 chip 同款 pill（已落地）。
 
-### 8.3 建议追问（Phase B → 证据锚定）
+### 8.3 建议追问（Phase B → Z 拆位）
 
 - 展示条件：存在至少一轮 turn。  
 - 点击：直接发送（同 session 新 turn）。  
-- 生成（P0）：
-  1. FE 先用本地模板占位（拒答/收窄或锚定 `sourceName`）。  
-  2. 异步 `POST …/turns/:turnId/follow-ups`：服务端用 **hits 证据 + 短答案 + 硬约束** 调小模型；门禁要求每条问句包含证据文件名。  
-  3. 拒答 / `no_hits` / `error`：**不走 LLM**，只返回收窄模板。  
-  4. LLM 失败或未配置 → 服务端模板 fallback（`source: template|llm`）。  
-- 禁止：行业常识、竞品对比、出室知识；禁止只拼「上一问+上一答」而无证据。  
-- 标签文案：`基于本室文档`。
+- 生成（Phase Z）：
+  1. FE 先用本地 split：收窄，或 slot0 接续本轮 claims/unresolved/hits（**不再**画责任/定义套话）。  
+  2. 异步 `POST …/turns/:turnId/follow-ups`：`source=llm` 或 `gap` 时替换；**不接受 `mission` 覆盖 composer**。  
+  3. 拒答 / `no_hits` / `error`：**不走 LLM**，只返回收窄 `template`。  
+  4. slot0 必须接续本轮；slot1–2 可为改写后的未覆盖 pack（须含本轮锚点）；YAML 原文禁止。  
+- 禁止：行业常识、竞品对比、出室知识、未改写的尽调清单原文。  
+- 清单原文只在 MissionProgressRail。  
+- 标签文案：`基于本室文档` / `证据锚定` / `本轮缺口`。
 
 ### 8.4 反馈（Phase C）
 
@@ -464,6 +465,7 @@ cd apps/web && REAL_API_BASE_URL=http://localhost:8090 ./e2e-knowledge-real.sh
 | 2026-08-04 | Phase I 首刀：`bound_answer.conflicts` 跨文件数值冲突；答案并列表不选边；FE ConflictPanel |
 | 2026-08-04 | Phase I2：Knowledge Query 合并本地 `table_row`（`SearchTableRowsByDocuments`）；mode 可标 `hybrid+table` |
 | 2026-08-04 | 天花板 Phase Y 冻结：§13 开放项标为已归宿；验收见 ceiling §9 |
+| 2026-08-18 | Phase Z：composer 拆位追问；`source` ∈ `llm\|gap\|template`；mission 原文只留 MissionProgressRail |
 
 **运维注记 · Redis admission `scope`（滚动发布）**
 
