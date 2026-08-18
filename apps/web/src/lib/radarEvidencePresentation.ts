@@ -1,5 +1,6 @@
-import type { RadarProduct } from "@/lib/radarQueue";
 import { isAccessGatePromptReason } from "@/lib/accessEventLabels";
+import { diligenceRemediationPath } from "@/lib/actionNavigation";
+import type { RadarProduct } from "@/lib/radarQueue";
 
 /** Gate-hold cards: waiting-to-enter, including allowlist/block holds. */
 export function isRadarGateHoldItem(item: {
@@ -224,4 +225,50 @@ export function topPagesSpanMultipleDocuments(
     if (id) ids.add(id);
   }
   return ids.size > 1;
+}
+
+function trimPath(value?: string | null): string {
+  return value?.trim() ?? "";
+}
+
+function isWorkspaceInsightsOverview(path: string): boolean {
+  const pathname = path.split("?")[0]?.replace(/\/+$/, "") ?? "";
+  return pathname.endsWith("/insights/overview");
+}
+
+export type RadarEvidenceOpenPaths = {
+  product: RadarProduct;
+  workspaceSlug: string;
+  dealRoomId?: string;
+  linkId?: string;
+  navigatePath?: string;
+  insightsPath?: string;
+  evidencePath?: string;
+};
+
+/**
+ * Bottom-rail destination: Diligence → Share/Access; other products → the share
+ * (`/links/:id` via insightsPath), never an arbitrary document in a bundle.
+ */
+export function radarEvidenceOpenPath(input: RadarEvidenceOpenPaths): string | null {
+  const nav = trimPath(input.navigatePath);
+  const insights = trimPath(input.insightsPath);
+  const evidence = trimPath(input.evidencePath);
+  if (input.product === "diligence_gate") {
+    const remediation = diligenceRemediationPath(input.workspaceSlug, {
+      dealRoomId: input.dealRoomId,
+      linkId: input.linkId,
+    });
+    return remediation || nav || insights || evidence || null;
+  }
+  if (insights && !isWorkspaceInsightsOverview(insights)) {
+    return insights;
+  }
+  return evidence || nav || insights || null;
+}
+
+export function radarEvidenceOpenLabelKey(product: RadarProduct): string {
+  return product === "diligence_gate"
+    ? "radar.evidenceRail.openShareInbox"
+    : "radar.evidenceRail.openFull";
 }

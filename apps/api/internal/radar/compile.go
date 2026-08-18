@@ -655,6 +655,11 @@ func buildItem(in CompileInput, a db.ActionItem, sig *db.Signal, product Product
 
 	nav := navigatePath(in.WorkspaceSlug, src, sourceID, targetID, isFormalAsk(a))
 	ev := evidencePath(in.WorkspaceSlug, docID, linkID, contactID, page)
+	// Gate holds are signal-backed (empty sourceType) — do not fall through to a
+	// single document. Document library and deal room must not cross.
+	if nav == "" && product == ProductDiligenceGate {
+		nav = diligenceRemediationPath(in.WorkspaceSlug, dealRoomID, linkID)
+	}
 	if nav == "" {
 		nav = ev
 	}

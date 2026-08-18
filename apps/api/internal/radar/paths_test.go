@@ -35,3 +35,21 @@ func TestParseDealRoomAskTarget(t *testing.T) {
 		t.Fatalf("room=%s link=%s", room, link)
 	}
 }
+
+func TestDiligenceRemediationPath(t *testing.T) {
+	room := diligenceRemediationPath("acme", "room-1", "link-9")
+	if room != "/acme/deal-rooms/room-1?tab=access&linkId=link-9" {
+		t.Fatalf("room+link=%q", room)
+	}
+	roomOnly := diligenceRemediationPath("acme", "room-1", "")
+	if roomOnly != "/acme/deal-rooms/room-1?tab=access" {
+		t.Fatalf("room-only=%q", roomOnly)
+	}
+	doc := diligenceRemediationPath("acme", "", "link-doc")
+	if doc != "/acme/documents?tab=shared&linkId=link-doc" {
+		t.Fatalf("document link=%q", doc)
+	}
+	if diligenceRemediationPath("acme", "", "") != "" {
+		t.Fatal("empty ids must not invent a path")
+	}
+}

@@ -50,6 +50,25 @@ func navigatePath(workspaceSlug string, sourceType, sourceID, targetID string, f
 	}
 }
 
+// diligenceRemediationPath is the allowlist / access-request inbox for a
+// Diligence gate item that has no operational sourceType (blocked_attempt).
+// Document library and deal room must not cross.
+func diligenceRemediationPath(workspaceSlug, dealRoomID, linkID string) string {
+	slug := strings.TrimSpace(workspaceSlug)
+	roomID := strings.TrimSpace(dealRoomID)
+	link := strings.TrimSpace(linkID)
+	if slug == "" {
+		return ""
+	}
+	if roomID != "" {
+		return dealRoomAccessPath(slug, roomID, link)
+	}
+	if link != "" {
+		return documentsSharePath(slug, link)
+	}
+	return ""
+}
+
 func evidencePath(workspaceSlug, documentID, linkID, contactID, page string) string {
 	slug := strings.TrimSpace(workspaceSlug)
 	if slug == "" {

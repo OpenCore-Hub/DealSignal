@@ -12,6 +12,8 @@ import {
   gateTimelineI18nKey,
   gateTimelineSummary,
   isRadarGateHoldItem,
+  radarEvidenceOpenLabelKey,
+  radarEvidenceOpenPath,
   topPagesSpanMultipleDocuments,
   type CoalescedSecurityEvent,
   type GateTimelineSummary,
@@ -79,6 +81,17 @@ export function RadarEvidenceRail({
   const cardActor = item.actor?.trim().toLowerCase() ?? "";
   const labelTopPagesWithDocument = topPagesSpanMultipleDocuments(data?.topPages ?? []);
   const keyPageTitles = displayablePageTitles(data?.keyPageTitles);
+  const openHref = data
+    ? radarEvidenceOpenPath({
+        product: item.product,
+        workspaceSlug,
+        dealRoomId: item.dealRoomId,
+        linkId: data.linkId || item.linkId,
+        navigatePath: data.navigatePath || item.navigatePath,
+        insightsPath: data.insightsPath,
+        evidencePath: data.evidencePath || item.evidencePath,
+      })
+    : null;
 
   return (
     <section
@@ -272,23 +285,16 @@ export function RadarEvidenceRail({
             <RecentVisitorsBlock visitors={data.recentVisitors} t={t} />
           ) : null}
 
-          {(data.insightsPath || data.evidencePath || data.navigatePath) && (
+          {openHref ? (
             <Link
-              to={
-                data.navigatePath ||
-                data.insightsPath ||
-                data.evidencePath ||
-                `/${workspaceSlug}/insights/overview`
-              }
+              to={openHref}
               className="inline-flex items-center gap-1 text-sm font-medium text-foreground hover:underline"
               data-testid="radar-evidence-open"
             >
-              {isDiligenceGate && accessRequest
-                ? t("radar.evidenceRail.openShareInbox")
-                : t("radar.evidenceRail.openFull")}
+              {t(radarEvidenceOpenLabelKey(item.product))}
               <ArrowRight size={14} />
             </Link>
-          )}
+          ) : null}
         </div>
       ) : null}
     </section>

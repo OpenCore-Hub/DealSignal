@@ -563,6 +563,87 @@ describe("RadarEvidenceRail", () => {
       "href",
       "/acme/documents/doc-pdf?tab=content&page=8",
     );
+    expect(screen.queryByTestId("radar-evidence-open")).not.toBeInTheDocument();
+  });
+
+  it("opens share-level evidence for a multi-document leak_watch, not one PDF", async () => {
+    mockFns.getRadarEvidence.mockResolvedValue({
+      itemId: "act-bundle-open",
+      product: "leak_watch",
+      headline: "Forward risk",
+      whyNowCode: "leak_watch",
+      navigatePath: "/acme/documents/doc-xlsx?tab=analytics",
+      evidencePath: "/acme/documents/doc-xlsx?tab=content&page=8",
+      insightsPath: "/acme/links/link-room",
+      topPages: [
+        {
+          documentId: "doc-xlsx",
+          documentTitle: "Financials.xlsx",
+          pageNumber: 8,
+          views: 4,
+          avgDurationSeconds: 20,
+        },
+        {
+          documentId: "doc-pdf",
+          documentTitle: "Deck.pdf",
+          pageNumber: 8,
+          views: 9,
+          avgDurationSeconds: 30,
+        },
+      ],
+    } satisfies RadarEvidencePack);
+
+    await renderRail(makeItem({ id: "act-bundle-open" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("radar-evidence-open")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("radar-evidence-open")).toHaveAttribute(
+      "href",
+      "/acme/links/link-room",
+    );
+    expect(screen.getByTestId("radar-evidence-open")).toHaveTextContent("Open full evidence");
+    expect(screen.getByRole("link", { name: "Deck.pdf · p.8" })).toHaveAttribute(
+      "href",
+      "/acme/documents/doc-pdf?tab=content&page=8",
+    );
+  });
+
+  it("sends a deal-room allowlist hold to Access, not a document", async () => {
+    mockFns.getRadarEvidence.mockResolvedValue({
+      itemId: "act-gate-room",
+      product: "diligence_gate",
+      headline: "Review allow list",
+      whyNowCode: "diligence_gate",
+      navigatePath: "/acme/documents/doc-1?tab=analytics",
+      insightsPath: "/acme/links/link-room",
+      linkId: "link-room",
+      securityEvents: [
+        {
+          eventType: "not_in_allow_list",
+          createdAt: "2026-08-11T17:00:00Z",
+        },
+      ],
+    } satisfies RadarEvidencePack);
+
+    await renderRail(
+      makeItem({
+        id: "act-gate-room",
+        product: "diligence_gate",
+        verb: "review",
+        dealRoomId: "room-1",
+        linkId: "link-room",
+      }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("radar-evidence-open")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("radar-evidence-open")).toHaveAttribute(
+      "href",
+      "/acme/deal-rooms/room-1?tab=access&linkId=link-room",
+    );
+    expect(screen.getByTestId("radar-evidence-open")).toHaveTextContent("Review in Share");
   });
 
   it("keeps solo-share top page labels as Page N when a document id is present", async () => {

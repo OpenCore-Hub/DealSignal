@@ -464,6 +464,53 @@ func TestCompileBlockedAttemptKeepsReviewVerbInFundraisingPack(t *testing.T) {
 	if got.HeadlineCode != "unlock_investor_gate" {
 		t.Fatalf("headlineCode=%s want unlock_investor_gate", got.HeadlineCode)
 	}
+	wantNav := "/acme/deal-rooms/" + roomID + "?tab=access&linkId=" + linkID.String()
+	if got.NavigatePath != wantNav {
+		t.Fatalf("navigatePath=%s want %s", got.NavigatePath, wantNav)
+	}
+}
+
+func TestCompileBlockedAttemptDocumentLinkNavigatesToShare(t *testing.T) {
+	now := time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC)
+	sigID := uuid.New()
+	linkID := uuid.New()
+	docID := uuid.New()
+	feed := Compile(CompileInput{
+		WorkspaceSlug: "acme",
+		Now:           now,
+		Links: map[string]LinkMeta{
+			linkID.String(): {ID: linkID.String(), Name: "Deck", DocumentID: docID.String()},
+		},
+		Signals: []db.Signal{{
+			ID:         mustUUID(sigID),
+			Type:       "risk_alert",
+			Subtype:    pgText(suggestions.SubtypeBlockedAttempt),
+			Title:      "Blocked",
+			Priority:   "medium",
+			LinkID:     mustUUID(linkID),
+			DocumentID: mustUUID(docID),
+			CreatedAt:  pgTime(now.Add(-10 * time.Minute)),
+		}},
+		Actions: []db.ActionItem{{
+			ID:         mustUUID(uuid.New()),
+			SignalID:   mustUUID(sigID),
+			Title:      "Review block",
+			Impact:     "medium",
+			Status:     "pending",
+			ActionType: "review",
+			CreatedAt:  pgTime(now.Add(-10 * time.Minute)),
+			DueAt:      pgTime(now.Add(time.Hour)),
+			UpdatedAt:  pgTime(now),
+		}},
+	})
+	if len(feed.Items) != 1 {
+		t.Fatalf("items=%d", len(feed.Items))
+	}
+	got := feed.Items[0]
+	wantNav := "/acme/documents?tab=shared&linkId=" + linkID.String()
+	if got.NavigatePath != wantNav {
+		t.Fatalf("navigatePath=%s want %s (must not pick the document analytics tab)", got.NavigatePath, wantNav)
+	}
 }
 
 func TestCompileGateHoldActorPrefersVisitorEmailOverShareContact(t *testing.T) {
