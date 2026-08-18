@@ -169,6 +169,8 @@ export interface PublicAskTurn {
   pinned_faq_at?: string;
   pinned_faq_by?: string;
   pinned_faq_sort?: number;
+  faq_source_turn_id?: string;
+  aliases?: string[];
   formal_status?: "pending_review" | "scheduled" | "published";
   formal_publish_at?: string;
   formal_published_at?: string;
@@ -201,6 +203,7 @@ export interface PublicAskFAQ {
   link_id?: string;
   link_name?: string;
   pinned_faq_sort?: number;
+  aliases?: string[];
   ai_payload?: PublicAskTurn["ai_payload"];
   pinned_at: string;
 }

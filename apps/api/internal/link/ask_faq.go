@@ -17,15 +17,16 @@ const publicAskFAQLimit = 20
 
 // PublicAskFAQ is the visitor-visible pinned FAQ projection for a link or deal room.
 type PublicAskFAQ struct {
-	ID        string        `json:"id"`
-	Question  string        `json:"question"`
-	Answer    string        `json:"answer"`
-	Source    string        `json:"source"`
-	LinkID    string        `json:"link_id,omitempty"`
+	ID            string        `json:"id"`
+	Question      string        `json:"question"`
+	Answer        string        `json:"answer"`
+	Source        string        `json:"source"`
+	LinkID        string        `json:"link_id,omitempty"`
 	LinkName      string        `json:"link_name,omitempty"`
 	PinnedFAQSort *int          `json:"pinned_faq_sort,omitempty"`
+	Aliases       []string      `json:"aliases,omitempty"`
 	AIPayload     *AskAIPayload `json:"ai_payload,omitempty"`
-	PinnedAt  time.Time     `json:"pinned_at"`
+	PinnedAt      time.Time     `json:"pinned_at"`
 }
 
 func mapPublicAskFAQ(t db.LinkAskTurn) (PublicAskFAQ, bool) {
@@ -59,12 +60,26 @@ func mapPublicAskFAQWithMeta(t db.LinkAskTurn, linkID pgtype.UUID, linkName stri
 		sort := int(t.PinnedFaqSort.Int32)
 		out.PinnedFAQSort = &sort
 	}
-	if len(t.AiPayload) > 0 {
+	if aliases := pinnedFAQAliases(t); len(aliases) > 0 {
+		out.Aliases = aliases
+	}
+	if len(t.AiPayload) > 0 && !askAIPayloadIsRefused(t.AiPayload) {
 		if payload, err := parseAskAIPayload(t.AiPayload); err == nil && strings.TrimSpace(payload.Answer) != "" {
 			out.AIPayload = &payload
 		}
 	}
 	return out, true
+}
+
+func askAIPayloadIsRefused(raw []byte) bool {
+	if len(raw) == 0 {
+		return false
+	}
+	payload, err := parseAskAIPayload(raw)
+	if err != nil {
+		return false
+	}
+	return payload.Refused || strings.EqualFold(payload.ResultStatus, "refused")
 }
 
 func pinnedFAQAnswer(t db.LinkAskTurn) string {
@@ -73,7 +88,7 @@ func pinnedFAQAnswer(t db.LinkAskTurn) string {
 			return trimmed
 		}
 	}
-	if len(t.AiPayload) == 0 {
+	if len(t.AiPayload) == 0 || askAIPayloadIsRefused(t.AiPayload) {
 		return ""
 	}
 	payload, err := parseAskAIPayload(t.AiPayload)
@@ -137,24 +152,26 @@ func pgTextString(v pgtype.Text) string {
 
 func mapPublicAskFAQFromRoomPublicRow(row db.ListRoomPublicAskFAQsRow) (PublicAskFAQ, bool) {
 	return mapPublicAskFAQWithMeta(db.LinkAskTurn{
-		ID:             row.ID,
-		SessionID:      row.SessionID,
-		TenantID:       row.TenantID,
-		WorkspaceID:    row.WorkspaceID,
-		LinkID:         row.LinkID,
-		VisitorID:      row.VisitorID,
-		Question:       row.Question,
-		Lane:           row.Lane,
-		Status:         row.Status,
-		AiPayload:      row.AiPayload,
-		HostAnswer:     row.HostAnswer,
-		AnsweredBy:     row.AnsweredBy,
-		RouteReason:    row.RouteReason,
-		PinnedFaqAt:    row.PinnedFaqAt,
-		PinnedFaqBy:    row.PinnedFaqBy,
-		PinnedFaqSort:  row.PinnedFaqSort,
-		CreatedAt:      row.CreatedAt,
-		UpdatedAt:      row.UpdatedAt,
+		ID:               row.ID,
+		SessionID:        row.SessionID,
+		TenantID:         row.TenantID,
+		WorkspaceID:      row.WorkspaceID,
+		LinkID:           row.LinkID,
+		VisitorID:        row.VisitorID,
+		Question:         row.Question,
+		Lane:             row.Lane,
+		Status:           row.Status,
+		AiPayload:        row.AiPayload,
+		HostAnswer:       row.HostAnswer,
+		AnsweredBy:       row.AnsweredBy,
+		RouteReason:      row.RouteReason,
+		PinnedFaqAt:      row.PinnedFaqAt,
+		PinnedFaqBy:      row.PinnedFaqBy,
+		PinnedFaqSort:    row.PinnedFaqSort,
+		FaqSourceTurnID:  row.FaqSourceTurnID,
+		PinnedFaqAliases: row.PinnedFaqAliases,
+		CreatedAt:        row.CreatedAt,
+		UpdatedAt:        row.UpdatedAt,
 	}, row.LinkID, pgTextString(row.LinkName))
 }
 

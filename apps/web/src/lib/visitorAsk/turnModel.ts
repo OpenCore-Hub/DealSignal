@@ -19,7 +19,12 @@ export function isAwaitingHostReply(turn: PublicAskTurn): boolean {
   );
 }
 
+export function isPinnedFAQReplayTurn(turn: PublicAskTurn): boolean {
+  return turn.route_reason === "pinned_faq";
+}
+
 export function turnNeedsAIStream(turn: PublicAskTurn): boolean {
+  if (isPinnedFAQReplayTurn(turn)) return false;
   return turn.lane === "ai" && (turn.status === "ai_streaming" || turn.status === "routing");
 }
 

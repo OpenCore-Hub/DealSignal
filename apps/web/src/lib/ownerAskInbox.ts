@@ -60,6 +60,9 @@ export function matchesOwnerAskInboxFilter(
   if (s === "formal_queue") {
     return ownerAskTurnIsFormalQueueActive(turn);
   }
+  if (turn.route_reason === "pinned_faq" && (l || s)) {
+    return false;
+  }
   if (s === "host_pending" && l === "host") {
     if (ownerAskTurnIsFormalQueue(turn)) return false;
     return isOwnerAskNeedsHostStatus(turn.status) && (turn.lane === "host" || turn.lane === "hybrid");
@@ -112,9 +115,16 @@ export function ownerAskTurnIsFormalQueueActive(turn: OwnerAskTurn): boolean {
 
 export function ownerAskTurnCanPinFAQ(turn: OwnerAskTurn): boolean {
   if (turn.pinned_faq_at) return false;
-  if (turn.status === "ai_answered" && turn.ai_payload?.answer?.trim()) return true;
+  const hostAnswer = turn.host_answer?.trim();
+  const aiAnswer = turn.ai_payload?.answer?.trim();
+  const refused =
+    Boolean(turn.ai_payload?.refused) || turn.ai_payload?.resultStatus === "refused";
+  if (turn.status === "ai_answered") {
+    return Boolean(aiAnswer) && !refused;
+  }
   if (turn.status === "host_answered") {
-    return Boolean(turn.host_answer?.trim() || turn.ai_payload?.answer?.trim());
+    if (hostAnswer) return true;
+    return Boolean(aiAnswer) && !refused;
   }
   return false;
 }

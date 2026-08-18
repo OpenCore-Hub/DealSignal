@@ -109,14 +109,20 @@ func TestAskTurnPinFAQEligible(t *testing.T) {
 		{name: "ai answered with payload", status: askStatusAIAnswered, ai: aiPayload, want: true},
 		{name: "host answered with text", status: askStatusHostAnswered, answer: "host reply", want: true},
 		{name: "host pending", status: askStatusHostPending, want: false},
-		{name: "ai refused", status: askStatusAIRefused, ai: aiPayload, want: false},
+		{name: "ai refused status", status: askStatusAIRefused, ai: aiPayload, want: false},
+		{
+			name:   "ai answered refuse payload",
+			status: askStatusAIAnswered,
+			ai:     []byte(`{"answer":"no","refused":true,"resultStatus":"refused","hits":[]}`),
+			want:   false,
+		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			turn := db.LinkAskTurn{
-				ID:     pgtype.UUID{Bytes: uuid.New(), Valid: true},
-				Status: tc.status,
+				ID:        pgtype.UUID{Bytes: uuid.New(), Valid: true},
+				Status:    tc.status,
 				AiPayload: tc.ai,
 			}
 			if tc.answer != "" {

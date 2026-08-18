@@ -1262,6 +1262,7 @@ SELECT COUNT(*)::int AS count
 FROM link_ask_turns
 WHERE link_id = $1
   AND lane = 'ai'
+  AND COALESCE(route_reason, '') <> 'pinned_faq'
   AND created_at >= date_trunc('month', now() AT TIME ZONE 'UTC')
 `
 
@@ -2217,6 +2218,7 @@ SELECT COUNT(*)::int AS count
 FROM link_ask_turns
 WHERE workspace_id = $1
   AND lane = 'ai'
+  AND COALESCE(route_reason, '') <> 'pinned_faq'
   AND created_at >= date_trunc('month', now() AT TIME ZONE 'UTC')
 `
 
@@ -2828,6 +2830,85 @@ func (q *Queries) CreateEmailLog(ctx context.Context, arg CreateEmailLogParams) 
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.WorkspaceID,
+	)
+	return i, err
+}
+
+const createFaqReplayAskTurn = `-- name: CreateFaqReplayAskTurn :one
+INSERT INTO link_ask_turns (
+    session_id,
+    tenant_id,
+    workspace_id,
+    link_id,
+    visitor_id,
+    question,
+    lane,
+    status,
+    route_reason,
+    host_answer,
+    ai_payload,
+    faq_source_turn_id,
+    formal_anonymize
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, true)
+RETURNING id, session_id, tenant_id, workspace_id, link_id, visitor_id, question, lane, status, ai_payload, host_answer, answered_by, route_reason, created_at, updated_at, pinned_faq_at, pinned_faq_by, pinned_faq_sort, formal_status, formal_publish_at, formal_published_at, formal_anonymize, faq_source_turn_id, pinned_faq_aliases
+`
+
+type CreateFaqReplayAskTurnParams struct {
+	SessionID       pgtype.UUID
+	TenantID        pgtype.UUID
+	WorkspaceID     pgtype.UUID
+	LinkID          pgtype.UUID
+	VisitorID       string
+	Question        string
+	Lane            string
+	Status          string
+	RouteReason     pgtype.Text
+	HostAnswer      pgtype.Text
+	AiPayload       []byte
+	FaqSourceTurnID pgtype.UUID
+}
+
+func (q *Queries) CreateFaqReplayAskTurn(ctx context.Context, arg CreateFaqReplayAskTurnParams) (LinkAskTurn, error) {
+	row := q.db.QueryRow(ctx, createFaqReplayAskTurn,
+		arg.SessionID,
+		arg.TenantID,
+		arg.WorkspaceID,
+		arg.LinkID,
+		arg.VisitorID,
+		arg.Question,
+		arg.Lane,
+		arg.Status,
+		arg.RouteReason,
+		arg.HostAnswer,
+		arg.AiPayload,
+		arg.FaqSourceTurnID,
+	)
+	var i LinkAskTurn
+	err := row.Scan(
+		&i.ID,
+		&i.SessionID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.LinkID,
+		&i.VisitorID,
+		&i.Question,
+		&i.Lane,
+		&i.Status,
+		&i.AiPayload,
+		&i.HostAnswer,
+		&i.AnsweredBy,
+		&i.RouteReason,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PinnedFaqAt,
+		&i.PinnedFaqBy,
+		&i.PinnedFaqSort,
+		&i.FormalStatus,
+		&i.FormalPublishAt,
+		&i.FormalPublishedAt,
+		&i.FormalAnonymize,
+		&i.FaqSourceTurnID,
+		&i.PinnedFaqAliases,
 	)
 	return i, err
 }
@@ -3513,7 +3594,7 @@ INSERT INTO link_ask_turns (
     formal_status,
     formal_anonymize
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-RETURNING id, session_id, tenant_id, workspace_id, link_id, visitor_id, question, lane, status, ai_payload, host_answer, answered_by, route_reason, created_at, updated_at, pinned_faq_at, pinned_faq_by, pinned_faq_sort, formal_status, formal_publish_at, formal_published_at, formal_anonymize
+RETURNING id, session_id, tenant_id, workspace_id, link_id, visitor_id, question, lane, status, ai_payload, host_answer, answered_by, route_reason, created_at, updated_at, pinned_faq_at, pinned_faq_by, pinned_faq_sort, formal_status, formal_publish_at, formal_published_at, formal_anonymize, faq_source_turn_id, pinned_faq_aliases
 `
 
 type CreateLinkAskTurnParams struct {
@@ -3568,6 +3649,8 @@ func (q *Queries) CreateLinkAskTurn(ctx context.Context, arg CreateLinkAskTurnPa
 		&i.FormalPublishAt,
 		&i.FormalPublishedAt,
 		&i.FormalAnonymize,
+		&i.FaqSourceTurnID,
+		&i.PinnedFaqAliases,
 	)
 	return i, err
 }
@@ -9140,7 +9223,7 @@ func (q *Queries) GetLinkAskSessionByLinkVisitor(ctx context.Context, arg GetLin
 }
 
 const getLinkAskTurnByID = `-- name: GetLinkAskTurnByID :one
-SELECT id, session_id, tenant_id, workspace_id, link_id, visitor_id, question, lane, status, ai_payload, host_answer, answered_by, route_reason, created_at, updated_at, pinned_faq_at, pinned_faq_by, pinned_faq_sort, formal_status, formal_publish_at, formal_published_at, formal_anonymize
+SELECT id, session_id, tenant_id, workspace_id, link_id, visitor_id, question, lane, status, ai_payload, host_answer, answered_by, route_reason, created_at, updated_at, pinned_faq_at, pinned_faq_by, pinned_faq_sort, formal_status, formal_publish_at, formal_published_at, formal_anonymize, faq_source_turn_id, pinned_faq_aliases
 FROM link_ask_turns
 WHERE id = $1
   AND workspace_id = $2
@@ -9180,12 +9263,14 @@ func (q *Queries) GetLinkAskTurnByID(ctx context.Context, arg GetLinkAskTurnByID
 		&i.FormalPublishAt,
 		&i.FormalPublishedAt,
 		&i.FormalAnonymize,
+		&i.FaqSourceTurnID,
+		&i.PinnedFaqAliases,
 	)
 	return i, err
 }
 
 const getLinkAskTurnByVisitor = `-- name: GetLinkAskTurnByVisitor :one
-SELECT id, session_id, tenant_id, workspace_id, link_id, visitor_id, question, lane, status, ai_payload, host_answer, answered_by, route_reason, created_at, updated_at, pinned_faq_at, pinned_faq_by, pinned_faq_sort, formal_status, formal_publish_at, formal_published_at, formal_anonymize
+SELECT id, session_id, tenant_id, workspace_id, link_id, visitor_id, question, lane, status, ai_payload, host_answer, answered_by, route_reason, created_at, updated_at, pinned_faq_at, pinned_faq_by, pinned_faq_sort, formal_status, formal_publish_at, formal_published_at, formal_anonymize, faq_source_turn_id, pinned_faq_aliases
 FROM link_ask_turns
 WHERE id = $1
   AND link_id = $2
@@ -9232,6 +9317,8 @@ func (q *Queries) GetLinkAskTurnByVisitor(ctx context.Context, arg GetLinkAskTur
 		&i.FormalPublishAt,
 		&i.FormalPublishedAt,
 		&i.FormalAnonymize,
+		&i.FaqSourceTurnID,
+		&i.PinnedFaqAliases,
 	)
 	return i, err
 }
@@ -10675,6 +10762,8 @@ SELECT
     t.pinned_faq_at,
     t.pinned_faq_by,
     t.pinned_faq_sort,
+    t.faq_source_turn_id,
+    t.pinned_faq_aliases,
     t.formal_status,
     t.formal_publish_at,
     t.formal_published_at,
@@ -10713,6 +10802,8 @@ type GetOwnerAskTurnByIDRow struct {
 	PinnedFaqAt       pgtype.Timestamptz
 	PinnedFaqBy       pgtype.UUID
 	PinnedFaqSort     pgtype.Int4
+	FaqSourceTurnID   pgtype.UUID
+	PinnedFaqAliases  []string
 	FormalStatus      pgtype.Text
 	FormalPublishAt   pgtype.Timestamptz
 	FormalPublishedAt pgtype.Timestamptz
@@ -10742,6 +10833,8 @@ func (q *Queries) GetOwnerAskTurnByID(ctx context.Context, arg GetOwnerAskTurnBy
 		&i.PinnedFaqAt,
 		&i.PinnedFaqBy,
 		&i.PinnedFaqSort,
+		&i.FaqSourceTurnID,
+		&i.PinnedFaqAliases,
 		&i.FormalStatus,
 		&i.FormalPublishAt,
 		&i.FormalPublishedAt,
@@ -15983,6 +16076,8 @@ SELECT
     t.pinned_faq_at,
     t.pinned_faq_by,
     t.pinned_faq_sort,
+    t.faq_source_turn_id,
+    t.pinned_faq_aliases,
     t.formal_status,
     t.formal_publish_at,
     t.formal_published_at,
@@ -16019,6 +16114,8 @@ type ListLinkAskTurnsByLinkRow struct {
 	PinnedFaqAt       pgtype.Timestamptz
 	PinnedFaqBy       pgtype.UUID
 	PinnedFaqSort     pgtype.Int4
+	FaqSourceTurnID   pgtype.UUID
+	PinnedFaqAliases  []string
 	FormalStatus      pgtype.Text
 	FormalPublishAt   pgtype.Timestamptz
 	FormalPublishedAt pgtype.Timestamptz
@@ -16054,6 +16151,8 @@ func (q *Queries) ListLinkAskTurnsByLink(ctx context.Context, arg ListLinkAskTur
 			&i.PinnedFaqAt,
 			&i.PinnedFaqBy,
 			&i.PinnedFaqSort,
+			&i.FaqSourceTurnID,
+			&i.PinnedFaqAliases,
 			&i.FormalStatus,
 			&i.FormalPublishAt,
 			&i.FormalPublishedAt,
@@ -16073,7 +16172,7 @@ func (q *Queries) ListLinkAskTurnsByLink(ctx context.Context, arg ListLinkAskTur
 }
 
 const listLinkAskTurnsByVisitor = `-- name: ListLinkAskTurnsByVisitor :many
-SELECT id, session_id, tenant_id, workspace_id, link_id, visitor_id, question, lane, status, ai_payload, host_answer, answered_by, route_reason, created_at, updated_at, pinned_faq_at, pinned_faq_by, pinned_faq_sort, formal_status, formal_publish_at, formal_published_at, formal_anonymize
+SELECT id, session_id, tenant_id, workspace_id, link_id, visitor_id, question, lane, status, ai_payload, host_answer, answered_by, route_reason, created_at, updated_at, pinned_faq_at, pinned_faq_by, pinned_faq_sort, formal_status, formal_publish_at, formal_published_at, formal_anonymize, faq_source_turn_id, pinned_faq_aliases
 FROM link_ask_turns
 WHERE link_id = $1 AND visitor_id = $2
 ORDER BY created_at ASC
@@ -16116,6 +16215,8 @@ func (q *Queries) ListLinkAskTurnsByVisitor(ctx context.Context, arg ListLinkAsk
 			&i.FormalPublishAt,
 			&i.FormalPublishedAt,
 			&i.FormalAnonymize,
+			&i.FaqSourceTurnID,
+			&i.PinnedFaqAliases,
 		); err != nil {
 			return nil, err
 		}
@@ -16509,7 +16610,7 @@ func (q *Queries) ListLinkNDAAgreementsByTemplate(ctx context.Context, arg ListL
 }
 
 const listLinkPinnedAskFAQs = `-- name: ListLinkPinnedAskFAQs :many
-SELECT id, session_id, tenant_id, workspace_id, link_id, visitor_id, question, lane, status, ai_payload, host_answer, answered_by, route_reason, created_at, updated_at, pinned_faq_at, pinned_faq_by, pinned_faq_sort, formal_status, formal_publish_at, formal_published_at, formal_anonymize
+SELECT id, session_id, tenant_id, workspace_id, link_id, visitor_id, question, lane, status, ai_payload, host_answer, answered_by, route_reason, created_at, updated_at, pinned_faq_at, pinned_faq_by, pinned_faq_sort, formal_status, formal_publish_at, formal_published_at, formal_anonymize, faq_source_turn_id, pinned_faq_aliases
 FROM link_ask_turns
 WHERE link_id = $1
   AND workspace_id = $2
@@ -16556,6 +16657,8 @@ func (q *Queries) ListLinkPinnedAskFAQs(ctx context.Context, arg ListLinkPinnedA
 			&i.FormalPublishAt,
 			&i.FormalPublishedAt,
 			&i.FormalAnonymize,
+			&i.FaqSourceTurnID,
+			&i.PinnedFaqAliases,
 		); err != nil {
 			return nil, err
 		}
@@ -16585,6 +16688,8 @@ SELECT
     t.pinned_faq_at,
     t.pinned_faq_by,
     t.pinned_faq_sort,
+    t.faq_source_turn_id,
+    t.pinned_faq_aliases,
     t.formal_status,
     t.formal_publish_at,
     t.formal_published_at,
@@ -16624,6 +16729,8 @@ type ListLinkPinnedAskTurnsByLinkRow struct {
 	PinnedFaqAt       pgtype.Timestamptz
 	PinnedFaqBy       pgtype.UUID
 	PinnedFaqSort     pgtype.Int4
+	FaqSourceTurnID   pgtype.UUID
+	PinnedFaqAliases  []string
 	FormalStatus      pgtype.Text
 	FormalPublishAt   pgtype.Timestamptz
 	FormalPublishedAt pgtype.Timestamptz
@@ -16659,6 +16766,8 @@ func (q *Queries) ListLinkPinnedAskTurnsByLink(ctx context.Context, arg ListLink
 			&i.PinnedFaqAt,
 			&i.PinnedFaqBy,
 			&i.PinnedFaqSort,
+			&i.FaqSourceTurnID,
+			&i.PinnedFaqAliases,
 			&i.FormalStatus,
 			&i.FormalPublishAt,
 			&i.FormalPublishedAt,
@@ -16695,6 +16804,8 @@ SELECT
     t.pinned_faq_at,
     t.pinned_faq_by,
     t.pinned_faq_sort,
+    t.faq_source_turn_id,
+    t.pinned_faq_aliases,
     t.formal_status,
     t.formal_publish_at,
     t.formal_published_at,
@@ -16734,6 +16845,8 @@ type ListLinkPublishedFormalAskRow struct {
 	PinnedFaqAt       pgtype.Timestamptz
 	PinnedFaqBy       pgtype.UUID
 	PinnedFaqSort     pgtype.Int4
+	FaqSourceTurnID   pgtype.UUID
+	PinnedFaqAliases  []string
 	FormalStatus      pgtype.Text
 	FormalPublishAt   pgtype.Timestamptz
 	FormalPublishedAt pgtype.Timestamptz
@@ -16769,6 +16882,8 @@ func (q *Queries) ListLinkPublishedFormalAsk(ctx context.Context, arg ListLinkPu
 			&i.PinnedFaqAt,
 			&i.PinnedFaqBy,
 			&i.PinnedFaqSort,
+			&i.FaqSourceTurnID,
+			&i.PinnedFaqAliases,
 			&i.FormalStatus,
 			&i.FormalPublishAt,
 			&i.FormalPublishedAt,
@@ -19204,6 +19319,8 @@ SELECT
     t.pinned_faq_at,
     t.pinned_faq_by,
     t.pinned_faq_sort,
+    t.faq_source_turn_id,
+    t.pinned_faq_aliases,
     t.formal_status,
     t.formal_publish_at,
     t.formal_published_at,
@@ -19242,6 +19359,8 @@ type ListRoomAskTurnsRow struct {
 	PinnedFaqAt       pgtype.Timestamptz
 	PinnedFaqBy       pgtype.UUID
 	PinnedFaqSort     pgtype.Int4
+	FaqSourceTurnID   pgtype.UUID
+	PinnedFaqAliases  []string
 	FormalStatus      pgtype.Text
 	FormalPublishAt   pgtype.Timestamptz
 	FormalPublishedAt pgtype.Timestamptz
@@ -19277,6 +19396,8 @@ func (q *Queries) ListRoomAskTurns(ctx context.Context, arg ListRoomAskTurnsPara
 			&i.PinnedFaqAt,
 			&i.PinnedFaqBy,
 			&i.PinnedFaqSort,
+			&i.FaqSourceTurnID,
+			&i.PinnedFaqAliases,
 			&i.FormalStatus,
 			&i.FormalPublishAt,
 			&i.FormalPublishedAt,
@@ -19535,6 +19656,8 @@ SELECT
     t.pinned_faq_at,
     t.pinned_faq_by,
     t.pinned_faq_sort,
+    t.faq_source_turn_id,
+    t.pinned_faq_aliases,
     t.formal_status,
     t.formal_publish_at,
     t.formal_published_at,
@@ -19574,6 +19697,8 @@ type ListRoomPinnedAskTurnsRow struct {
 	PinnedFaqAt       pgtype.Timestamptz
 	PinnedFaqBy       pgtype.UUID
 	PinnedFaqSort     pgtype.Int4
+	FaqSourceTurnID   pgtype.UUID
+	PinnedFaqAliases  []string
 	FormalStatus      pgtype.Text
 	FormalPublishAt   pgtype.Timestamptz
 	FormalPublishedAt pgtype.Timestamptz
@@ -19609,6 +19734,8 @@ func (q *Queries) ListRoomPinnedAskTurns(ctx context.Context, arg ListRoomPinned
 			&i.PinnedFaqAt,
 			&i.PinnedFaqBy,
 			&i.PinnedFaqSort,
+			&i.FaqSourceTurnID,
+			&i.PinnedFaqAliases,
 			&i.FormalStatus,
 			&i.FormalPublishAt,
 			&i.FormalPublishedAt,
@@ -19645,6 +19772,8 @@ SELECT
     t.pinned_faq_at,
     t.pinned_faq_by,
     t.pinned_faq_sort,
+    t.faq_source_turn_id,
+    t.pinned_faq_aliases,
     t.created_at,
     t.updated_at,
     l.name AS link_name
@@ -19663,25 +19792,27 @@ type ListRoomPublicAskFAQsParams struct {
 }
 
 type ListRoomPublicAskFAQsRow struct {
-	ID            pgtype.UUID
-	SessionID     pgtype.UUID
-	TenantID      pgtype.UUID
-	WorkspaceID   pgtype.UUID
-	LinkID        pgtype.UUID
-	VisitorID     string
-	Question      string
-	Lane          string
-	Status        string
-	AiPayload     []byte
-	HostAnswer    pgtype.Text
-	AnsweredBy    pgtype.UUID
-	RouteReason   pgtype.Text
-	PinnedFaqAt   pgtype.Timestamptz
-	PinnedFaqBy   pgtype.UUID
-	PinnedFaqSort pgtype.Int4
-	CreatedAt     pgtype.Timestamptz
-	UpdatedAt     pgtype.Timestamptz
-	LinkName      pgtype.Text
+	ID               pgtype.UUID
+	SessionID        pgtype.UUID
+	TenantID         pgtype.UUID
+	WorkspaceID      pgtype.UUID
+	LinkID           pgtype.UUID
+	VisitorID        string
+	Question         string
+	Lane             string
+	Status           string
+	AiPayload        []byte
+	HostAnswer       pgtype.Text
+	AnsweredBy       pgtype.UUID
+	RouteReason      pgtype.Text
+	PinnedFaqAt      pgtype.Timestamptz
+	PinnedFaqBy      pgtype.UUID
+	PinnedFaqSort    pgtype.Int4
+	FaqSourceTurnID  pgtype.UUID
+	PinnedFaqAliases []string
+	CreatedAt        pgtype.Timestamptz
+	UpdatedAt        pgtype.Timestamptz
+	LinkName         pgtype.Text
 }
 
 func (q *Queries) ListRoomPublicAskFAQs(ctx context.Context, arg ListRoomPublicAskFAQsParams) ([]ListRoomPublicAskFAQsRow, error) {
@@ -19710,6 +19841,8 @@ func (q *Queries) ListRoomPublicAskFAQs(ctx context.Context, arg ListRoomPublicA
 			&i.PinnedFaqAt,
 			&i.PinnedFaqBy,
 			&i.PinnedFaqSort,
+			&i.FaqSourceTurnID,
+			&i.PinnedFaqAliases,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.LinkName,
@@ -19742,6 +19875,8 @@ SELECT
     t.pinned_faq_at,
     t.pinned_faq_by,
     t.pinned_faq_sort,
+    t.faq_source_turn_id,
+    t.pinned_faq_aliases,
     t.formal_status,
     t.formal_publish_at,
     t.formal_published_at,
@@ -19782,6 +19917,8 @@ type ListRoomPublishedFormalAskRow struct {
 	PinnedFaqAt       pgtype.Timestamptz
 	PinnedFaqBy       pgtype.UUID
 	PinnedFaqSort     pgtype.Int4
+	FaqSourceTurnID   pgtype.UUID
+	PinnedFaqAliases  []string
 	FormalStatus      pgtype.Text
 	FormalPublishAt   pgtype.Timestamptz
 	FormalPublishedAt pgtype.Timestamptz
@@ -19818,6 +19955,8 @@ func (q *Queries) ListRoomPublishedFormalAsk(ctx context.Context, arg ListRoomPu
 			&i.PinnedFaqAt,
 			&i.PinnedFaqBy,
 			&i.PinnedFaqSort,
+			&i.FaqSourceTurnID,
+			&i.PinnedFaqAliases,
 			&i.FormalStatus,
 			&i.FormalPublishAt,
 			&i.FormalPublishedAt,
@@ -22449,6 +22588,36 @@ func (q *Queries) SetLinkAskSessionVisitorEmailIfEmpty(ctx context.Context, arg 
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const setLinkAskTurnFAQAliases = `-- name: SetLinkAskTurnFAQAliases :execrows
+UPDATE link_ask_turns
+SET pinned_faq_aliases = $1,
+    updated_at = now()
+WHERE id = $2
+  AND workspace_id = $3
+  AND link_id = $4
+  AND pinned_faq_at IS NOT NULL
+`
+
+type SetLinkAskTurnFAQAliasesParams struct {
+	PinnedFaqAliases []string
+	ID               pgtype.UUID
+	WorkspaceID      pgtype.UUID
+	LinkID           pgtype.UUID
+}
+
+func (q *Queries) SetLinkAskTurnFAQAliases(ctx context.Context, arg SetLinkAskTurnFAQAliasesParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setLinkAskTurnFAQAliases,
+		arg.PinnedFaqAliases,
+		arg.ID,
+		arg.WorkspaceID,
+		arg.LinkID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const setLinkAskTurnFAQSort = `-- name: SetLinkAskTurnFAQSort :exec

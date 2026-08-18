@@ -3,7 +3,6 @@ package link
 import (
 	"context"
 	"errors"
-	"strings"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/google/uuid"
@@ -12,28 +11,10 @@ import (
 )
 
 func askTurnPinFAQEligible(t db.LinkAskTurn) bool {
-	switch t.Status {
-	case askStatusAIAnswered:
-		if len(t.AiPayload) == 0 {
-			return false
-		}
-		payload, err := parseAskAIPayload(t.AiPayload)
-		return err == nil && strings.TrimSpace(payload.Answer) != ""
-	case askStatusHostAnswered:
-		if t.HostAnswer.Valid && strings.TrimSpace(t.HostAnswer.String) != "" {
-			return true
-		}
-		if len(t.AiPayload) == 0 {
-			return false
-		}
-		payload, err := parseAskAIPayload(t.AiPayload)
-		return err == nil && strings.TrimSpace(payload.Answer) != ""
-	default:
-		return false
-	}
+	return pinnedFAQAnswer(t) != "" && (t.Status == askStatusAIAnswered || t.Status == askStatusHostAnswered)
 }
 
-// PinAskTurnFAQ marks an answered Ask turn as a pinned FAQ candidate (Phase B).
+// PinAskTurnFAQ marks an answered Ask turn as a pinned FAQ (Help Center + intercept).
 func (s *Service) PinAskTurnFAQ(
 	ctx context.Context,
 	link db.Link,
@@ -69,6 +50,9 @@ func (s *Service) PinAskTurnFAQ(
 
 	if !askTurnPinFAQEligible(turn) {
 		return OwnerAskTurn{}, ErrAskTurnNotPinnable
+	}
+	if err := s.pinnedFAQKeysConflict(ctx, link, turn); err != nil {
+		return OwnerAskTurn{}, err
 	}
 
 	maxSort, err := s.queries.MaxLinkPinnedFAQSort(ctx, db.MaxLinkPinnedFAQSortParams{

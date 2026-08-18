@@ -143,6 +143,17 @@ describe("matchesOwnerAskInboxFilter", () => {
     } as OwnerAskTurn;
     expect(matchesOwnerAskInboxFilter(turn, "ai", "ai_answered")).toBe(false);
   });
+
+  it("excludes FAQ replay from needs_host and ai_handled", () => {
+    const turn = {
+      lane: "ai",
+      status: "ai_answered",
+      route_reason: "pinned_faq",
+    } as OwnerAskTurn;
+    expect(matchesOwnerAskInboxFilter(turn, "ai", "ai_answered")).toBe(false);
+    expect(matchesOwnerAskInboxFilter(turn, "host", "host_pending")).toBe(false);
+    expect(matchesOwnerAskInboxFilter(turn, "", "")).toBe(true);
+  });
 });
 
 describe("ownerAskTurnNeedsHostReply", () => {
@@ -179,6 +190,23 @@ describe("ownerAskTurnCanPinFAQ", () => {
       ai_payload: { answer: "yes", refused: false, resultStatus: "answered" },
     } as OwnerAskTurn;
     expect(ownerAskTurnCanPinFAQ(turn)).toBe(false);
+  });
+
+  it("rejects refused AI answers even when answer text is present", () => {
+    const turn = {
+      status: "ai_answered",
+      ai_payload: { answer: "cannot share", refused: true, resultStatus: "refused" },
+    } as OwnerAskTurn;
+    expect(ownerAskTurnCanPinFAQ(turn)).toBe(false);
+  });
+
+  it("allows host-answered hybrid turns whose AI payload was refused", () => {
+    const turn = {
+      status: "host_answered",
+      host_answer: "暂不公开",
+      ai_payload: { answer: "", refused: true, resultStatus: "refused" },
+    } as OwnerAskTurn;
+    expect(ownerAskTurnCanPinFAQ(turn)).toBe(true);
   });
 });
 

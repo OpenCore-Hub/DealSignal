@@ -543,7 +543,9 @@ type LinkAskTurn struct {
 	// When the formal answer was published to visitors
 	FormalPublishedAt pgtype.Timestamptz
 	// Whether visitor identity is hidden on the public formal board
-	FormalAnonymize bool
+	FormalAnonymize  bool
+	FaqSourceTurnID  pgtype.UUID
+	PinnedFaqAliases []string
 }
 
 type LinkContact struct {

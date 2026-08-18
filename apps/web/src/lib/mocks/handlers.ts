@@ -27,7 +27,7 @@ let mockKeyPageSettings = {
 function keyPageLangFromRequest(request: Request) {
   return keywordLangFromI18n(request.headers.get("Accept-Language") ?? undefined);
 }
-import { attachOwnerAskRepeatCounts, matchesOwnerAskInboxFilter, ownerAskTurnCanPinFAQ } from "@/lib/ownerAskInbox";
+import { attachOwnerAskRepeatCounts, matchesOwnerAskInboxFilter, normalizeAskQuestionKey, ownerAskTurnCanPinFAQ } from "@/lib/ownerAskInbox";
 import {
   mockAccessLogs,
   mockActionItems,
@@ -399,7 +399,15 @@ const mockOwnerFormalTurns = new Map<string, OwnerAskTurn[]>();
 /** Per-link pinned FAQ overrides for owner inbox (Phase B). */
 const mockOwnerAskPinOverrides = new Map<
   string,
-  Map<string, { pinned_faq_at: string; pinned_faq_by: string; pinned_faq_sort?: number }>
+  Map<
+    string,
+    {
+      pinned_faq_at?: string;
+      pinned_faq_by?: string;
+      pinned_faq_sort?: number;
+      aliases?: string[];
+    }
+  >
 >();
 /** Per-link formal Q&A overrides for owner inbox (Phase C). */
 const mockOwnerAskFormalOverrides = new Map<string, Map<string, Partial<OwnerAskTurn>>>();
@@ -1491,15 +1499,20 @@ function mockPublicAskFAQsForToken(token: string) {
     const sourceLink = mockLinks.find((l) => l.id === linkId);
     for (const turn of mockOwnerAskTurnsForLink(linkId).filter((t) => t.pinned_faq_at)) {
       if (seen.has(turn.id)) continue;
-      const answer = (turn.host_answer ?? turn.ai_payload?.answer ?? "").trim();
+      const refused =
+        Boolean(turn.ai_payload?.refused) || turn.ai_payload?.resultStatus === "refused";
+      const hostAnswer = (turn.host_answer ?? "").trim();
+      const aiAnswer = refused ? "" : (turn.ai_payload?.answer ?? "").trim();
+      const answer = hostAnswer || aiAnswer;
       if (!answer) continue;
       rows.push({
         id: turn.id,
         question: turn.question,
         answer,
         source: turn.lane,
-        ai_payload: turn.ai_payload,
+        ai_payload: refused ? undefined : turn.ai_payload,
         pinned_at: turn.pinned_faq_at!,
+        aliases: turn.aliases,
         link_id: linkId,
         link_name: sourceLink?.name ?? sourceLink?.documentTitle,
       });
@@ -3924,6 +3937,37 @@ export const handlers = [
     },
   ),
 
+  http.patch(
+    "*/api/workspaces/:workspaceSlug/links/:id/ask/:turnId/faq-aliases",
+    async ({ params, request }) => {
+      await hydrateVisitorAskState();
+      const linkId = params.id as string;
+      const turnId = params.turnId as string;
+      const link = mockLinks.find((l) => l.id === linkId);
+      if (!link) return new HttpResponse(null, { status: 404 });
+      const body = (await request.json().catch(() => ({}))) as { aliases?: string[] };
+      const turns = mockOwnerAskTurnsForLink(linkId);
+      const turn = turns.find((t) => t.id === turnId);
+      if (!turn?.pinned_faq_at) {
+        return HttpResponse.json(
+          { code: "ask_turn_not_pinned", message: "ask turn is not pinned as faq" },
+          { status: 409 },
+        );
+      }
+      const aliases = (body.aliases ?? []).map((item) => item.trim()).filter(Boolean).slice(0, 10);
+      const perLink = mockOwnerAskPinOverrides.get(linkId) ?? new Map();
+      perLink.set(turnId, { ...(perLink.get(turnId) ?? {}), aliases });
+      mockOwnerAskPinOverrides.set(linkId, perLink);
+      return HttpResponse.json({
+        data: {
+          ...turn,
+          aliases,
+          updated_at: new Date().toISOString(),
+        },
+      });
+    },
+  ),
+
   http.get("*/api/workspaces/:workspaceSlug/links/:id/ask/faq", async ({ params }) => {
     await hydrateVisitorAskState();
     const linkId = params.id as string;
@@ -6322,16 +6366,47 @@ export const handlers = [
     const forceHost = lower.includes("__host__");
     const askMode = resolveLinkAskMode(link);
     const isFormal = askMode === "formal" && !forceAI && !body.escalate;
-    const aiEnabled = resolveLinkAskAiEnabled(link);
-    const isAIAsk =
-      forceAI || (!forceHost && aiEnabled && !isFormal && !body.escalate);
-    const isSlowStream = lower.includes("__slow__");
     const cleanedQuestion =
       question
         .replace(/__ai__/gi, "")
         .replace(/__host__/gi, "")
         .replace(/__slow__/gi, "")
         .trim() || question;
+    if (!forceAI && !forceHost && !body.escalate && !isFormal) {
+      const key = normalizeAskQuestionKey(cleanedQuestion);
+      const hit = mockPublicAskFAQsForToken(token).find((faq) => {
+        if (normalizeAskQuestionKey(faq.question) === key) return true;
+        return (faq.aliases ?? []).some((alias) => normalizeAskQuestionKey(alias) === key);
+      });
+      if (hit) {
+        const refused = Boolean(hit.ai_payload?.refused) || hit.ai_payload?.resultStatus === "refused";
+        if (!(refused && hit.source === "ai")) {
+          const hostReplay = Boolean(hit.source !== "ai" || !hit.ai_payload?.answer);
+          const replay: PublicAskTurn = {
+            id: generateId("turn"),
+            session_id: sessionId,
+            question: cleanedQuestion,
+            lane: hostReplay ? "host" : "ai",
+            status: hostReplay ? "host_answered" : "ai_answered",
+            route_reason: "pinned_faq",
+            host_answer: hostReplay ? hit.answer : undefined,
+            ai_payload: hostReplay || refused ? undefined : hit.ai_payload,
+            faq_source_turn_id: hit.id,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          };
+          const replayList = mockPublicAskTurns.get(token) ?? [];
+          replayList.push(replay);
+          mockPublicAskTurns.set(token, replayList);
+          await persistVisitorAskState();
+          return HttpResponse.json({ data: replay }, { status: 201 });
+        }
+      }
+    }
+    const aiEnabled = resolveLinkAskAiEnabled(link);
+    const isAIAsk =
+      forceAI || (!forceHost && aiEnabled && !isFormal && !body.escalate);
+    const isSlowStream = lower.includes("__slow__");
     const turn: PublicAskTurn = isAIAsk
       ? {
           id: generateId("turn"),

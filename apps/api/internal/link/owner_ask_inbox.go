@@ -55,6 +55,8 @@ func mapOwnerAskTurnFromRow(row db.ListLinkAskTurnsByLinkRow) OwnerAskTurn {
 		PinnedFaqAt:       row.PinnedFaqAt,
 		PinnedFaqBy:       row.PinnedFaqBy,
 		PinnedFaqSort:     row.PinnedFaqSort,
+		FaqSourceTurnID:   row.FaqSourceTurnID,
+		PinnedFaqAliases:  row.PinnedFaqAliases,
 		FormalStatus:      row.FormalStatus,
 		FormalPublishAt:   row.FormalPublishAt,
 		FormalPublishedAt: row.FormalPublishedAt,
@@ -86,6 +88,8 @@ func mapOwnerAskTurnFromRoomRow(row db.ListRoomAskTurnsRow) OwnerAskTurn {
 		PinnedFaqAt:       row.PinnedFaqAt,
 		PinnedFaqBy:       row.PinnedFaqBy,
 		PinnedFaqSort:     row.PinnedFaqSort,
+		FaqSourceTurnID:   row.FaqSourceTurnID,
+		PinnedFaqAliases:  row.PinnedFaqAliases,
 		FormalStatus:      row.FormalStatus,
 		FormalPublishAt:   row.FormalPublishAt,
 		FormalPublishedAt: row.FormalPublishedAt,
@@ -120,6 +124,9 @@ func filterOwnerAskTurns(turns []OwnerAskTurn, lane, status string) []OwnerAskTu
 func matchesOwnerAskInboxFilter(t OwnerAskTurn, lane, status string) bool {
 	if status == ownerAskInboxFormalQueue {
 		return isFormalQueueActive(t)
+	}
+	if t.RouteReason == routeReasonPinnedFAQ && (lane != "" || status != "") {
+		return false
 	}
 	// needs_host tab: host_pending or host_escalated on host or hybrid lanes (exclude formal queue).
 	if status == askStatusHostPending && lane == askLaneHost {

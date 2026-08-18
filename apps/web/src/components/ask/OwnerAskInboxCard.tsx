@@ -1,10 +1,11 @@
-import { ArrowDown, ArrowUp, PushPin, Robot, Scales, User, UsersThree } from "@phosphor-icons/react";
+import { ArrowDown, ArrowUp, PushPin, Robot, Scales, User, UsersThree, X } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { AnswerMarkdown } from "@/components/deal-rooms/knowledge/AnswerMarkdown";
@@ -12,6 +13,7 @@ import { formatHitLocusLabel } from "@/lib/knowledge/citations";
 import { api } from "@/lib/api";
 import { ApiError } from "@/lib/apiClient";
 import {
+  normalizeAskQuestionKey,
   ownerAskTurnCanPinFAQ,
   ownerAskTurnCanUnpinFAQ,
   ownerAskTurnHasAIPreview,
@@ -88,6 +90,9 @@ export function OwnerAskInboxCard({
   const [formalAnonymize, setFormalAnonymize] = useState(true);
   const [pinning, setPinning] = useState(false);
   const [unpinning, setUnpinning] = useState(false);
+  const [aliasDraft, setAliasDraft] = useState("");
+  const [aliases, setAliases] = useState<string[]>(() => turn.aliases ?? []);
+  const [savingAliases, setSavingAliases] = useState(false);
   const [activeCite, setActiveCite] = useState<number | null>(null);
   const prefix = i18nNs === "linkShare" ? "management" : "qa";
   const locusFmt = {
@@ -124,6 +129,10 @@ export function OwnerAskInboxCard({
       setFormalSchedule("");
     }
   }, [showFormalPublish, turn.host_answer, turn.formal_anonymize, turn.formal_publish_at, turn.formal_status]);
+
+  useEffect(() => {
+    setAliases(turn.aliases ?? []);
+  }, [turn.aliases, turn.id]);
 
   const handleFormalPublish = async () => {
     const text = formalAnswer.trim();
@@ -184,8 +193,12 @@ export function OwnerAskInboxCard({
       const res = await api.pinAskTurnFAQ(turn.link_id, turn.id);
       onPinned?.(res.data);
       toast.success(t(`${prefix}.pinFaqSuccess`));
-    } catch {
-      toast.error(t(`${prefix}.pinFaqFailed`));
+    } catch (err) {
+      if (err instanceof ApiError && err.code === "ask_faq_alias_conflict") {
+        toast.error(t(`${prefix}.faqAliasConflict`));
+      } else {
+        toast.error(t(`${prefix}.pinFaqFailed`));
+      }
     } finally {
       setPinning(false);
     }
@@ -201,6 +214,38 @@ export function OwnerAskInboxCard({
       toast.error(t(`${prefix}.unpinFaqFailed`));
     } finally {
       setUnpinning(false);
+    }
+  };
+
+  const handleAddAlias = () => {
+    const next = aliasDraft.trim();
+    if (!next || aliases.length >= 10) return;
+    const nextKey = normalizeAskQuestionKey(next);
+    if (
+      !nextKey ||
+      aliases.some((item) => normalizeAskQuestionKey(item) === nextKey)
+    ) {
+      setAliasDraft("");
+      return;
+    }
+    setAliases((prev) => [...prev, next]);
+    setAliasDraft("");
+  };
+
+  const handleSaveAliases = async () => {
+    try {
+      setSavingAliases(true);
+      const res = await api.patchAskTurnFAQAliases(turn.link_id, turn.id, aliases);
+      onPinned?.(res.data);
+      toast.success(t(`${prefix}.faqAliasSuccess`));
+    } catch (err) {
+      if (err instanceof ApiError && err.code === "ask_faq_alias_conflict") {
+        toast.error(t(`${prefix}.faqAliasConflict`));
+      } else {
+        toast.error(t(`${prefix}.faqAliasFailed`));
+      }
+    } finally {
+      setSavingAliases(false);
     }
   };
 
@@ -257,6 +302,12 @@ export function OwnerAskInboxCard({
               <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-amber-800 dark:text-amber-200">
                 <PushPin size={10} weight="fill" />
                 {t(`${prefix}.pinnedFaqBadge`)}
+              </span>
+            ) : null}
+            {turn.route_reason === "pinned_faq" ? (
+              <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-amber-800 dark:text-amber-200">
+                <PushPin size={10} weight="fill" />
+                {t(`${prefix}.faqHitBadge`)}
               </span>
             ) : null}
             {showFormalPublish ? (
@@ -434,7 +485,8 @@ export function OwnerAskInboxCard({
       ) : null}
 
       {canUnpinFAQ ? (
-        <div className="mt-3 flex flex-wrap items-center gap-2">
+        <div className="mt-3 space-y-3">
+        <div className="flex flex-wrap items-center gap-2">
           {faqReorder ? (
             <>
               <Button
@@ -471,6 +523,63 @@ export function OwnerAskInboxCard({
             <PushPin size={14} className="mr-1.5" weight="fill" />
             {unpinning ? t(`${prefix}.unpinningFaq`) : t(`${prefix}.unpinFaqAction`)}
           </Button>
+        </div>
+        <div className="space-y-2 rounded-md border border-border/50 bg-muted/20 p-3">
+          <p className="text-xs font-medium text-foreground">{t(`${prefix}.faqAliasesLabel`)}</p>
+          {aliases.length > 0 ? (
+            <ul className="flex flex-wrap gap-1.5">
+              {aliases.map((alias) => (
+                <li
+                  key={alias}
+                  className="inline-flex max-w-full items-center gap-1 rounded-full bg-background px-2 py-0.5 text-[11px] ring-1 ring-border"
+                >
+                  <span className="truncate">{alias}</span>
+                  <button
+                    type="button"
+                    className="shrink-0 text-muted-foreground hover:text-foreground"
+                    aria-label={t(`${prefix}.faqAliasRemove`, { alias })}
+                    onClick={() => setAliases((prev) => prev.filter((item) => item !== alias))}
+                  >
+                    <X size={10} />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          <div className="flex gap-2">
+            <Input
+              value={aliasDraft}
+              onChange={(e) => setAliasDraft(e.target.value)}
+              placeholder={t(`${prefix}.faqAliasPlaceholder`)}
+              maxLength={500}
+              className="h-8 text-xs"
+              onKeyDown={(e) => {
+                if (e.key !== "Enter") return;
+                e.preventDefault();
+                handleAddAlias();
+              }}
+            />
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8"
+              disabled={!aliasDraft.trim() || aliases.length >= 10}
+              onClick={handleAddAlias}
+            >
+              {t(`${prefix}.faqAliasAdd`)}
+            </Button>
+          </div>
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            disabled={savingAliases}
+            onClick={() => void handleSaveAliases()}
+          >
+            {savingAliases ? t(`${prefix}.faqAliasSaving`) : t(`${prefix}.faqAliasSave`)}
+          </Button>
+        </div>
         </div>
       ) : null}
     </li>

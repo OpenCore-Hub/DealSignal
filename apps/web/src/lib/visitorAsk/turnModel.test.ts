@@ -18,6 +18,20 @@ describe("turnNeedsAIStream", () => {
     };
     expect(turnNeedsAIStream(turn)).toBe(true);
   });
+
+  it("does not stream pinned FAQ replay turns", () => {
+    const turn: PublicAskTurn = {
+      id: "t1",
+      session_id: "s1",
+      question: "q",
+      lane: "ai",
+      status: "ai_answered",
+      route_reason: "pinned_faq",
+      created_at: "",
+      updated_at: "",
+    };
+    expect(turnNeedsAIStream(turn)).toBe(false);
+  });
 });
 
 describe("publicAskTurnToKnowledgeTurn", () => {

@@ -253,7 +253,7 @@ func TestSubmitPublicAsk_RepeatQuestionAfterEnableAI_Integration(t *testing.T) {
 		t.Fatalf("third SubmitPublicAsk: %v", err)
 	}
 	if third.Lane != askLaneAI {
-		t.Fatalf("third lane = %q want ai (repeat question must re-route)", third.Lane)
+		t.Fatalf("third lane = %q want ai (unpinned repeat still routes AI)", third.Lane)
 	}
 	if third.ID == first.ID {
 		t.Fatal("repeat submit must create a new turn")

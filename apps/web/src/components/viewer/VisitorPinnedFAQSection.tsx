@@ -11,12 +11,14 @@ export interface VisitorPinnedFAQSectionProps {
   faqs: PublicAskFAQ[];
   onSuggestQuestion?: (question: string) => void;
   onOpenCitation?: (hit: DealRoomKnowledgeQueryHit) => void;
+  hideHeading?: boolean;
 }
 
 export function VisitorPinnedFAQSection({
   faqs,
   onSuggestQuestion,
   onOpenCitation,
+  hideHeading = false,
 }: VisitorPinnedFAQSectionProps) {
   const { t } = useTranslation("documents");
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -40,13 +42,19 @@ export function VisitorPinnedFAQSection({
 
   return (
     <section
-      className="rounded-2xl border border-amber-500/20 bg-amber-500/5 p-3"
+      className={
+        hideHeading
+          ? undefined
+          : "rounded-2xl border border-amber-500/20 bg-amber-500/5 p-3"
+      }
       aria-label={t("viewer.askFaqSectionTitle")}
     >
+      {hideHeading ? null : (
       <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-amber-900 dark:text-amber-100">
         <PushPin size={14} weight="fill" />
         {t("viewer.askFaqSectionTitle")}
       </div>
+      )}
       <ul className="space-y-2">
         {faqs.map((faq) => {
           const expanded = expandedId === faq.id;

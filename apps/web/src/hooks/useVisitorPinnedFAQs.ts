@@ -14,7 +14,7 @@ export function faqListFingerprint(faqs: PublicAskFAQ[]): string {
   return faqs
     .map(
       (faq) =>
-        `${faq.id}:${faq.pinned_faq_sort ?? ""}:${faq.pinned_at}:${faq.question}:${faq.answer}`,
+        `${faq.id}:${faq.pinned_faq_sort ?? ""}:${faq.pinned_at}:${faq.question}:${faq.answer}:${(faq.aliases ?? []).join(",")}`,
     )
     .join("\n");
 }

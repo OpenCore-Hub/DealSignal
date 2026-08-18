@@ -1,11 +1,12 @@
 import { visitorAskUnifiedEnabled } from "@/lib/visitorAskUnified";
 
-export type VisitorWorkspaceTab = "documents" | "qa" | "requests";
+export type VisitorWorkspaceTab = "documents" | "qa" | "faq" | "requests";
 
 export interface VisitorWorkspaceVisibility {
   documentCount: number;
   fileRequestsEnabled: boolean;
   qaEnabled: boolean;
+  faqCount?: number;
 }
 
 export interface VisitorWorkspaceLink {
@@ -66,6 +67,7 @@ export function visitorWorkspaceTabs(args: VisitorWorkspaceVisibility): VisitorW
   const tabs: VisitorWorkspaceTab[] = [];
   if (args.documentCount > 1) tabs.push("documents");
   if (args.qaEnabled) tabs.push("qa");
+  if (args.qaEnabled && (args.faqCount ?? 0) > 0) tabs.push("faq");
   if (args.fileRequestsEnabled) tabs.push("requests");
   return tabs;
 }

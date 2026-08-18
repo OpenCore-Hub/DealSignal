@@ -5,10 +5,13 @@ import {
   ChatCenteredDots,
   FileText,
   Folder,
+  Question,
 } from "@phosphor-icons/react";
 import { useTranslation } from "react-i18next";
+import { useVisitorPinnedFAQs } from "@/hooks/useVisitorPinnedFAQs";
 import { FileRequestPanel } from "./FileRequestPanel";
 import { UnifiedQAPanel } from "./UnifiedQAPanel";
+import { VisitorFaqPanel } from "./VisitorFaqPanel";
 import {
   groupDocumentsByFolder,
   shouldGroupDocumentsByFolder,
@@ -58,6 +61,13 @@ export function VisitorWorkspacePanel({
   const showDocumentsTab = hasMultipleDocuments;
   const showAskTab = Boolean(qaEnabled);
   const showRequestsTab = Boolean(fileRequestsEnabled);
+  const { faqs: pinnedFaqs } = useVisitorPinnedFAQs({
+    token: publicToken ?? "",
+    sessionToken: publicSessionToken,
+    qaEnabled: showAskTab && Boolean(publicToken),
+  });
+  const showFaqTab = showAskTab && pinnedFaqs.length > 0;
+  const [pendingAsk, setPendingAsk] = useState<{ question: string; submit: boolean } | undefined>();
 
   const visibleTabs = useMemo(
     () =>
@@ -65,8 +75,9 @@ export function VisitorWorkspacePanel({
         documentCount,
         fileRequestsEnabled: showRequestsTab,
         qaEnabled: showAskTab,
+        faqCount: pinnedFaqs.length,
       }),
-    [documentCount, showAskTab, showRequestsTab],
+    [documentCount, pinnedFaqs.length, showAskTab, showRequestsTab],
   );
 
   const [activeTab, setActiveTab] = useState<VisitorWorkspaceTab>(() =>
@@ -116,6 +127,9 @@ export function VisitorWorkspacePanel({
       : null,
     showAskTab
       ? { id: "qa", label: t("viewer.sidebarQA"), icon: ChatCenteredDots }
+      : null,
+    showFaqTab
+      ? { id: "faq", label: t("viewer.sidebarFAQ"), icon: Question }
       : null,
     showRequestsTab
       ? { id: "requests", label: t("viewer.sidebarRequests"), icon: FileText }
@@ -225,6 +239,25 @@ export function VisitorWorkspacePanel({
                   sessionToken={publicSessionToken}
                   qaEnabled={showAskTab}
                   onOpenCitation={onOpenCitation}
+                  pendingQuestion={pendingAsk?.question}
+                  pendingSubmit={pendingAsk?.submit}
+                  onPendingQuestionConsumed={() => setPendingAsk(undefined)}
+                />
+              </div>
+            ) : null}
+            {activeTab === "faq" && showFaqTab ? (
+              <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                <VisitorFaqPanel
+                  faqs={pinnedFaqs}
+                  onOpenCitation={onOpenCitation}
+                  onAskQuestion={(question) => {
+                    setPendingAsk({ question, submit: false });
+                    setActiveTab("qa");
+                  }}
+                  onAskThis={(question) => {
+                    setPendingAsk({ question, submit: true });
+                    setActiveTab("qa");
+                  }}
                 />
               </div>
             ) : null}

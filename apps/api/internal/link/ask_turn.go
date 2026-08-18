@@ -45,6 +45,8 @@ type PublicAskTurn struct {
 	PinnedFAQAt       *time.Time    `json:"pinned_faq_at,omitempty"`
 	PinnedFAQBy       string        `json:"pinned_faq_by,omitempty"`
 	PinnedFAQSort     *int          `json:"pinned_faq_sort,omitempty"`
+	FaqSourceTurnID   string        `json:"faq_source_turn_id,omitempty"`
+	Aliases           []string      `json:"aliases,omitempty"`
 	FormalStatus      string        `json:"formal_status,omitempty"`
 	FormalPublishAt   *time.Time    `json:"formal_publish_at,omitempty"`
 	FormalPublishedAt *time.Time    `json:"formal_published_at,omitempty"`
@@ -232,6 +234,11 @@ func (s *Service) SubmitPublicAsk(
 	// Fail closed: Formal mode without entitlement must not silently become a host turn.
 	if routeReason == routeReasonPolicyFormal && !s.isFormalAskEntitled(ctx, link) {
 		return PublicAskTurn{}, ErrAskFormalNotEntitled
+	}
+	if replay, ok, err := s.maybeReplayPinnedFAQ(ctx, link, visitorID, visitorEmail, question, routeReason); err != nil {
+		return PublicAskTurn{}, err
+	} else if ok {
+		return replay, nil
 	}
 	switch routeReason {
 	case routeReasonUserEscalate, routeReasonPolicyFormal, routeReasonAINotEnabled, routeReasonAIQuotaExceeded:

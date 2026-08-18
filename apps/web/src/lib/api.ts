@@ -1553,6 +1553,11 @@ export const api = {
     request<{ data: OwnerAskTurn }>(getWorkspaceSlug(), `/links/${linkId}/ask/${turnId}/pin-faq`, {
       method: "POST",
     }),
+  patchAskTurnFAQAliases: (linkId: string, turnId: string, aliases: string[]) =>
+    request<{ data: OwnerAskTurn }>(getWorkspaceSlug(), `/links/${linkId}/ask/${turnId}/faq-aliases`, {
+      method: "PATCH",
+      body: JSON.stringify({ aliases }),
+    }),
   unpinAskTurnFAQ: (linkId: string, turnId: string) =>
     request<{ data: OwnerAskTurn }>(getWorkspaceSlug(), `/links/${linkId}/ask/${turnId}/unpin-faq`, {
       method: "POST",

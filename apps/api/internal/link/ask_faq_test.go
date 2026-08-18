@@ -56,7 +56,7 @@ func TestMapPublicAskFAQ(t *testing.T) {
 		}
 	})
 
-    t.Run("hybrid prefers host answer", func(t *testing.T) {
+	t.Run("hybrid prefers host answer", func(t *testing.T) {
 		got, ok := mapPublicAskFAQ(db.LinkAskTurn{
 			ID:          pgtype.UUID{Bytes: turnID, Valid: true},
 			Question:    "Hybrid Q",
@@ -67,6 +67,36 @@ func TestMapPublicAskFAQ(t *testing.T) {
 		})
 		if !ok || got.Answer != "Host wins" {
 			t.Fatalf("unexpected FAQ: %+v ok=%v", got, ok)
+		}
+	})
+
+	t.Run("hybrid refuse payload is not exposed", func(t *testing.T) {
+		got, ok := mapPublicAskFAQ(db.LinkAskTurn{
+			ID:          pgtype.UUID{Bytes: turnID, Valid: true},
+			Question:    "Hybrid refuse",
+			Lane:        askLaneHybrid,
+			HostAnswer:  pgtype.Text{String: "暂不公开", Valid: true},
+			AiPayload:   []byte(`{"answer":"cannot share","refused":true,"resultStatus":"refused","hits":[]}`),
+			PinnedFaqAt: pgtype.Timestamptz{Time: pinnedAt, Valid: true},
+		})
+		if !ok || got.Answer != "暂不公开" {
+			t.Fatalf("unexpected FAQ: %+v ok=%v", got, ok)
+		}
+		if got.AIPayload != nil {
+			t.Fatalf("refused payload leaked: %+v", got.AIPayload)
+		}
+	})
+
+	t.Run("refused AI-only skipped", func(t *testing.T) {
+		_, ok := mapPublicAskFAQ(db.LinkAskTurn{
+			ID:          pgtype.UUID{Bytes: turnID, Valid: true},
+			Question:    "Refused",
+			Lane:        askLaneAI,
+			AiPayload:   []byte(`{"answer":"cannot share","refused":true,"resultStatus":"refused","hits":[]}`),
+			PinnedFaqAt: pgtype.Timestamptz{Time: pinnedAt, Valid: true},
+		})
+		if ok {
+			t.Fatal("expected skip")
 		}
 	})
 
@@ -92,6 +122,15 @@ func TestPinnedFAQAnswerPrefersHost(t *testing.T) {
 		AiPayload:  []byte(`{"answer":"draft","refused":false,"resultStatus":"answered","hits":[]}`),
 	})
 	if answer != "official" {
+		t.Fatalf("answer = %q", answer)
+	}
+}
+
+func TestPinnedFAQAnswerSkipsRefusedAI(t *testing.T) {
+	answer := pinnedFAQAnswer(db.LinkAskTurn{
+		AiPayload: []byte(`{"answer":"cannot share","refused":true,"resultStatus":"refused","hits":[]}`),
+	})
+	if answer != "" {
 		t.Fatalf("answer = %q", answer)
 	}
 }

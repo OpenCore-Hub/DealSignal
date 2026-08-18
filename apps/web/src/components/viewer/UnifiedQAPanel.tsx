@@ -4,10 +4,8 @@ import { ChatCenteredDots, PaperPlaneRight, Spinner } from "@phosphor-icons/reac
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useVisitorAskPanel } from "@/hooks/useVisitorAskPanel";
-import { useVisitorPinnedFAQs } from "@/hooks/useVisitorPinnedFAQs";
 import { useVisitorFormalAsk } from "@/hooks/useVisitorFormalAsk";
 import { VisitorAskTurnCard } from "./VisitorAskTurnCard";
-import { VisitorPinnedFAQSection } from "./VisitorPinnedFAQSection";
 import { VisitorFormalQASection } from "./VisitorFormalQASection";
 import type { DealRoomKnowledgeQueryHit } from "@/types";
 
@@ -16,6 +14,9 @@ interface UnifiedQAPanelProps {
   sessionToken?: string;
   qaEnabled?: boolean;
   onOpenCitation?: (hit: DealRoomKnowledgeQueryHit) => void;
+  pendingQuestion?: string;
+  pendingSubmit?: boolean;
+  onPendingQuestionConsumed?: () => void;
 }
 
 export function UnifiedQAPanel({
@@ -23,6 +24,9 @@ export function UnifiedQAPanel({
   sessionToken,
   qaEnabled,
   onOpenCitation,
+  pendingQuestion,
+  pendingSubmit,
+  onPendingQuestionConsumed,
 }: UnifiedQAPanelProps) {
   const { t } = useTranslation("documents");
   const {
@@ -41,11 +45,6 @@ export function UnifiedQAPanel({
     sessionToken,
     qaEnabled,
   });
-  const { faqs: pinnedFaqs } = useVisitorPinnedFAQs({
-    token,
-    sessionToken,
-    qaEnabled,
-  });
   const { entries: formalEntries } = useVisitorFormalAsk({
     token,
     sessionToken,
@@ -54,6 +53,23 @@ export function UnifiedQAPanel({
 
   const [input, setInput] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
+  const consumedPendingRef = useRef<string | undefined>(undefined);
+
+  useEffect(() => {
+    const next = pendingQuestion?.trim();
+    if (!next) {
+      consumedPendingRef.current = undefined;
+      return;
+    }
+    if (consumedPendingRef.current === next) return;
+    consumedPendingRef.current = next;
+    onPendingQuestionConsumed?.();
+    if (pendingSubmit) {
+      void submitQuestion(next);
+      return;
+    }
+    setInput(next);
+  }, [pendingQuestion, pendingSubmit, onPendingQuestionConsumed, submitQuestion]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -85,13 +101,6 @@ export function UnifiedQAPanel({
             onSuggestQuestion={(question) => setInput(question)}
           />
         ) : null}
-        {pinnedFaqs.length > 0 ? (
-          <VisitorPinnedFAQSection
-            faqs={pinnedFaqs}
-            onSuggestQuestion={(question) => setInput(question)}
-            onOpenCitation={onOpenCitation}
-          />
-        ) : null}
         {loading ? (
           <div className="flex items-center justify-center py-8">
             <Spinner size={20} className="animate-spin text-muted-foreground" />
@@ -120,7 +129,9 @@ export function UnifiedQAPanel({
               onOpenCitation={onOpenCitation}
               onStopStream={streaming ? () => stopStream(turn.id) : undefined}
               onEscalate={
-                turn.lane === "ai" && turn.status === "ai_refused"
+                turn.route_reason !== "pinned_faq" &&
+                turn.lane === "ai" &&
+                turn.status === "ai_refused"
                   ? () => void escalateToHost(turn)
                   : undefined
               }

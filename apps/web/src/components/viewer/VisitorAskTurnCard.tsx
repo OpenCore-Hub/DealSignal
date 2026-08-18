@@ -1,14 +1,15 @@
-import { CircleNotch, Robot, Stop, User } from "@phosphor-icons/react";
+import { ArrowClockwise, CircleNotch, PushPin, Robot, Stop, User } from "@phosphor-icons/react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AnswerMarkdown } from "@/components/deal-rooms/knowledge/AnswerMarkdown";
 import { Button } from "@/components/ui/button";
+import { formatDate } from "@/lib/formatters";
 import { formatHitLocusLabel } from "@/lib/knowledge/citations";
 import {
   shouldShowEvidence,
   type KnowledgeTurn,
 } from "@/lib/knowledge/streamEvents";
-import { isAskQuotaExceededTurn, isAwaitingHostReply, isFormalUnderReview, isHostQueuedTurn } from "@/lib/visitorAsk/turnModel";
+import { isAskQuotaExceededTurn, isAwaitingHostReply, isFormalUnderReview, isHostQueuedTurn, isPinnedFAQReplayTurn } from "@/lib/visitorAsk/turnModel";
 import { cn } from "@/lib/utils";
 import type { DealRoomKnowledgeQueryHit, PublicAskTurn } from "@/types";
 
@@ -19,6 +20,8 @@ export interface VisitorAskTurnCardProps {
   stopped?: boolean;
   onEscalate?: () => void;
   onStopStream?: () => void;
+  onRefresh?: () => void;
+  refreshing?: boolean;
   onOpenCitation?: (hit: DealRoomKnowledgeQueryHit) => void;
 }
 
@@ -29,9 +32,11 @@ export function VisitorAskTurnCard({
   stopped,
   onEscalate,
   onStopStream,
+  onRefresh,
+  refreshing,
   onOpenCitation,
 }: VisitorAskTurnCardProps) {
-  const { t } = useTranslation("documents");
+  const { t, i18n } = useTranslation("documents");
   const [activeCite, setActiveCite] = useState<number | null>(null);
   const locusFmt = {
     sheetPrefix: t("viewer.askSheetLabel"),
@@ -55,6 +60,7 @@ export function VisitorAskTurnCard({
   const showAIBlock = Boolean(aiTurn) && (turn.lane === "ai" || turn.lane === "hybrid");
   const showEvidence = aiTurn ? shouldShowEvidence(aiTurn) : false;
   const showEscalate =
+    !isPinnedFAQReplayTurn(turn) &&
     turn.lane === "ai" &&
     turn.status === "ai_refused" &&
     (aiTurn?.phase === "refused" || turn.status === "ai_refused") &&
@@ -64,7 +70,30 @@ export function VisitorAskTurnCard({
     turn.status === "host_pending" &&
     isAskQuotaExceededTurn(turn);
   const showEscalatedDraft = turn.status === "host_escalated";
+  const awaitingHost = isAwaitingHostReply(turn);
+  const aiIsHistorical = showHostAnswer || showEscalatedDraft;
+  const showAskHostHint =
+    (aiTurn?.refused || aiTurn?.phase === "refused") &&
+    !showHostAnswer &&
+    !awaitingHost;
   const showFormalUnderReview = isFormalUnderReview(turn);
+  const scheduledAtRaw =
+    showFormalUnderReview && turn.formal_status === "scheduled"
+      ? turn.formal_publish_at
+      : undefined;
+  const scheduledAtMs = scheduledAtRaw ? Date.parse(scheduledAtRaw) : Number.NaN;
+  const pendingLabel = showFormalUnderReview
+    ? turn.formal_status === "scheduled"
+      ? scheduledAtRaw && !Number.isNaN(scheduledAtMs)
+        ? t("viewer.askFormalScheduledAt", {
+            time: formatDate(scheduledAtRaw, i18n.language),
+          })
+        : t("viewer.askFormalScheduled")
+      : t("viewer.askFormalUnderReview")
+    : showEscalatedDraft
+      ? t("viewer.askAwaitingHostConfirm")
+      : t("viewer.askPendingReply");
+  const pendingIsScheduled = turn.formal_status === "scheduled";
 
   const openHit = (hit: DealRoomKnowledgeQueryHit) => {
     if (!onOpenCitation) return;
@@ -87,45 +116,12 @@ export function VisitorAskTurnCard({
         </div>
       </div>
 
-      {showHostAnswer ? (
-        <div className="flex justify-start">
-          <div className="max-w-[90%] space-y-1">
-            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
-              <User size={10} />
-              {t("viewer.askSourceOwner")}
-            </span>
-            <div className="rounded-2xl border border-border/60 bg-background/90 px-3.5 py-2.5 text-sm shadow-sm">
-              <p className="whitespace-pre-wrap break-words">{turn.host_answer}</p>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {isAwaitingHostReply(turn) ? (
-        <div className="space-y-1 text-center">
-          {showQuotaFallback ? (
-            <p className="text-xs text-amber-700 dark:text-amber-300">
-              {t("viewer.askAiQuotaExceededVisitor")}
-            </p>
-          ) : null}
-          <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-            {showFormalUnderReview
-              ? turn.formal_status === "scheduled"
-                ? t("viewer.askFormalScheduled")
-                : t("viewer.askFormalUnderReview")
-              : showEscalatedDraft
-                ? t("viewer.askAwaitingHostConfirm")
-                : t("viewer.askPendingReply")}
-          </p>
-        </div>
-      ) : null}
-
       {showAIBlock && aiTurn ? (
         <div className="flex justify-start">
           <div className="max-w-[95%] space-y-2">
             <span className="inline-flex items-center gap-1 rounded-full bg-sky-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sky-700 dark:text-sky-300">
-              <Robot size={10} weight="fill" />
-              {t("viewer.askSourceAI")}
+              {isPinnedFAQReplayTurn(turn) ? <PushPin size={10} weight="fill" /> : <Robot size={10} weight="fill" />}
+              {isPinnedFAQReplayTurn(turn) ? t("viewer.askSourceFaq") : t("viewer.askSourceAI")}
             </span>
 
             {streaming ? (
@@ -160,16 +156,23 @@ export function VisitorAskTurnCard({
             ) : null}
 
             {aiTurn.refused || aiTurn.phase === "refused" ? (
-              <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 px-3.5 py-2.5 text-sm text-foreground">
+              <div
+                className={cn(
+                  "rounded-2xl border border-amber-500/30 bg-amber-500/5 px-3.5 py-2.5 text-sm text-foreground",
+                  aiIsHistorical && "border-dashed opacity-70",
+                )}
+              >
                 <p>{t("viewer.qaNoEvidence")}</p>
-                <p className="mt-1 text-xs text-muted-foreground">{t("viewer.qaSuggestAskHost")}</p>
+                {showAskHostHint ? (
+                  <p className="mt-1 text-xs text-muted-foreground">{t("viewer.qaSuggestAskHost")}</p>
+                ) : null}
               </div>
             ) : aiTurn.answer ? (
               <div
                 className={cn(
                   "rounded-2xl border border-border/60 bg-background/90 px-3.5 py-2.5 text-sm shadow-sm",
                   streaming && "animate-pulse",
-                  showEscalatedDraft && "border-dashed opacity-70",
+                  aiIsHistorical && "border-dashed opacity-70",
                 )}
               >
                 <AnswerMarkdown
@@ -236,6 +239,63 @@ export function VisitorAskTurnCard({
                 {escalating ? t("viewer.askEscalating") : t("viewer.askEscalateToHost")}
               </Button>
             ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      {awaitingHost ? (
+        <div className="space-y-1 text-center">
+          {showQuotaFallback ? (
+            <p className="text-xs text-amber-700 dark:text-amber-300">
+              {t("viewer.askAiQuotaExceededVisitor")}
+            </p>
+          ) : null}
+          {onRefresh ? (
+            <Button
+              type="button"
+              variant="ghost"
+              className={cn(
+                "h-auto gap-1.5 px-2 py-1 font-medium text-muted-foreground hover:text-foreground",
+                pendingIsScheduled
+                  ? "max-w-[22rem] whitespace-normal text-xs font-normal normal-case tracking-normal"
+                  : "text-[10px] uppercase tracking-wide",
+              )}
+              onClick={onRefresh}
+              disabled={refreshing}
+              aria-label={pendingLabel}
+              data-testid="visitor-ask-refresh"
+            >
+              <ArrowClockwise
+                size={12}
+                className={cn("shrink-0", refreshing ? "animate-spin" : undefined)}
+              />
+              <span className="text-left leading-snug">{pendingLabel}</span>
+            </Button>
+          ) : (
+            <p
+              className={cn(
+                "font-medium text-muted-foreground",
+                pendingIsScheduled
+                  ? "text-xs font-normal normal-case tracking-normal"
+                  : "text-[10px] uppercase tracking-wide",
+              )}
+            >
+              {pendingLabel}
+            </p>
+          )}
+        </div>
+      ) : null}
+
+      {showHostAnswer ? (
+        <div className="flex justify-start">
+          <div className="max-w-[90%] space-y-1">
+            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
+              {isPinnedFAQReplayTurn(turn) ? <PushPin size={10} weight="fill" /> : <User size={10} />}
+              {isPinnedFAQReplayTurn(turn) ? t("viewer.askSourceFaq") : t("viewer.askSourceOwner")}
+            </span>
+            <div className="rounded-2xl border border-border/60 bg-background/90 px-3.5 py-2.5 text-sm shadow-sm">
+              <p className="whitespace-pre-wrap break-words">{turn.host_answer}</p>
+            </div>
           </div>
         </div>
       ) : null}

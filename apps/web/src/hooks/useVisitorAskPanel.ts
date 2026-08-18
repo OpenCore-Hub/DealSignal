@@ -37,19 +37,25 @@ export function useVisitorAskPanel(opts: {
   const [refreshKey, setRefreshKey] = useState(0);
   const streamAbortRef = useRef<Record<string, AbortController>>({});
 
-  const reloadTurns = useCallback(async () => {
+  const [refreshing, setRefreshing] = useState(false);
+
+  const reloadTurns = useCallback(async (reloadOpts?: { silent?: boolean }) => {
     if (!qaEnabled) return;
     setError(null);
-    setLoading(true);
+    if (reloadOpts?.silent) setRefreshing(true);
+    else setLoading(true);
     try {
       const res = await api.listPublicAskTurns(token, creds(sessionTokenRef.current));
       setTurns(res.data ?? []);
     } catch {
       setError(t("viewer.askLoadError"));
     } finally {
-      setLoading(false);
+      if (reloadOpts?.silent) setRefreshing(false);
+      else setLoading(false);
     }
   }, [qaEnabled, t, token]);
+
+  const refreshTurns = useCallback(() => reloadTurns({ silent: true }), [reloadTurns]);
 
   useEffect(() => {
     void reloadTurns();
@@ -184,6 +190,7 @@ export function useVisitorAskPanel(opts: {
   return {
     turns,
     loading,
+    refreshing,
     error,
     submitting,
     escalatingId,
@@ -192,5 +199,6 @@ export function useVisitorAskPanel(opts: {
     escalateToHost,
     resolveKnowledgeTurn,
     stopStream,
+    refreshTurns,
   };
 }

@@ -67,9 +67,13 @@
 
 **布局（遵循 Grounded Chat 白名单组件）**
 
+Workspace Tab（沟通右侧为 FAQ Help Center；有至少 1 条 Pin 才显示 FAQ Tab，默认不落到 FAQ）：
+
+`文档 | 沟通 | FAQ | 资料请求`
+
 ```
 ┌─────────────────────────────────────┐
-│ Ask                                 │
+│ Ask（沟通 Tab）                       │
 │ Scoped to documents you can access  │  ← TrustChip（link ACL）
 ├─────────────────────────────────────┤
 │ [ Turn 时间线：问 → 答 / 待回复 ]      │
@@ -79,6 +83,8 @@
 └─────────────────────────────────────┘
 ```
 
+FAQ Tab：搜索已 Pin 条目并展开阅读官方答；搜不到则「去提问」切回沟通并预填（不自动发送）。沟通 Tab **不再**内嵌 FAQ 目录。
+
 **单轮交互**
 
 ```
@@ -86,6 +92,10 @@
     │
     ▼
 路由层（同步，<300ms 内给出 UX 分支）
+    │
+    ├─► Pin FAQ 命中（规范化全等或发起方配置的同义问法）
+    │       → 新 turn 复制官方答；不跑 RAG / SSE；route_reason=pinned_faq
+    │       → 不计 AI 月度配额；Formal / 访客主动 escalate 不拦截
     │
     ├─► AI 可答（grounded + 置信度 ≥ τ）
     │       → 流式 AnswerStream + EvidenceRail（引用页码）
@@ -108,6 +118,7 @@
 | `host_pending` | 已转人工，待回复 | 排队提示 |
 | `host_answered` | 发起方已回复 | 人工答案 |
 | `host_escalated` | 从 AI 升级 | 显示 AI 草稿（灰）+ 正式答复 |
+| `route_reason=pinned_faq` | FAQ 拦截回放 | 「常见问题」徽章；无升级 CTA、无 SSE |
 
 ### 3.2 宿主：统一 Ask Inbox，三 Lane
 
@@ -123,7 +134,8 @@ Ask Inbox
 **宿主动作**
 
 - 回复 / 编辑 AI 纠正并发布  
-- 将重复问 Pin 为 **Room FAQ**（减少后续 AI/host 负载）  
+- 将已答问 **人工 Pin** 为 FAQ（Help Center Tab 可检索；相同/同义提问拦截复用官方答、不再走 AI）。高频只 **建议** Pin（`repeat_count ≥ 3`），**禁止自动上架**  
+- 可为每条 Pin 配置同义问法（规范化全等匹配，不做 embedding）  
 - 批量「此类问题以后由 AI 答」（策略学习，Phase B+）  
 - Analytics：主题、文档、访客、AI 解决率
 
@@ -319,7 +331,8 @@ ask_ai_monthly_quota INT;  -- NULL = 套餐默认
 | `GET` | `/api/v1/workspaces/:slug/links/:id/ask` | Inbox（filter: lane, status） |
 | `GET` | `/api/v1/workspaces/:slug/deal-rooms/:roomId/ask` | Room 级聚合 |
 | `PATCH` | `.../ask/:turnId/host-answer` | 人工答复 |
-| `POST` | `.../ask/:turnId/pin-faq` | Pin 为 FAQ（Phase B） |
+| `POST` | `.../ask/:turnId/pin-faq` | Pin 为 FAQ（Help Center + 拦截） |
+| `PATCH` | `.../ask/:turnId/faq-aliases` | 为已 Pin 条目设置同义问法（最多 10） |
 
 ### 6.4 路由与 AI 引擎
 
@@ -331,6 +344,10 @@ func (o *Orchestrator) Ask(ctx, link, visitor, question string, escalate bool) (
 
     if escalate || policy.AskMode == "formal" {
         return o.routeHost(ctx, link, visitor, question, reasonUserEscalate)
+    }
+    // Pin FAQ intercept: same visibility as GET .../ask/faq. Fail closed.
+    if faq, ok := o.matchPinnedFAQ(link, question); ok { // normalize key or owner aliases
+        return o.replayPinnedFAQ(ctx, link, visitor, question, faq) // copy-on-write; no RAG
     }
     if !policy.AskAIEnabled || o.quotaExceeded(link) {
         return o.routeHost(ctx, link, visitor, question, reasonAINotEnabled)
@@ -377,8 +394,8 @@ const (
 
 | 模块 | 变更 |
 |------|------|
-| `VisitorWorkspacePanel` | 单 Tab **Ask**；移除 Ask Host / Ask Docs 双 Tab |
-| `UnifiedAskPanel`（新） | 合并 Composer + Turn 时间线 + SSE |
+| `VisitorWorkspacePanel` | 单 Ask **沟通** Tab + 有 Pin 时右侧 **FAQ** Tab；移除 Ask Host / Ask Docs 双 Tab |
+| `UnifiedAskPanel`（新） | 合并 Composer + Turn 时间线 + SSE；FAQ 目录不内嵌于此 |
 | 组件 | 复用 Grounded 白名单：`TrustChip`, `AnswerStream`, `EvidenceRail`, `Composer` |
 | `UnifiedQAPanel` | 迁移为 host-only 历史视图或废弃 |
 | `VisitorAskDocsPanel` | 废弃（upsell 改为 quota / 设置页） |
@@ -426,7 +443,7 @@ const (
 ### Phase C — Formal Q&A + 商业化完整（8+ 周）
 
 - Formal 模式工作流（公示、延迟发布、匿名化）  
-- FAQ Pin、重复问聚类  
+- FAQ Pin = Help Center Tab + Ask 拦截（规范化键 + 同义问法；不自动 Pin、不做语义模糊）  
 - Enterprise 导出与 SLA  
 - Slack 通知集成  
 
@@ -502,4 +519,4 @@ stateDiagram-v2
 
 ---
 
-*文档版本：2026-08-06 · 作者：Product + Engineering 共识稿*
+*文档版本：2026-08-18 · 作者：Product + Engineering 共识稿*

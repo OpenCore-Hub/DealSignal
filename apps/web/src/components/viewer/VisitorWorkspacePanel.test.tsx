@@ -6,13 +6,15 @@ import i18n from "i18next";
 import { VisitorWorkspacePanel } from "./VisitorWorkspacePanel";
 import enDocuments from "@/i18n/locales/en/documents.json";
 
-const { listPublicAskTurnsMock } = vi.hoisted(() => ({
+const { listPublicAskTurnsMock, listPublicAskFAQsMock } = vi.hoisted(() => ({
   listPublicAskTurnsMock: vi.fn(),
+  listPublicAskFAQsMock: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({
   api: {
     listPublicAskTurns: listPublicAskTurnsMock,
+    listPublicAskFAQs: listPublicAskFAQsMock,
   },
 }));
 
@@ -41,6 +43,8 @@ describe("VisitorWorkspacePanel", () => {
   beforeEach(() => {
     listPublicAskTurnsMock.mockReset();
     listPublicAskTurnsMock.mockResolvedValue({ data: [] });
+    listPublicAskFAQsMock.mockReset();
+    listPublicAskFAQsMock.mockResolvedValue({ data: [] });
   });
 
   it("renders Ask Host for single-doc deal-room links with qa enabled", async () => {
@@ -78,5 +82,31 @@ describe("VisitorWorkspacePanel", () => {
     await waitFor(() => {
       expect(listPublicAskTurnsMock).toHaveBeenCalled();
     });
+  });
+
+  it("shows FAQ tab to the right of Ask when pins exist", async () => {
+    listPublicAskFAQsMock.mockResolvedValue({
+      data: [
+        {
+          id: "faq1",
+          question: "What is ARR?",
+          answer: "Twelve million.",
+          source: "host",
+          pinned_at: "2026-01-01T00:00:00Z",
+        },
+      ],
+    });
+    renderPanel({
+      qaEnabled: true,
+      documents: [
+        { id: "doc-1", title: "Deck", pageCount: 12 },
+        { id: "doc-2", title: "Financials", pageCount: 8 },
+      ],
+    });
+
+    expect(await screen.findByRole("button", { name: "FAQ" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "FAQ" }));
+    expect(await screen.findByPlaceholderText(/Search common questions/i)).toBeInTheDocument();
+    expect(screen.getByText("What is ARR?")).toBeInTheDocument();
   });
 });

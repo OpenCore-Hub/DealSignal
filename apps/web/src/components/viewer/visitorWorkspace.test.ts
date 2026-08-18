@@ -39,6 +39,17 @@ describe("visitorWorkspace", () => {
     ).toEqual(["qa"]);
   });
 
+  it("inserts FAQ tab to the right of Ask when pins exist", () => {
+    expect(
+      visitorWorkspaceTabs({
+        documentCount: 1,
+        fileRequestsEnabled: true,
+        qaEnabled: true,
+        faqCount: 2,
+      }),
+    ).toEqual(["qa", "faq", "requests"]);
+  });
+
   it("opens workspace by default for deal-room links when sidebar is available", () => {
     expect(
       shouldDefaultVisitorWorkspaceOpen({

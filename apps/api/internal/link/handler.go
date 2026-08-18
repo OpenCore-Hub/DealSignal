@@ -263,6 +263,7 @@ func (h *Handler) RegisterWorkspaceRoutes(r *gin.RouterGroup) {
 	g.PATCH("/:id/ask/faq/order", h.ReorderLinkAskFAQ)
 	g.PATCH("/:id/ask/:turnId/host-answer", h.AnswerAskTurnHostAnswer)
 	g.PATCH("/:id/ask/:turnId/formal-publish", h.FormalPublishAskTurn)
+	g.PATCH("/:id/ask/:turnId/faq-aliases", h.PatchAskTurnFAQAliases)
 	g.POST("/:id/ask/:turnId/pin-faq", h.PinAskTurnFAQ)
 	g.POST("/:id/ask/:turnId/unpin-faq", h.UnpinAskTurnFAQ)
 	g.GET("/:id/ask-policy", h.GetLinkAskPolicy)
@@ -3455,6 +3456,41 @@ func (h *Handler) PinAskTurnFAQ(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": turn})
 }
 
+// PatchAskTurnFAQAliases replaces synonym questions on a pinned FAQ turn.
+func (h *Handler) PatchAskTurnFAQAliases(c *gin.Context) {
+	wsID := middleware.WorkspaceIDFrom(c)
+	lID := c.Param("id")
+	link, err := h.service.GetByID(c.Request.Context(), lID, wsID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": "link not found"})
+		return
+	}
+	turnUUID, err := uuid.Parse(c.Param("turnId"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_id", "message": "invalid turn id"})
+		return
+	}
+	var body struct {
+		Aliases []string `json:"aliases"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": "invalid aliases"})
+		return
+	}
+	turn, err := h.service.SetAskTurnFAQAliases(
+		c.Request.Context(),
+		link,
+		pgtype.UUID{Bytes: turnUUID, Valid: true},
+		middleware.UserIDFrom(c),
+		body.Aliases,
+	)
+	if err != nil {
+		writeAskHostError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": turn})
+}
+
 // UnpinAskTurnFAQ removes a pinned FAQ marker from an Ask turn.
 func (h *Handler) UnpinAskTurnFAQ(c *gin.Context) {
 	wsID := middleware.WorkspaceIDFrom(c)
@@ -3653,6 +3689,10 @@ func writeAskHostError(c *gin.Context, err error) {
 		c.JSON(http.StatusConflict, gin.H{"code": "ask_turn_not_pinnable", "message": "ask turn cannot be pinned as faq"})
 	case errors.Is(err, ErrAskTurnNotPinned):
 		c.JSON(http.StatusConflict, gin.H{"code": "ask_turn_not_pinned", "message": "ask turn is not pinned as faq"})
+	case errors.Is(err, ErrAskFAQAliasesInvalid):
+		c.JSON(http.StatusBadRequest, gin.H{"code": "ask_faq_aliases_invalid", "message": "faq aliases are invalid"})
+	case errors.Is(err, ErrAskFAQAliasConflict):
+		c.JSON(http.StatusConflict, gin.H{"code": "ask_faq_alias_conflict", "message": "faq alias conflicts with another pinned question"})
 	case errors.Is(err, ErrAskTurnNotFormalPending):
 		c.JSON(http.StatusConflict, gin.H{"code": "ask_turn_not_formal_pending", "message": "ask turn is not in formal review queue"})
 	case errors.Is(err, ErrAskTurnFormalAnswerReq):

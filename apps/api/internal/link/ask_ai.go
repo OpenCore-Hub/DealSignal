@@ -17,12 +17,12 @@ import (
 )
 
 const (
-	askLaneAI              = "ai"
-	askStatusRouting       = "routing"
-	askStatusAIStreaming   = "ai_streaming"
-	askStatusAIAnswered    = "ai_answered"
-	askStatusAIRefused     = "ai_refused"
-	askStatusFailed        = "failed"
+	askLaneAI                = "ai"
+	askStatusRouting         = "routing"
+	askStatusAIStreaming     = "ai_streaming"
+	askStatusAIAnswered      = "ai_answered"
+	askStatusAIRefused       = "ai_refused"
+	askStatusFailed          = "failed"
 	routeReasonAINoRoom      = "ai_no_room"
 	routeReasonAIUnavailable = "ai_unavailable"
 )
@@ -36,10 +36,10 @@ type VisitorAskKnowledge interface {
 
 // AskAIPayload is the visitor-visible AI turn payload (mirrors knowledge desk hits).
 type AskAIPayload struct {
-	Answer       string               `json:"answer,omitempty"`
-	Refused      bool                 `json:"refused"`
-	ResultStatus string               `json:"resultStatus"`
-	Hits         []knowledge.QueryHit `json:"hits"`
+	Answer       string                 `json:"answer,omitempty"`
+	Refused      bool                   `json:"refused"`
+	ResultStatus string                 `json:"resultStatus"`
+	Hits         []knowledge.QueryHit   `json:"hits"`
 	Refusal      *knowledge.RefusalInfo `json:"refusal,omitempty"`
 }
 
@@ -167,6 +167,12 @@ func applyPinnedFAQFields(out *PublicAskTurn, t db.LinkAskTurn) {
 	if t.PinnedFaqSort.Valid {
 		sort := int(t.PinnedFaqSort.Int32)
 		out.PinnedFAQSort = &sort
+	}
+	if t.FaqSourceTurnID.Valid {
+		out.FaqSourceTurnID = uuid.UUID(t.FaqSourceTurnID.Bytes).String()
+	}
+	if aliases := pinnedFAQAliases(t); len(aliases) > 0 {
+		out.Aliases = aliases
 	}
 }
 

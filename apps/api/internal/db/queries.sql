@@ -6551,6 +6551,33 @@ INSERT INTO link_ask_turns (
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 RETURNING *;
 
+-- name: CreateFaqReplayAskTurn :one
+INSERT INTO link_ask_turns (
+    session_id,
+    tenant_id,
+    workspace_id,
+    link_id,
+    visitor_id,
+    question,
+    lane,
+    status,
+    route_reason,
+    host_answer,
+    ai_payload,
+    faq_source_turn_id,
+    formal_anonymize
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, true)
+RETURNING *;
+
+-- name: SetLinkAskTurnFAQAliases :execrows
+UPDATE link_ask_turns
+SET pinned_faq_aliases = $1,
+    updated_at = now()
+WHERE id = $2
+  AND workspace_id = $3
+  AND link_id = $4
+  AND pinned_faq_at IS NOT NULL;
+
 -- name: ListLinkAskTurnsByVisitor :many
 SELECT *
 FROM link_ask_turns
@@ -6590,6 +6617,7 @@ SELECT COUNT(*)::int AS count
 FROM link_ask_turns
 WHERE link_id = $1
   AND lane = 'ai'
+  AND COALESCE(route_reason, '') <> 'pinned_faq'
   AND created_at >= date_trunc('month', now() AT TIME ZONE 'UTC');
 
 -- name: CountWorkspaceAskAITurnsThisMonth :one
@@ -6597,6 +6625,7 @@ SELECT COUNT(*)::int AS count
 FROM link_ask_turns
 WHERE workspace_id = $1
   AND lane = 'ai'
+  AND COALESCE(route_reason, '') <> 'pinned_faq'
   AND created_at >= date_trunc('month', now() AT TIME ZONE 'UTC');
 
 -- name: GetLinkAskTurnSummary :one
@@ -6652,6 +6681,8 @@ SELECT
     t.pinned_faq_at,
     t.pinned_faq_by,
     t.pinned_faq_sort,
+    t.faq_source_turn_id,
+    t.pinned_faq_aliases,
     t.formal_status,
     t.formal_publish_at,
     t.formal_published_at,
@@ -6684,6 +6715,8 @@ SELECT
     t.pinned_faq_at,
     t.pinned_faq_by,
     t.pinned_faq_sort,
+    t.faq_source_turn_id,
+    t.pinned_faq_aliases,
     t.formal_status,
     t.formal_publish_at,
     t.formal_published_at,
@@ -6715,6 +6748,8 @@ SELECT
     t.pinned_faq_at,
     t.pinned_faq_by,
     t.pinned_faq_sort,
+    t.faq_source_turn_id,
+    t.pinned_faq_aliases,
     t.formal_status,
     t.formal_publish_at,
     t.formal_published_at,
@@ -6794,6 +6829,8 @@ SELECT
     t.pinned_faq_at,
     t.pinned_faq_by,
     t.pinned_faq_sort,
+    t.faq_source_turn_id,
+    t.pinned_faq_aliases,
     t.created_at,
     t.updated_at,
     l.name AS link_name
@@ -6822,6 +6859,8 @@ SELECT
     t.pinned_faq_at,
     t.pinned_faq_by,
     t.pinned_faq_sort,
+    t.faq_source_turn_id,
+    t.pinned_faq_aliases,
     t.formal_status,
     t.formal_publish_at,
     t.formal_published_at,
@@ -6855,6 +6894,8 @@ SELECT
     t.pinned_faq_at,
     t.pinned_faq_by,
     t.pinned_faq_sort,
+    t.faq_source_turn_id,
+    t.pinned_faq_aliases,
     t.formal_status,
     t.formal_publish_at,
     t.formal_published_at,
@@ -6950,6 +6991,8 @@ SELECT
     t.pinned_faq_at,
     t.pinned_faq_by,
     t.pinned_faq_sort,
+    t.faq_source_turn_id,
+    t.pinned_faq_aliases,
     t.formal_status,
     t.formal_publish_at,
     t.formal_published_at,
@@ -6983,6 +7026,8 @@ SELECT
     t.pinned_faq_at,
     t.pinned_faq_by,
     t.pinned_faq_sort,
+    t.faq_source_turn_id,
+    t.pinned_faq_aliases,
     t.formal_status,
     t.formal_publish_at,
     t.formal_published_at,
