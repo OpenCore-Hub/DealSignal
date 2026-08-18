@@ -23,6 +23,7 @@ export type ApiErrorContext =
   | "resetPassword"
   | "viewerGate"
   | "acceptInvitation"
+  | "acceptRoomInvitation"
   | "knowledge"
   | "accessRequestApprove"
   | "accessRequestReject";
@@ -150,12 +151,13 @@ export function apiErrorMessage(
     }
   }
 
-  if (options.context === "acceptInvitation") {
+  if (options.context === "acceptInvitation" || options.context === "acceptRoomInvitation") {
+    const ns = options.context === "acceptRoomInvitation" ? "auth:acceptRoomInvitation" : "auth:acceptInvitation";
     if (code === "invitation_email_mismatch" || code === "email_mismatch") {
-      return translate("auth:acceptInvitation.emailMismatch");
+      return translate(`${ns}.emailMismatch`);
     }
-    if (code === "plan_limit_seats" && hasKey("auth:acceptInvitation.planLimitSeats")) {
-      return translate("auth:acceptInvitation.planLimitSeats");
+    if (code === "plan_limit_seats" && hasKey(`${ns}.planLimitSeats`)) {
+      return translate(`${ns}.planLimitSeats`);
     }
   }
 
@@ -177,6 +179,16 @@ export function apiErrorMessage(
       (key) => translate(`linkShare:${key}`),
       "accessRequests.rejectError",
     );
+  }
+
+  if (code === "nda_consent_required" && hasKey("dealRooms:ndaGate.consentRequired")) {
+    return translate("dealRooms:ndaGate.consentRequired");
+  }
+  if (code === "nda_content_mismatch" && hasKey("dealRooms:ndaGate.contentMismatch")) {
+    return translate("dealRooms:ndaGate.contentMismatch");
+  }
+  if (code === "nda_preview_unavailable" && hasKey("dealRooms:ndaGate.previewUnavailable")) {
+    return translate("dealRooms:ndaGate.previewUnavailable");
   }
 
   if (code === "duplicate_slug" || code === "slug_conflict") {

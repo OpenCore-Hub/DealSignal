@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { I18nextProvider, initReactI18next } from "react-i18next";
 import i18n from "i18next";
 import { DealRoomFolderTree } from "./DealRoomFolderTree";
 import { DealRoomDocumentsHome } from "./DealRoomDocumentsHome";
 import enDealRooms from "@/i18n/locales/en/dealRooms.json";
 import type { DealRoomFolder, DealRoomFolderDocs } from "@/types";
+import { toast } from "sonner";
 
 vi.mock("@/lib/api", () => ({
   api: {
@@ -361,5 +362,48 @@ describe("DealRoomFolderTree toolbar", () => {
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
     expect(screen.queryByTestId("folder-tree-create-directory")).not.toBeInTheDocument();
     expect(screen.queryByTestId("folder-tree-bulk-upload")).not.toBeInTheDocument();
+  });
+
+  it("continues bulk upload after a per-file error", async () => {
+    const onFolderUpload = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("first failed"))
+      .mockResolvedValueOnce(undefined);
+    render(
+      <Wrapper>
+        <DealRoomFolderTree
+          roomId="room-1"
+          folders={folders}
+          folderDocs={folderDocs}
+          isAdmin
+          onFolderCreate={async () => {}}
+          onFolderRename={async () => {}}
+          onFolderDelete={async () => {}}
+          onDocumentRemove={async () => {}}
+          onFolderUpload={onFolderUpload}
+        />
+      </Wrapper>,
+    );
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Legal" }));
+    fireEvent.click(screen.getByTestId("folder-tree-bulk-upload"));
+
+    const input = screen.getByTestId("folder-tree-bulk-upload-input");
+    const first = new File(["a"], "a.pdf", { type: "application/pdf" });
+    const second = new File(["b"], "b.pdf", { type: "application/pdf" });
+    await act(async () => {
+      Object.defineProperty(input, "files", {
+        configurable: true,
+        value: [first, second],
+      });
+      fireEvent.change(input);
+    });
+
+    await waitFor(() => {
+      expect(onFolderUpload).toHaveBeenCalledTimes(2);
+    });
+    expect(onFolderUpload).toHaveBeenNthCalledWith(1, first, "/legal", 1);
+    expect(onFolderUpload).toHaveBeenNthCalledWith(2, second, "/legal", 2);
+    expect(toast.success).toHaveBeenCalled();
   });
 });

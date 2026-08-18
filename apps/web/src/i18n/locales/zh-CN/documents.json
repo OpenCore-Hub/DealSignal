@@ -405,6 +405,7 @@
     "askEscalateToHost": "发送给发起方",
     "askEscalating": "发送中…",
     "askAiUnavailable": "AI 问答暂不可用，您可以向发起方提问。",
+    "askAiCorpusNotReady": "本室尚未建立知识索引，您可以向发起方提问。",
     "askAiRateLimited": "AI 问答请求过于频繁，请稍后再试或向发起方提问。",
     "askAiQuotaExceededVisitor": "本链接本月 AI 问答配额已用尽，您的问题已转给发起方人工回复。",
     "askSheetLabel": "工作表",

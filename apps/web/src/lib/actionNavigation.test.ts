@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   actionNavigatePath,
+  diligenceRemediationPath,
   formalAskSuggestionPath,
   isFormalAskReviewAction,
 } from "./actionNavigation";
@@ -172,5 +173,23 @@ describe("formalAskSuggestionPath", () => {
 
   it("refuses empty linkId", () => {
     expect(formalAskSuggestionPath("acme", { linkId: "" })).toBeNull();
+  });
+});
+
+describe("diligenceRemediationPath", () => {
+  it("sends deal-room holds to Access, not a document", () => {
+    expect(
+      diligenceRemediationPath("acme", { dealRoomId: "room-1", linkId: "link-9" }),
+    ).toBe("/acme/deal-rooms/room-1?tab=access&linkId=link-9");
+  });
+
+  it("sends document-library holds to Share", () => {
+    expect(diligenceRemediationPath("acme", { linkId: "link-doc" })).toBe(
+      "/acme/documents?tab=shared&linkId=link-doc",
+    );
+  });
+
+  it("does not invent a path without room or link", () => {
+    expect(diligenceRemediationPath("acme", {})).toBeNull();
   });
 });

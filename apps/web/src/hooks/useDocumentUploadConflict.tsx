@@ -137,6 +137,66 @@ export function useDocumentUploadConflict(opts?: {
     [askReplace, t],
   );
 
+  const uploadDealRoomFile = useCallback(
+    async (
+      roomId: string,
+      file: File,
+      opts?: {
+        folderPath?: string;
+        sortOrder?: number;
+        onUploadProgress?: (event: { loaded: number; total: number }) => void;
+      },
+    ): Promise<Document> => {
+      const confirmReplace = async () => {
+        const decision = await askReplace(file.name);
+        if (decision === "cancel") {
+          throw new UploadCancelledError(t("upload.replaceCancelled"));
+        }
+        return api.uploadDealRoomDocument(roomId, file, {
+          folderPath: opts?.folderPath,
+          sortOrder: opts?.sortOrder,
+          replace: true,
+          ...(opts?.onUploadProgress
+            ? { onUploadProgress: opts.onUploadProgress }
+            : {}),
+        });
+      };
+
+      let check: Awaited<ReturnType<typeof api.checkDealRoomUploadExists>> | null = null;
+      try {
+        check = await api.checkDealRoomUploadExists(roomId, file.name);
+      } catch {
+        // Preflight is best-effort; upload still handles 409 codes.
+      }
+      if (check?.exists && !check.replaceable && check.reason === "locked") {
+        throw new ApiError({
+          status: 409,
+          code: "resource_locked",
+          message: "resource_locked",
+          requestId: "",
+        });
+      }
+      if (check?.exists && check.replaceable) {
+        return confirmReplace();
+      }
+      try {
+        return await api.uploadDealRoomDocument(roomId, file, {
+          folderPath: opts?.folderPath,
+          sortOrder: opts?.sortOrder,
+          ...(opts?.onUploadProgress
+            ? { onUploadProgress: opts.onUploadProgress }
+            : {}),
+        });
+      } catch (err) {
+        if (!isDocumentExistsError(err)) {
+          throw err;
+        }
+        return confirmReplace();
+      }
+    },
+    [askReplace, t],
+  );
+
   const conflictDialog = (
     <DocumentExistsDialog
       open={Boolean(prompt)}
@@ -146,5 +206,5 @@ export function useDocumentUploadConflict(opts?: {
     />
   );
 
-  return { uploadDocument, conflictDialog, isAwaitingConflict: Boolean(prompt) };
+  return { uploadDocument, uploadDealRoomFile, conflictDialog, isAwaitingConflict: Boolean(prompt) };
 }

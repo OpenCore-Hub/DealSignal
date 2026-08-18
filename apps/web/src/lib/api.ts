@@ -118,6 +118,20 @@ export interface DashboardStats {
   recentActivities: RecentActivityItem[];
 }
 
+export type DealRoomMemberNdaPreview = {
+  ndaTemplate: {
+    id: string;
+    name: string;
+    contentSha256: string;
+    sourceDocumentId: string;
+  };
+  document: { id: string; title: string; pageCount: number; sourceType: string };
+  previewPageUrls?: string[];
+  documentUrl?: string;
+  signerEmail: string;
+  expiresAt: string;
+};
+
 export interface InsightsDailyVisit {
   date: string;
   opens: number;
@@ -1236,6 +1250,49 @@ export const api = {
     });
   },
 
+  checkDealRoomUploadExists: (roomId: string, filename: string) =>
+    request<{
+      exists: boolean;
+      replaceable?: boolean;
+      reason?: "locked";
+      document?: { id: string; title: string };
+    }>(
+      getWorkspaceSlug(),
+      `/deal-rooms/${roomId}/uploads/exists?filename=${encodeURIComponent(filename)}`,
+    ),
+
+  uploadDealRoomDocument: (
+    roomId: string,
+    file: File,
+    opts?: {
+      folderPath?: string;
+      sortOrder?: number;
+      replace?: boolean;
+      onUploadProgress?: (event: { loaded: number; total: number }) => void;
+    },
+  ) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    if (opts?.folderPath) formData.append("folder_path", opts.folderPath);
+    if (opts?.sortOrder != null) formData.append("sort_order", String(opts.sortOrder));
+    if (opts?.replace) formData.append("replace", "true");
+    if (opts?.onUploadProgress) {
+      return requestWithUploadProgress<Document>(
+        getWorkspaceSlug(),
+        `/deal-rooms/${roomId}/uploads`,
+        {
+          method: "POST",
+          body: formData,
+          onUploadProgress: opts.onUploadProgress,
+        },
+      );
+    }
+    return request<Document>(getWorkspaceSlug(), `/deal-rooms/${roomId}/uploads`, {
+      method: "POST",
+      body: formData,
+    });
+  },
+
   createLink: (documentIds: string[], config: PermissionConfig) =>
     request<Link>(getWorkspaceSlug(), "/links", {
       method: "POST",
@@ -1956,9 +2013,15 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(payload),
     }),
-  signDealRoomMemberNda: (roomId: string) =>
+  getDealRoomMemberNdaPreview: (roomId: string) =>
+    request<DealRoomMemberNdaPreview>(getWorkspaceSlug(), `/deal-rooms/${roomId}/nda-preview`),
+  signDealRoomMemberNda: (
+    roomId: string,
+    payload: { agreed: boolean; content_sha256?: string },
+  ) =>
     request<DealRoom>(getWorkspaceSlug(), `/deal-rooms/${roomId}/sign-nda`, {
       method: "POST",
+      body: JSON.stringify(payload),
     }),
   updateDealRoomMemberRole: (
     roomId: string,
@@ -2250,6 +2313,66 @@ export const api = {
       workspaceId: backend.workspace_id ?? backend.workspaceId ?? "",
       workspaceSlug: backend.workspace_slug ?? backend.workspaceSlug ?? "",
       workspaceName: backend.workspace_name ?? backend.workspaceName ?? "",
+    };
+  },
+
+  acceptDealRoomInvitation: async (token: string) => {
+    const backend = await request<{
+      user_id?: string;
+      userId?: string;
+      role?: string;
+      workspace_id?: string;
+      workspaceId?: string;
+      workspace_slug?: string;
+      workspaceSlug?: string;
+      workspace_name?: string;
+      workspaceName?: string;
+      room_id?: string;
+      roomId?: string;
+      room_name?: string;
+      roomName?: string;
+      member_status?: string;
+      memberStatus?: string;
+    }>(undefined, `/deal-room-invites/${encodeURIComponent(token)}/accept`, {
+      method: "POST",
+    });
+    return {
+      userId: backend.user_id ?? backend.userId ?? "",
+      role: backend.role ?? "guest",
+      workspaceId: backend.workspace_id ?? backend.workspaceId ?? "",
+      workspaceSlug: backend.workspace_slug ?? backend.workspaceSlug ?? "",
+      workspaceName: backend.workspace_name ?? backend.workspaceName ?? "",
+      roomId: backend.room_id ?? backend.roomId ?? "",
+      roomName: backend.room_name ?? backend.roomName ?? "",
+      memberStatus: backend.member_status ?? backend.memberStatus ?? "",
+    };
+  },
+
+  previewDealRoomInvitation: async (token: string) => {
+    const backend = await request<{
+      email?: string;
+      role?: string;
+      status?: string;
+      workspace_id?: string;
+      workspaceId?: string;
+      workspace_slug?: string;
+      workspaceSlug?: string;
+      workspace_name?: string;
+      workspaceName?: string;
+      room_id?: string;
+      roomId?: string;
+      room_name?: string;
+      roomName?: string;
+    }>(undefined, `/deal-room-invites/${encodeURIComponent(token)}`);
+    return {
+      email: backend.email ?? "",
+      role: backend.role ?? "guest",
+      status: (backend.status ?? "pending") as "pending" | "used",
+      workspaceId: backend.workspace_id ?? backend.workspaceId ?? "",
+      workspaceSlug: backend.workspace_slug ?? backend.workspaceSlug ?? "",
+      workspaceName: backend.workspace_name ?? backend.workspaceName ?? "",
+      roomId: backend.room_id ?? backend.roomId ?? "",
+      roomName: backend.room_name ?? backend.roomName ?? "",
     };
   },
 

@@ -36,7 +36,6 @@ import {
   type SelectionKey,
 } from "@/lib/dealRoomFolderTree";
 import { ResourcesToolbarHostContext } from "./DealRoomDocumentsHome";
-import { UploadCancelledError } from "@/hooks/useDocumentUploadConflict";
 import type { DealRoomDocumentItem, DealRoomFolder, DealRoomFolderDocs } from "@/types";
 
 /** Backend treats parent_path "/" as a top-level (root) folder create. */
@@ -345,17 +344,18 @@ export function DealRoomFolderTree({
       const baseSort = folderDocs.find((fd) => fd.folder === target)?.documents.length ?? 0;
       // Sequential so shared replace/cancel dialogs never race.
       for (let index = 0; index < selection.files.length; index++) {
-        await onFolderUpload(selection.files[index]!, target, baseSort + index);
-        uploaded += 1;
+        try {
+          await onFolderUpload(selection.files[index]!, target, baseSort + index);
+          uploaded += 1;
+        } catch {
+          // Per-file error/cancel is reported by the upload helper; keep the batch going.
+        }
       }
-      toast.success(t("folders.toolbar.batchUploadSuccess", { count: selection.files.length }));
-      clearSelection();
-    } catch (err) {
-      if (!(err instanceof UploadCancelledError)) {
-        toast.error(apiErrorMessage(err, { fallback: "uploadFailed", messageKey: "dealRooms:folders.toolbar.batchUploadFailed" }));
+      if (uploaded > 0) {
+        toast.success(t("folders.toolbar.batchUploadSuccess", { count: uploaded }));
+        clearSelection();
       }
     } finally {
-      // Refresh even when a later file is cancelled/fails so earlier successes appear.
       if (uploaded > 0) {
         await onChanged?.();
       }

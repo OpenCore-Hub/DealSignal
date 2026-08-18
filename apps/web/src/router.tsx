@@ -68,6 +68,9 @@ const ResetPasswordPage = lazy(() => import("@/routes/reset-password").then((m) 
 const AcceptInvitationPage = lazy(() =>
   import("@/routes/accept-invitation").then((m) => ({ default: m.AcceptInvitationPage })),
 );
+const AcceptRoomInvitationPage = lazy(() =>
+  import("@/routes/accept-room-invitation").then((m) => ({ default: m.AcceptRoomInvitationPage })),
+);
 const WorkspacesPage = lazy(() => import("@/routes/workspaces").then((m) => ({ default: m.WorkspacesPage })));
 const CreateWorkspacePage = lazy(() => import("@/routes/workspaces/new").then((m) => ({ default: m.CreateWorkspacePage })));
 
@@ -204,6 +207,16 @@ export const router = createBrowserRouter([
     element: (
       <Suspense fallback={<PageLoader />}>
         <AcceptInvitationPage />
+      </Suspense>
+    ),
+    errorElement: <RouteError />,
+  },
+  {
+    // Must be registered before /:workspaceSlug so invite links are not treated as workspace routes.
+    path: "/room-invitations/:token/accept",
+    element: (
+      <Suspense fallback={<PageLoader />}>
+        <AcceptRoomInvitationPage />
       </Suspense>
     ),
     errorElement: <RouteError />,

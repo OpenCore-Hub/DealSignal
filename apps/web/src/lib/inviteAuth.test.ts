@@ -10,5 +10,6 @@ describe("workspaceInviteTokenFromRedirect", () => {
     expect(workspaceInviteTokenFromRedirect("https://evil.example/invitations/tok-1/accept")).toBe("");
     expect(workspaceInviteTokenFromRedirect("/login")).toBe("");
     expect(workspaceInviteTokenFromRedirect("/invitations/../secrets/accept")).toBe("");
+    expect(workspaceInviteTokenFromRedirect("/room-invitations/dsr1.abc.def/accept")).toBe("");
   });
 });

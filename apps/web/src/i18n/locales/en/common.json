@@ -163,6 +163,7 @@
       "document_locked": "This document is locked in the data room.",
       "document_out_of_scope": "This document is not included in this share link.",
       "document_exists": "A document with this name already exists.",
+      "document_exists_outside_room": "This file is already in another data room.",
       "whitelist_denied": "Your email is not on the allowed list for this link.",
       "access_code_send_failed": "Could not send the verification code. Please try again.",
       "stream_error": "Connection interrupted. Please try again.",

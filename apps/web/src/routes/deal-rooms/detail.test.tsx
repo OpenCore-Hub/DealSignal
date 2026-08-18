@@ -9,6 +9,7 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DealRoomDetailPage } from "./detail";
 import { useWorkspaceAccess } from "@/hooks/useWorkspaceAccess";
+import { ApiError } from "@/lib/apiClient";
 import type { DealRoom, DealRoomFolder, DealRoomFolderDocs, DealRoomMember, DealRoomTemplate, Document } from "@/types";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -18,7 +19,7 @@ const {
   getDealRoomTemplatesMock,
   getDocumentsMock,
   getDocumentByIdMock,
-  uploadDocumentMock,
+  uploadDealRoomDocumentMock,
   addDealRoomDocumentMock,
   createDealRoomFolderMock,
   getDealRoomLinksMock,
@@ -27,12 +28,13 @@ const {
   getDealRoomKnowledgeMock,
   getDealRoomAnalyticsMock,
   getDealRoomMembersMock,
+  logoutMock,
 } = vi.hoisted(() => ({
   getDealRoomByIdMock: vi.fn(),
   getDealRoomTemplatesMock: vi.fn(),
   getDocumentsMock: vi.fn(),
   getDocumentByIdMock: vi.fn(),
-  uploadDocumentMock: vi.fn(),
+  uploadDealRoomDocumentMock: vi.fn(),
   addDealRoomDocumentMock: vi.fn(),
   createDealRoomFolderMock: vi.fn(),
   getDealRoomLinksMock: vi.fn(),
@@ -41,6 +43,7 @@ const {
   getDealRoomKnowledgeMock: vi.fn(),
   getDealRoomAnalyticsMock: vi.fn(),
   getDealRoomMembersMock: vi.fn(),
+  logoutMock: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({
@@ -50,7 +53,8 @@ vi.mock("@/lib/api", () => ({
     getDocuments: getDocumentsMock,
     getDocumentById: getDocumentByIdMock,
     checkDocumentExists: vi.fn().mockResolvedValue({ exists: false }),
-    uploadDocument: uploadDocumentMock,
+    checkDealRoomUploadExists: vi.fn().mockResolvedValue({ exists: false, replaceable: false }),
+    uploadDealRoomDocument: uploadDealRoomDocumentMock,
     addDealRoomDocument: addDealRoomDocumentMock,
     removeDealRoomDocument: vi.fn().mockResolvedValue(undefined),
     createDealRoomFolder: createDealRoomFolderMock,
@@ -123,6 +127,7 @@ vi.mock("@/lib/api", () => ({
     updateDealRoomMemberRole: vi.fn(),
     removeDealRoomMember: vi.fn(),
     listNDATemplates: vi.fn().mockResolvedValue({ data: [] }),
+    logout: logoutMock,
   },
 }));
 
@@ -253,6 +258,8 @@ async function renderPage(initialEntry = "/acme/deal-rooms/room-1") {
         <MemoryRouter initialEntries={[initialEntry]}>
           <Routes>
             <Route path=":workspaceSlug/deal-rooms/:roomId" element={<DealRoomDetailPage />} />
+            <Route path=":workspaceSlug/deal-rooms" element={<div>rooms-list</div>} />
+            <Route path="/login" element={<div>login-page</div>} />
           </Routes>
         </MemoryRouter>
       </I18nextProvider>
@@ -289,7 +296,7 @@ describe("DealRoomDetailPage", () => {
     getDealRoomByIdMock.mockReset();
     getDealRoomTemplatesMock.mockReset();
     getDocumentsMock.mockReset();
-    uploadDocumentMock.mockReset();
+    uploadDealRoomDocumentMock.mockReset();
     addDealRoomDocumentMock.mockReset();
     createDealRoomFolderMock.mockReset();
     getDocumentByIdMock.mockReset();
@@ -299,6 +306,7 @@ describe("DealRoomDetailPage", () => {
     getDealRoomKnowledgeMock.mockReset();
     getDealRoomAnalyticsMock.mockReset();
     getDealRoomMembersMock.mockReset();
+    logoutMock.mockReset();
     getDealRoomTemplatesMock.mockResolvedValue({ data: mockTemplates });
     getDocumentsMock.mockResolvedValue({ data: mockWorkspaceDocs });
     getDealRoomLinksMock.mockResolvedValue({ data: [] });
@@ -320,14 +328,14 @@ describe("DealRoomDetailPage", () => {
     getDealRoomMembersMock.mockResolvedValue({ data: mockMembers });
   });
 
-  async function uploadViaPageFileInput(file: File) {
+  async function uploadViaPageFileInput(...files: File[]) {
     // Drive the page-level multi-file input used by deal-room uploads.
-    // "Uploaded File.pdf" falls through to the first folder (/pitch) in mock data.
+    // Names that do not match a folder recommendation fall through to /pitch.
     const fileInput = await screen.findByTestId("deal-room-page-upload-input");
     await act(async () => {
       Object.defineProperty(fileInput, "files", {
         configurable: true,
-        value: [file],
+        value: files,
       });
       fireEvent.change(fileInput);
       await new Promise((resolve) => setTimeout(resolve, 0));
@@ -540,9 +548,32 @@ describe("DealRoomDetailPage", () => {
     });
   });
 
+  it("offers switch account instead of retry when the room is forbidden", async () => {
+    getDealRoomByIdMock.mockRejectedValue(
+      new ApiError({
+        status: 403,
+        code: "forbidden",
+        message: "forbidden",
+        requestId: "r1",
+      }),
+    );
+    logoutMock.mockResolvedValue(undefined);
+    await renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText(/not available on this account/i)).toBeInTheDocument();
+    });
+    expect(screen.queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /switch account/i }));
+    await waitFor(() => {
+      expect(logoutMock).toHaveBeenCalled();
+      expect(screen.getByText("login-page")).toBeInTheDocument();
+    });
+  });
+
   it("uploads a file to a folder via toolbar batch upload", async () => {
     getDealRoomByIdMock.mockResolvedValue(mockRoom);
-    uploadDocumentMock.mockResolvedValue({
+    uploadDealRoomDocumentMock.mockResolvedValue({
       id: "doc_new",
       title: "Uploaded File.pdf",
       sourceType: "pdf",
@@ -571,17 +602,73 @@ describe("DealRoomDetailPage", () => {
     await uploadViaPageFileInput(file);
 
     await waitFor(() => {
-      expect(uploadDocumentMock).toHaveBeenCalledWith(
+      expect(uploadDealRoomDocumentMock).toHaveBeenCalledWith(
+        "room-1",
         file,
-        undefined,
-        expect.objectContaining({ onUploadProgress: expect.any(Function) }),
+        expect.objectContaining({
+          folderPath: "/pitch",
+          sortOrder: 1,
+          onUploadProgress: expect.any(Function),
+        }),
       );
     });
-    expect(addDealRoomDocumentMock).toHaveBeenCalledWith("room-1", {
-      document_id: "doc_new",
-      folder_path: "/pitch",
-      sort_order: 1,
+    expect(addDealRoomDocumentMock).not.toHaveBeenCalled();
+  });
+
+  it("continues the page batch when one file fails", async () => {
+    getDealRoomByIdMock.mockResolvedValue(mockRoom);
+    uploadDealRoomDocumentMock
+      .mockRejectedValueOnce(
+        new ApiError({
+          status: 500,
+          code: "internal_error",
+          message: "upload failed",
+          requestId: "r1",
+        }),
+      )
+      .mockResolvedValueOnce({
+        id: "doc_ok",
+        title: "b.pdf",
+        sourceType: "pdf",
+        status: "processing",
+      });
+    getDocumentByIdMock.mockResolvedValue({
+      id: "doc_ok",
+      title: "b.pdf",
+      sourceType: "pdf",
+      fileName: "b.pdf",
+      fileType: "pdf",
+      fileSize: 1_000,
+      pageCount: 1,
+      status: "ready",
+      createdAt: "2026-06-20T10:00:00Z",
+      updatedAt: "2026-06-20T10:00:00Z",
     });
+    await renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Series A Data Room" })).toBeInTheDocument();
+    });
+
+    const first = new File(["a"], "a.pdf", { type: "application/pdf" });
+    const second = new File(["b"], "b.pdf", { type: "application/pdf" });
+    await uploadViaPageFileInput(first, second);
+
+    await waitFor(() => {
+      expect(uploadDealRoomDocumentMock).toHaveBeenCalledTimes(2);
+    });
+    expect(uploadDealRoomDocumentMock).toHaveBeenNthCalledWith(
+      1,
+      "room-1",
+      first,
+      expect.objectContaining({ folderPath: "/pitch" }),
+    );
+    expect(uploadDealRoomDocumentMock).toHaveBeenNthCalledWith(
+      2,
+      "room-1",
+      second,
+      expect.objectContaining({ folderPath: "/pitch" }),
+    );
   });
 
   it("creates a subdirectory from the selection toolbar", async () => {
@@ -604,7 +691,7 @@ describe("DealRoomDetailPage", () => {
 
   it("shows centered floating upload progress bar while uploading", async () => {
     getDealRoomByIdMock.mockResolvedValue(mockRoom);
-    uploadDocumentMock.mockResolvedValue({
+    uploadDealRoomDocumentMock.mockResolvedValue({
       id: "doc_new",
       title: "Uploaded File.pdf",
       sourceType: "pdf",
@@ -652,7 +739,7 @@ describe("DealRoomDetailPage", () => {
       // flash back to the loading skeleton while the upload overlay is shown.
       return new Promise((resolve) => setTimeout(() => resolve(mockRoom), 800));
     });
-    uploadDocumentMock.mockResolvedValue({
+    uploadDealRoomDocumentMock.mockResolvedValue({
       id: "doc_new",
       title: "Uploaded File.pdf",
       sourceType: "pdf",
@@ -696,7 +783,7 @@ describe("DealRoomDetailPage", () => {
 
   it("reflects real backend processing status in the progress bar", async () => {
     getDealRoomByIdMock.mockResolvedValue(mockRoom);
-    uploadDocumentMock.mockResolvedValue({
+    uploadDealRoomDocumentMock.mockResolvedValue({
       id: "doc_new",
       title: "Uploaded File.pdf",
       sourceType: "pdf",

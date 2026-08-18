@@ -106,3 +106,25 @@ export function actionNavigatePath(
       return null;
   }
 }
+
+/**
+ * Allowlist / access inbox for Diligence gate holds that have no operational
+ * sourceType (blocked_attempt). Document library and deal room must not cross.
+ * Mirrors apps/api/internal/radar/paths.go diligenceRemediationPath.
+ */
+export function diligenceRemediationPath(
+  workspaceSlug: string,
+  opts?: { dealRoomId?: string; linkId?: string },
+): string | null {
+  const slug = workspaceSlug.trim();
+  const roomId = opts?.dealRoomId?.trim();
+  const linkId = opts?.linkId?.trim();
+  if (!slug) return null;
+  if (roomId) {
+    return dealRoomAccessPath(slug, roomId, linkId ? { linkId } : undefined);
+  }
+  if (linkId) {
+    return documentsSharePath(slug, { linkId });
+  }
+  return null;
+}

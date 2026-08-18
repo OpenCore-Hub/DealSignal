@@ -410,6 +410,7 @@
     "askEscalateToHost": "Send to host",
     "askEscalating": "Sending…",
     "askAiUnavailable": "AI Ask is temporarily unavailable. You can ask the host instead.",
+    "askAiCorpusNotReady": "This room has no knowledge index yet. You can ask the host instead.",
     "askAiRateLimited": "Too many AI Ask requests. Please wait a moment or ask the host instead.",
     "askAiQuotaExceededVisitor": "This link’s AI answer quota is used up for now. Your question was sent to the host for a personal reply.",
     "askSheetLabel": "Sheet",

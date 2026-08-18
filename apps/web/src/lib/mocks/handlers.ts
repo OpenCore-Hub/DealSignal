@@ -1640,6 +1640,66 @@ function updateRoomDerivedFields(room: DealRoom) {
   if (room.tags === undefined) room.tags = [];
 }
 
+function findRoomDocumentItem(room: DealRoom, documentId: string): DealRoomDocumentItem | undefined {
+  for (const fd of getRoomFolderDocs(room)) {
+    const found = fd.documents.find((d) => d.document_id === documentId);
+    if (found) return found;
+  }
+  return undefined;
+}
+
+function findRoomDocumentByTitle(room: DealRoom, title: string): DealRoomDocumentItem | undefined {
+  for (const fd of getRoomFolderDocs(room)) {
+    const found = fd.documents.find((d) => d.title === title);
+    if (found) return found;
+  }
+  return undefined;
+}
+
+function attachDocumentToRoom(
+  room: DealRoom,
+  doc: (typeof mockDocuments)[number],
+  folderPath: string,
+  sortOrder?: number,
+): DealRoomDocumentItem | { error: "folder_not_found" } {
+  const folders = getRoomFolders(room);
+  if (!folders.some((f) => f.path === folderPath)) {
+    return { error: "folder_not_found" };
+  }
+  const docs = getRoomFolderDocs(room);
+  let fd = docs.find((d) => d.folder === folderPath);
+  if (!fd) {
+    fd = { folder: folderPath, permission: "view", documents: [] };
+    docs.push(fd);
+  }
+  const existing = fd.documents.find((d) => d.document_id === doc.id);
+  if (existing) {
+    existing.sort_order = sortOrder ?? existing.sort_order;
+    existing.folder_path = folderPath;
+    room.documents = docs;
+    doc.category = "deal_room";
+    updateRoomDerivedFields(room);
+    return existing;
+  }
+  const item: DealRoomDocumentItem = {
+    id: generateId("rd"),
+    document_id: doc.id,
+    title: doc.title,
+    folder_path: folderPath,
+    sort_order: sortOrder ?? nextSortOrder(fd.documents),
+    source_type: doc.sourceType,
+    status: doc.status,
+    page_count: doc.pageCount,
+    file_size: doc.fileSize,
+    created_at: doc.createdAt,
+  };
+  fd.documents.push(item);
+  room.documents = docs;
+  doc.category = "deal_room";
+  updateRoomDerivedFields(room);
+  return item;
+}
+
 export const handlers = [
   // Auth
   http.get("*/api/auth/captcha", () => {
@@ -4289,6 +4349,100 @@ export const handlers = [
     });
   }),
 
+  http.get("*/api/workspaces/:workspaceSlug/deal-rooms/:id/uploads/exists", ({ request, params }) => {
+    const room = findRoom(params.id as string);
+    if (!room) return new HttpResponse(null, { status: 404 });
+    const filename = new URL(request.url).searchParams.get("filename") ?? "";
+    const title = filename.split("/").pop()?.trim() ?? "";
+    const inRoom = findRoomDocumentByTitle(room, title);
+    if (!inRoom) {
+      return HttpResponse.json({ exists: false, replaceable: false });
+    }
+    const folderLocked = getRoomFolders(room).some((f) => f.path === inRoom.folder_path && f.locked);
+    if (inRoom.locked || folderLocked) {
+      return HttpResponse.json({
+        exists: true,
+        replaceable: false,
+        reason: "locked",
+        document: { id: inRoom.document_id, title: inRoom.title },
+      });
+    }
+    return HttpResponse.json({
+      exists: true,
+      replaceable: true,
+      document: { id: inRoom.document_id, title: inRoom.title },
+    });
+  }),
+
+  http.post("*/api/workspaces/:workspaceSlug/deal-rooms/:id/uploads", async ({ request, params }) => {
+    const room = findRoom(params.id as string);
+    if (!room) return new HttpResponse(null, { status: 404 });
+    const formData = await request.formData();
+    const file = formData.get("file") as File | null;
+    const replace = ["1", "true", "yes", "on"].includes(
+      String(formData.get("replace") ?? "").toLowerCase(),
+    );
+    const folderPath = String(formData.get("folder_path") ?? getRoomFolders(room)[0]?.path ?? "/general");
+    const sortRaw = formData.get("sort_order");
+    const sortOrder = sortRaw == null || String(sortRaw) === "" ? undefined : Number(sortRaw);
+    const title = file?.name ?? "uploaded.pdf";
+    const ext = title.split(".").pop()?.toLowerCase() ?? "pdf";
+    const inRoom = findRoomDocumentByTitle(room, title);
+    const existing = inRoom
+      ? mockDocuments.find((d) => d.id === inRoom.document_id)
+      : undefined;
+    if (inRoom && !replace) {
+      return HttpResponse.json(
+        {
+          code: "document_exists",
+          message: "a document with this filename already exists",
+          document: { id: inRoom.document_id, title: inRoom.title },
+        },
+        { status: 409 },
+      );
+    }
+    const folderLocked = getRoomFolders(room).some((f) => f.path === folderPath && f.locked);
+    if (folderLocked || inRoom?.locked) {
+      return HttpResponse.json(
+        { code: "resource_locked", message: "resource is locked" },
+        { status: 409 },
+      );
+    }
+    const fileType = (["pdf", "docx", "pptx", "xlsx"] as const).includes(ext as never)
+      ? (ext as import("@/types").Document["fileType"])
+      : "pdf";
+    let doc = existing;
+    if (doc && replace) {
+      doc.fileSize = file?.size ?? doc.fileSize;
+      doc.fileType = fileType;
+      doc.sourceType = fileType;
+      doc.fileName = title;
+      doc.status = "ready";
+      doc.category = "deal_room";
+      doc.updatedAt = new Date().toISOString();
+    } else {
+      doc = {
+        id: generateId("doc"),
+        title,
+        sourceType: fileType,
+        fileName: title,
+        fileType,
+        fileSize: file?.size ?? 1_000_000,
+        pageCount: 10,
+        status: "ready" as const,
+        category: "deal_room" as import("@/types").DocumentCategory,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      mockDocuments.unshift(doc);
+    }
+    const attached = attachDocumentToRoom(room, doc, folderPath, Number.isFinite(sortOrder) ? sortOrder : undefined);
+    if ("error" in attached) {
+      return HttpResponse.json({ code: "folder_not_found", message: "folder not found" }, { status: 404 });
+    }
+    return HttpResponse.json(doc, { status: 201 });
+  }),
+
   http.post("*/api/workspaces/:workspaceSlug/deal-rooms/:id/documents", async ({ request, params }) => {
     const room = findRoom(params.id as string);
     if (!room) return new HttpResponse(null, { status: 404 });
@@ -4313,29 +4467,37 @@ export const handlers = [
     if (!folders.some((f) => f.path === folderPath)) {
       return HttpResponse.json({ code: "folder_not_found", message: "folder not found" }, { status: 404 });
     }
-    const docs = getRoomFolderDocs(room);
-    let fd = docs.find((d) => d.folder === folderPath);
-    if (!fd) {
-      fd = { folder: folderPath, permission: "view", documents: [] };
-      docs.push(fd);
+    const alreadyHere = findRoomDocumentItem(room, doc.id);
+    if (!alreadyHere) {
+      const otherLive = mockDealRooms.find(
+        (r) => r.id !== room.id && r.status !== "archived" && findRoomDocumentItem(r, doc.id),
+      );
+      if (otherLive) {
+        return HttpResponse.json(
+          {
+            code: "document_exists_outside_room",
+            message: "this document is already in another live data room",
+          },
+          { status: 409 },
+        );
+      }
+      const titleHit = findRoomDocumentByTitle(room, doc.title);
+      if (titleHit && titleHit.document_id !== doc.id) {
+        return HttpResponse.json(
+          {
+            code: "document_exists",
+            message: "a document with this filename already exists",
+            document: { id: titleHit.document_id, title: titleHit.title },
+          },
+          { status: 409 },
+        );
+      }
     }
-    const item: DealRoomDocumentItem = {
-      id: generateId("rd"),
-      document_id: doc.id,
-      title: doc.title,
-      folder_path: folderPath,
-      sort_order: body.sort_order ?? nextSortOrder(fd.documents),
-      source_type: doc.sourceType,
-      status: doc.status,
-      page_count: doc.pageCount,
-      file_size: doc.fileSize,
-      created_at: doc.createdAt,
-    };
-    fd.documents.push(item);
-    room.documents = docs;
-    doc.category = "deal_room";
-    updateRoomDerivedFields(room);
-    return HttpResponse.json(item, { status: 201 });
+    const attached = attachDocumentToRoom(room, doc, folderPath, body.sort_order);
+    if ("error" in attached) {
+      return HttpResponse.json({ code: "folder_not_found", message: "folder not found" }, { status: 404 });
+    }
+    return HttpResponse.json(attached, { status: 201 });
   }),
 
   http.patch("*/api/workspaces/:workspaceSlug/deal-rooms/:id/documents/:docId", async ({ request, params }) => {
@@ -4453,9 +4615,48 @@ export const handlers = [
     return HttpResponse.json(room);
   }),
 
-  http.post("*/api/workspaces/:workspaceSlug/deal-rooms/:id/sign-nda", ({ params }) => {
+  http.get("*/api/workspaces/:workspaceSlug/deal-rooms/:id/nda-preview", ({ params }) => {
     const room = findRoom(params.id as string);
     if (!room) return new HttpResponse(null, { status: 404 });
+    if (!room.ndaRequired) {
+      return HttpResponse.json({ code: "nda_not_required", message: "nda is not required" }, { status: 404 });
+    }
+    return HttpResponse.json({
+      ndaTemplate: {
+        id: room.ndaTemplateId ?? "nda-tpl-mock",
+        name: "Standard NDA",
+        contentSha256: "mock-nda-sha",
+        sourceDocumentId: room.ndaDocumentId ?? "nda-doc-mock",
+      },
+      document: {
+        id: room.ndaDocumentId ?? "nda-doc-mock",
+        title: "Standard NDA",
+        pageCount: 1,
+        sourceType: "upload",
+      },
+      previewPageUrls: ["https://files.example/nda-page-1.png"],
+      documentUrl: "https://files.example/nda.pdf?disposition=inline",
+      signerEmail: "invitee@example.com",
+      expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+    });
+  }),
+
+  http.post("*/api/workspaces/:workspaceSlug/deal-rooms/:id/sign-nda", async ({ request, params }) => {
+    const room = findRoom(params.id as string);
+    if (!room) return new HttpResponse(null, { status: 404 });
+    let agreed = false;
+    try {
+      const body = (await request.json()) as { agreed?: boolean };
+      agreed = body.agreed === true;
+    } catch {
+      agreed = false;
+    }
+    if (room.ndaRequired && !agreed) {
+      return HttpResponse.json(
+        { code: "nda_consent_required", message: "nda consent is required" },
+        { status: 400 },
+      );
+    }
     room.ndaRequired = false;
     room.memberStatus = "active";
     return HttpResponse.json(room);
@@ -5443,6 +5644,20 @@ export const handlers = [
       workspace_slug: "acme-capital",
       workspace_name: "Demo Workspace",
     });
+  }),
+
+  http.get("*/api/deal-room-invites/:token", () => {
+    return HttpResponse.json(
+      { code: "invitation_not_found", message: "invitation not found" },
+      { status: 404 },
+    );
+  }),
+
+  http.post("*/api/deal-room-invites/:token/accept", () => {
+    return HttpResponse.json(
+      { code: "invitation_not_found", message: "invitation not found" },
+      { status: 404 },
+    );
   }),
 
   http.put("*/api/workspaces/:workspaceSlug/members/:userId", async ({ params, request }) => {

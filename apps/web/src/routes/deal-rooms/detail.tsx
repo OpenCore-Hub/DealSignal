@@ -6,6 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { PageHeader } from "@/components/common/PageHeader";
 import { SkeletonDetail } from "@/components/common/SkeletonLayout";
 import { api } from "@/lib/api";
+import { ApiError } from "@/lib/apiClient";
 import { apiErrorMessage, ingestionErrorLabel } from "@/lib/apiErrors";
 import { filterUploadSelection, notifyUploadSelectionFiltered } from "@/lib/uploadFileFilters";
 import { useTranslation } from "react-i18next";
@@ -84,7 +85,7 @@ export function DealRoomDetailPage() {
   const { t } = useTranslation("dealRooms");
   const { t: tc } = useTranslation("common");
   const { t: td } = useTranslation("documents");
-  const { uploadDocument, conflictDialog } = useDocumentUploadConflict();
+  const { uploadDealRoomFile, conflictDialog } = useDocumentUploadConflict();
   const { workspaceSlug, roomId } = useParams<{ workspaceSlug: string; roomId: string }>();
   const { loading: accessLoading } = useWorkspaceAccess(workspaceSlug);
   const navigate = useNavigate();
@@ -102,6 +103,7 @@ export function DealRoomDetailPage() {
   const [accessLinkId, setAccessLinkId] = useState<string | undefined>();
   const [accessPolicyDirty, setAccessPolicyDirty] = useState(false);
   const [pendingLeaveTab, setPendingLeaveTab] = useState<DealRoomTab | null>(null);
+  const [forbiddenSwitching, setForbiddenSwitching] = useState(false);
   const { tab, setTab } = useDealRoomTab();
 
   const requestTabChange = useCallback(
@@ -149,11 +151,18 @@ export function DealRoomDetailPage() {
     if (!roomId) {
       throw new Error(t("detail.notFound"));
     }
-    const [r, tRes] = await Promise.all([
-      api.getDealRoomById(roomId),
-      api.getDealRoomTemplates(),
-    ]);
-    return { room: r, templates: tRes.data };
+    try {
+      const [r, tRes] = await Promise.all([
+        api.getDealRoomById(roomId),
+        api.getDealRoomTemplates(),
+      ]);
+      return { room: r, templates: tRes.data, forbidden: false as const };
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 403) {
+        return { room: null, templates: [], forbidden: true as const };
+      }
+      throw e;
+    }
   }, [roomId, t]);
 
   const { data, loading, error, refetch } = useAsyncData(fetchRoom, [roomId]);
@@ -300,8 +309,13 @@ export function DealRoomDetailPage() {
       ]);
 
       try {
-        // Upload as general; AddDocument promotes to deal_room atomically in sequence.
-        const doc = await uploadDocument(file, undefined, {
+        const order =
+          sortOrder ??
+          (room?.documents ?? []).find((fd) => fd.folder === folderPath)?.documents.length ??
+          0;
+        const doc = await uploadDealRoomFile(roomId, file, {
+          folderPath,
+          sortOrder: order,
           onUploadProgress: ({ loaded, total }) => {
             const pct = transferBarPercent(loaded, total);
             if (pct == null) return;
@@ -315,21 +329,9 @@ export function DealRoomDetailPage() {
           },
         });
 
-        const order =
-          sortOrder ??
-          (room?.documents ?? []).find((fd) => fd.folder === folderPath)?.documents.length ??
-          0;
-        // Backend AddDocument is idempotent: re-add after replace updates folder
-        // placement instead of failing on UNIQUE(room_id, document_id).
-        await api.addDealRoomDocument(roomId, {
-          document_id: doc.id,
-          folder_path: folderPath,
-          sort_order: order,
-        });
-
-        // HTTP upload + room association succeeded, but the backend may still be
-        // processing the document. Show the real backend status instead of jumping
-        // straight to "done" so this popup stays in sync with the Documents page.
+        // HTTP upload succeeded, but the backend may still be processing the
+        // document. Show the real backend status instead of jumping straight
+        // to "done" so this popup stays in sync with the Documents page.
         setUploadItems((prev) =>
           prev.map((item) =>
             item.id === id
@@ -365,7 +367,7 @@ export function DealRoomDetailPage() {
         if (fileInputRef.current) fileInputRef.current.value = "";
       }
     },
-    [roomId, folderByPath, room?.documents, tc, td, pollDocumentStatus, uploadDocument, refetch]
+    [roomId, folderByPath, room?.documents, td, pollDocumentStatus, uploadDealRoomFile, refetch]
   );
 
   const resolveTargetFolder = useCallback(
@@ -408,8 +410,7 @@ export function DealRoomDetailPage() {
           try {
             await uploadFileToFolder(folderFiles[index]!, folderPath, base + index);
           } catch {
-            // Stop the batch after cancel/error; earlier successes already refreshed.
-            return;
+            // Per-file error/cancel already toasted; keep the rest of the batch.
           }
         }
       }
@@ -505,6 +506,42 @@ export function DealRoomDetailPage() {
   // Only show the full loading/error placeholders on the initial load. During
   // background refetches (e.g. after a document finishes processing) we keep the
   // existing room rendered so the page doesn't flash behind the upload overlay.
+  if (data?.forbidden) {
+    return (
+      <div className="space-y-6">
+        <div className="flex flex-col items-center justify-center gap-4 rounded-lg border border-border p-12 text-center">
+          <p className="text-muted-foreground">{t("detail.forbiddenAccount")}</p>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <Button
+              disabled={forbiddenSwitching}
+              onClick={() => {
+                setForbiddenSwitching(true);
+                void (async () => {
+                  try {
+                    await api.logout();
+                  } catch {
+                    // Continue even if logout fails.
+                  }
+                  const redirect =
+                    workspaceSlug && roomId ? `/${workspaceSlug}/deal-rooms/${roomId}` : "/login";
+                  navigate(`/login?redirect=${encodeURIComponent(redirect)}`, { replace: true });
+                })();
+              }}
+            >
+              {t("detail.switchAccount")}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => navigate(workspaceSlug ? `/${workspaceSlug}/deal-rooms` : "/")}
+            >
+              {t("detail.back")}
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (error && !room) {
     return (
       <div className="space-y-6">
