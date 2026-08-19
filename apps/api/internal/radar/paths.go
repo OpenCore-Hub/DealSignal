@@ -31,7 +31,9 @@ func navigatePath(workspaceSlug string, sourceType, sourceID, targetID string, f
 		}
 		return dealRoomAccessPath(slug, roomID, "")
 	case action.SourceTypeExpiringRoom:
-		return "/" + slug + "/deal-rooms/" + sourceID
+		// No host editor writes deal_rooms.expires_at. Empty so ACT cannot
+		// open the documents tab as a fake renew.
+		return ""
 	case action.SourceTypeDealRoomLinkQuestion:
 		if targetID == "" {
 			return ""

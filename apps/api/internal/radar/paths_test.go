@@ -2,6 +2,13 @@ package radar
 
 import "testing"
 
+func TestNavigatePathExpiringRoomEmpty(t *testing.T) {
+	got := navigatePath("acme", "expiring_room", "room-1", "", false)
+	if got != "" {
+		t.Fatalf("got %q want empty (no room-expiry editor)", got)
+	}
+}
+
 func TestNavigatePathDealRoomAccess(t *testing.T) {
 	got := navigatePath("acme", "deal_room_link_access_request", "link-1", "room-1", false)
 	want := "/acme/deal-rooms/room-1?tab=access&linkId=link-1"

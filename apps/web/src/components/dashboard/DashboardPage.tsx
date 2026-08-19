@@ -21,6 +21,7 @@ import { useRadarStore } from "@/stores/radarStore";
 import type { ActionStatus } from "@/types";
 import {
   decrementRadarCounts,
+  isRadarRoomExpiryItem,
   parseRadarCircle,
   type RadarFeed,
   type RadarOutcome,
@@ -128,6 +129,10 @@ export function DashboardPage() {
       return;
     }
     if (item.product === "buying_window" && item.verb === "open") {
+      return;
+    }
+    // Room expiry has no host editor. Do not fall through to documents.
+    if (isRadarRoomExpiryItem(item)) {
       return;
     }
     const path = item.navigatePath || item.evidencePath;

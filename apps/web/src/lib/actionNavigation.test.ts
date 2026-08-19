@@ -144,6 +144,16 @@ describe("actionNavigatePath", () => {
     expect(path).not.toMatch(/\/links\//);
   });
 
+  it("does not send deal-room expiry to the documents tab", () => {
+    expect(
+      actionNavigatePath("acme", {
+        sourceType: "expiring_room",
+        sourceId: "room-1",
+        actionType: "renew",
+      }),
+    ).toBeNull();
+  });
+
   it("routes document-library expiring links to the expiry editor", () => {
     expect(
       actionNavigatePath("acme", {

@@ -14,6 +14,7 @@ import {
   parseRadarCircle,
   parseRadarFilter,
   productRankForCircle,
+  isRadarRoomExpiryItem,
   radarCtaKey,
   radarEmailContactLabel,
   radarHeadlineKey,
@@ -199,6 +200,28 @@ describe("radarQueue", () => {
       "radar.ctaByProduct.buying_window.confirmRecipient",
     );
     expect(radarCtaKey("access_decay", "open")).toBe("radar.cta.open");
+    expect(
+      isRadarRoomExpiryItem({
+        product: "access_decay",
+        verb: "renew",
+        dealRoomId: "room-1",
+      }),
+    ).toBe(true);
+    expect(
+      isRadarRoomExpiryItem({
+        product: "access_decay",
+        verb: "renew",
+        dealRoomId: "room-1",
+        linkId: "link-room",
+      }),
+    ).toBe(false);
+    expect(
+      isRadarRoomExpiryItem({
+        product: "access_decay",
+        verb: "renew",
+        linkId: "link-doc",
+      }),
+    ).toBe(false);
     expect(radarEmailContactLabel({ contactEmail: "buyer@acme.test" })).toBe(
       "buyer@acme.test",
     );

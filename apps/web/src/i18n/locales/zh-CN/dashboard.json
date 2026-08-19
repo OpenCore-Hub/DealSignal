@@ -46,7 +46,8 @@
       }
     },
     "suggestion": {
-      "email": "建议给 {{contact}} 发邮件"
+      "email": "建议给 {{contact}} 发邮件",
+      "roomExpiry": "数据室到期时间无法在应用内修改"
     },
     "evidence": "证据",
     "snooze": "延后",

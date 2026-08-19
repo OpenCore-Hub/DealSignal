@@ -227,6 +227,21 @@ export function outcomesForProduct(
   }
 }
 
+/** Room-level expiry: deal_rooms.expires_at has no host editor. Library / room-share renew still have linkId. */
+export function isRadarRoomExpiryItem(item: {
+  product: RadarProduct;
+  verb?: RadarVerb;
+  dealRoomId?: string;
+  linkId?: string;
+}): boolean {
+  return (
+    item.product === "access_decay" &&
+    item.verb === "renew" &&
+    Boolean(item.dealRoomId?.trim()) &&
+    !item.linkId?.trim()
+  );
+}
+
 /** Copy key for the row action. Warm-card email is a suggestion, not a send CTA. */
 export function radarCtaKey(product: RadarProduct, verb: RadarVerb): string {
   if (verb === "review" && (product === "diligence_gate" || product === "leak_watch")) {

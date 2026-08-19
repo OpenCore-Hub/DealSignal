@@ -1368,3 +1368,43 @@ func TestCompileExpiringDealRoomShareStaysOnLinkDetail(t *testing.T) {
 		t.Fatalf("navigatePath=%s want %s (must not open the library editor)", got.NavigatePath, wantNav)
 	}
 }
+
+func TestCompileExpiringRoomDoesNotNavigateToDocuments(t *testing.T) {
+	now := time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC)
+	roomID := uuid.New().String()
+	feed := Compile(CompileInput{
+		WorkspaceSlug: "acme",
+		Now:           now,
+		Rooms: map[string]RoomMeta{
+			roomID: {Name: "Fundraise"},
+		},
+		Actions: []db.ActionItem{{
+			ID:         mustUUID(uuid.New()),
+			Title:      "Room expires soon",
+			Impact:     "high",
+			Status:     "pending",
+			ActionType: "renew",
+			SourceType: pgText(action.SourceTypeExpiringRoom),
+			SourceID:   pgText(roomID),
+			CreatedAt:  pgTime(now.Add(-10 * time.Minute)),
+			DueAt:      pgTime(now.Add(48 * time.Hour)),
+			UpdatedAt:  pgTime(now),
+		}},
+	})
+	if len(feed.Items) != 1 {
+		t.Fatalf("items=%d", len(feed.Items))
+	}
+	got := feed.Items[0]
+	if got.Product != ProductAccessDecay || got.Verb != VerbRenew {
+		t.Fatalf("product=%s verb=%s", got.Product, got.Verb)
+	}
+	if got.DealRoomID != roomID {
+		t.Fatalf("dealRoomId=%s want %s", got.DealRoomID, roomID)
+	}
+	if got.LinkID != "" {
+		t.Fatalf("linkId=%s want empty (room-level expiry, not a share)", got.LinkID)
+	}
+	if got.NavigatePath != "" {
+		t.Fatalf("navigatePath=%s want empty (no room-expiry editor)", got.NavigatePath)
+	}
+}

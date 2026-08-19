@@ -46,7 +46,8 @@
       }
     },
     "suggestion": {
-      "email": "Suggested: email {{contact}}"
+      "email": "Suggested: email {{contact}}",
+      "roomExpiry": "Room expiry can't be changed in this app"
     },
     "evidence": "Evidence",
     "snooze": "Snooze",

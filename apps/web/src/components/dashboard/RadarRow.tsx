@@ -18,6 +18,7 @@ import { isOverdue, daysOverdue } from "@/lib/calculations";
 import { radarRowIdentities } from "@/lib/radarEvidencePresentation";
 import {
   defaultOutcomeForProduct,
+  isRadarRoomExpiryItem,
   outcomesForProduct,
   radarCtaKey,
   radarEmailContactLabel,
@@ -79,7 +80,8 @@ export function RadarRow({
   const identities = radarRowIdentities(item);
   const emailContact = radarEmailContactLabel(item);
   const emailSuggestion = item.verb === "email" ? emailContact : null;
-  const showPrimary = item.verb !== "email";
+  const roomExpirySuggestion = isRadarRoomExpiryItem(item);
+  const showPrimary = item.verb !== "email" && !roomExpirySuggestion;
 
   return (
     <div
@@ -193,6 +195,13 @@ export function RadarRow({
             data-testid="radar-email-suggestion"
           >
             {t("radar.suggestion.email", { contact: emailSuggestion })}
+          </span>
+        ) : roomExpirySuggestion ? (
+          <span
+            className="max-w-[12rem] text-right text-caption text-muted-foreground"
+            data-testid="radar-room-expiry-suggestion"
+          >
+            {t("radar.suggestion.roomExpiry")}
           </span>
         ) : showPrimary ? (
           <Button

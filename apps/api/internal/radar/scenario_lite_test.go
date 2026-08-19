@@ -143,6 +143,9 @@ func TestCompileRealEstateAccessDecayHeadline(t *testing.T) {
 	if feed.NextUp.Verb != VerbRenew {
 		t.Fatalf("verb=%s", feed.NextUp.Verb)
 	}
+	if feed.NextUp.NavigatePath != "" {
+		t.Fatalf("navigatePath=%s want empty (no room-expiry editor)", feed.NextUp.NavigatePath)
+	}
 }
 
 func gateAndAskActions(now time.Time, roomID string) []db.ActionItem {

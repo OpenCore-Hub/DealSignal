@@ -94,6 +94,7 @@ async function renderPage(waitForLoad = true, entry = "/acme/dashboard") {
       "radar.cta.reply": "Reply",
       "radar.cta.email": "Email",
       "radar.suggestion.email": "Suggested: email {{contact}}",
+      "radar.suggestion.roomExpiry": "Room expiry can't be changed in this app",
       "radar.ctaByProduct.buying_window.confirmRecipient": "Confirm who to email",
       "radar.cta.renew": "Renew",
       "radar.cta.review": "Review",
@@ -449,6 +450,34 @@ describe("DashboardPage inbox", () => {
     fireEvent.click(
       within(nextUp).getByRole("button", { name: /^Confirm who to email$/i }),
     );
+    expect(mockFns.navigate).not.toHaveBeenCalled();
+  });
+
+  it("does not open the documents tab for a deal-room expiry card", async () => {
+    mockFns.getRadar.mockResolvedValue(
+      makeFeed([
+        makeItem({
+          id: "act-room",
+          actionId: "act-room",
+          product: "access_decay",
+          verb: "renew",
+          headline: "Room access expiring",
+          dealRoomId: "room-1",
+          linkId: undefined,
+          navigatePath: "/acme/deal-rooms/room-1",
+          evidencePath: "/acme/deal-rooms/room-1",
+        }),
+      ]),
+    );
+
+    await renderPage();
+    const nextUp = await screen.findByTestId("radar-next-up");
+    expect(
+      within(nextUp).getByTestId("radar-room-expiry-suggestion"),
+    ).toHaveTextContent("Room expiry can't be changed in this app");
+    expect(
+      within(nextUp).queryByRole("button", { name: /^Renew$/i }),
+    ).not.toBeInTheDocument();
     expect(mockFns.navigate).not.toHaveBeenCalled();
   });
 

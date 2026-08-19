@@ -80,7 +80,9 @@ export function actionNavigatePath(
     }
 
     case "expiring_room":
-      return `/${workspaceSlug}/deal-rooms/${action.sourceId}`;
+      // No host editor writes deal_rooms.expires_at. Null so ACT cannot
+      // open the documents tab as a fake renew.
+      return null;
 
     case "deal_room_link_question": {
       if (!action.targetId) return null;

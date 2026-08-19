@@ -39,9 +39,12 @@ async function renderRow(
     dashboard: {
       "radar.products.buying_window": "Hot intent",
       "radar.products.diligence_gate": "Diligence gate",
+      "radar.products.access_decay": "Access expiring",
       "radar.cta.approve": "Approve",
       "radar.cta.email": "Email",
+      "radar.cta.renew": "Renew",
       "radar.suggestion.email": "Suggested: email {{contact}}",
+      "radar.suggestion.roomExpiry": "Room expiry can't be changed in this app",
       "radar.ctaByProduct.buying_window.confirmRecipient": "Confirm who to email",
       "radar.cta.review": "Review",
       "radar.ctaByProduct.diligence_gate.review": "See this hold",
@@ -215,5 +218,41 @@ describe("RadarRow", () => {
     expect(
       screen.queryByRole("button", { name: /^Review$/i }),
     ).not.toBeInTheDocument();
+  });
+
+  it("does not offer Renew for a deal-room expiry with no editor", async () => {
+    const { onPrimary } = await renderRow(
+      makeItem({
+        product: "access_decay",
+        verb: "renew",
+        headline: "Room access expiring",
+        dealRoomId: "room-1",
+        linkId: undefined,
+        navigatePath: "/acme/deal-rooms/room-1",
+        evidencePath: "/acme/deal-rooms/room-1",
+      }),
+    );
+    expect(screen.getByTestId("radar-room-expiry-suggestion")).toHaveTextContent(
+      "Room expiry can't be changed in this app",
+    );
+    expect(
+      screen.queryByRole("button", { name: /^Renew$/i }),
+    ).not.toBeInTheDocument();
+    expect(onPrimary).not.toHaveBeenCalled();
+  });
+
+  it("still offers Renew for a library share expiry", async () => {
+    const { onPrimary } = await renderRow(
+      makeItem({
+        product: "access_decay",
+        verb: "renew",
+        headline: "Link expires soon",
+        linkId: "l1",
+        dealRoomId: undefined,
+        navigatePath: "/acme/links/l1/edit?focus=expiry",
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^Renew$/i }));
+    expect(onPrimary).toHaveBeenCalledTimes(1);
   });
 });

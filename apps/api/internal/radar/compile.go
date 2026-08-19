@@ -668,12 +668,15 @@ func buildItem(in CompileInput, a db.ActionItem, sig *db.Signal, product Product
 	// (document content/analytics) onto NavigatePath — including when the
 	// card later demotes to open because no recipient email is present.
 	emailAct := verb == VerbEmail
+	// Room expiry has no host editor. Do not copy evidence (or the default
+	// documents tab) onto NavigatePath as a fake renew.
+	roomExpiry := src == action.SourceTypeExpiringRoom
 	// Leak / abuse are signal-backed (empty sourceType). Primary CTA must
 	// match the evidence-rail share link, not a document content tab.
 	if nav == "" && (product == ProductLeakWatch || product == ProductAbuseGuard) && strings.TrimSpace(linkID) != "" {
 		nav = insightsPath(in.WorkspaceSlug, linkID, "")
 	}
-	if nav == "" && !emailAct {
+	if nav == "" && !emailAct && !roomExpiry {
 		nav = ev
 	}
 	if verb == VerbEmail && email == "" {
