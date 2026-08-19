@@ -400,9 +400,9 @@
       "choose": "Choose completion reason",
       "acted": "Acted",
       "false_positive": "No action needed",
-      "renewed": "Renewed",
-      "approved": "Approved",
-      "replied": "Replied",
+      "renewed": "Cleared from this list",
+      "approved": "Cleared from this list",
+      "replied": "Cleared from this list",
       "other": "Other"
     },
     "outcomeByProduct": {

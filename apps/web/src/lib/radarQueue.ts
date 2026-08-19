@@ -203,39 +203,25 @@ export function isEditableKeyboardTarget(target: EventTarget | null): boolean {
   return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
 }
 
-/** Default completion outcome when the user marks done without choosing. */
+/** Default queue-clear reason when the user marks done without choosing.
+ *  These are radar-list markers, not Share approve / Ask reply / link renew. */
 export function defaultOutcomeForProduct(
-  product: RadarProduct,
-  verb?: RadarVerb,
+  _product: RadarProduct,
+  _verb?: RadarVerb,
 ): RadarOutcome {
-  switch (product) {
-    case "diligence_gate":
-      return verb === "review" ? "acted" : "approved";
-    case "commitment_ask":
-      return "replied";
-    case "access_decay":
-      return "renewed";
-    default:
-      return "acted";
-  }
+  return "acted";
 }
 
 /** Outcomes offered in the complete menu for a product. */
 export function outcomesForProduct(
   product: RadarProduct,
-  verb?: RadarVerb,
+  _verb?: RadarVerb,
 ): RadarOutcome[] {
   switch (product) {
     case "leak_watch":
     case "abuse_guard":
-      return ["acted", "false_positive"];
     case "diligence_gate":
-      if (verb === "review") return ["acted", "false_positive"];
-      return ["approved", "false_positive"];
-    case "commitment_ask":
-      return ["replied", "acted"];
-    case "access_decay":
-      return ["renewed", "acted"];
+      return ["acted", "false_positive"];
     default:
       return ["acted"];
   }

@@ -400,9 +400,9 @@
       "choose": "选择完成原因",
       "acted": "已处理",
       "false_positive": "无需处理",
-      "renewed": "已续期",
-      "approved": "已审批",
-      "replied": "已回复",
+      "renewed": "已从本列表清掉",
+      "approved": "已从本列表清掉",
+      "replied": "已从本列表清掉",
       "other": "其他"
     },
     "outcomeByProduct": {

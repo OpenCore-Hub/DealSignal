@@ -167,12 +167,21 @@ describe("radarQueue", () => {
   it("parses circle lens and default outcomes", () => {
     expect(parseRadarCircle("sales")).toBe("sales");
     expect(parseRadarCircle("nope")).toBe("founder");
-    expect(defaultOutcomeForProduct("diligence_gate")).toBe("approved");
+    expect(defaultOutcomeForProduct("diligence_gate")).toBe("acted");
+    expect(defaultOutcomeForProduct("diligence_gate", "approve")).toBe("acted");
     expect(defaultOutcomeForProduct("diligence_gate", "review")).toBe("acted");
+    expect(defaultOutcomeForProduct("commitment_ask")).toBe("acted");
+    expect(defaultOutcomeForProduct("access_decay")).toBe("acted");
     expect(outcomesForProduct("diligence_gate", "review")).toEqual([
       "acted",
       "false_positive",
     ]);
+    expect(outcomesForProduct("diligence_gate", "approve")).toEqual([
+      "acted",
+      "false_positive",
+    ]);
+    expect(outcomesForProduct("commitment_ask")).toEqual(["acted"]);
+    expect(outcomesForProduct("access_decay")).toEqual(["acted"]);
     expect(outcomesForProduct("leak_watch")).toEqual([
       "acted",
       "false_positive",
