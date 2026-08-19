@@ -1132,6 +1132,101 @@ func TestCompileBuyingWindowEmptyEmailDoesNotNavigateToDocument(t *testing.T) {
 	}
 }
 
+func TestCompileLeakWatchNavigatesToShareLinkNotDocument(t *testing.T) {
+	now := time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC)
+	sigID := uuid.New()
+	linkID := uuid.New()
+	docID := uuid.New()
+	md, err := json.Marshal(map[string]string{
+		"page_number": "3",
+		"document_id": docID.String(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	feed := Compile(CompileInput{
+		WorkspaceSlug: "acme",
+		Now:           now,
+		Signals: []db.Signal{{
+			ID:         mustUUID(sigID),
+			Type:       "risk_alert",
+			Subtype:    pgText(suggestions.SubtypeForward),
+			Title:      "Possible forward",
+			Priority:   "high",
+			LinkID:     mustUUID(linkID),
+			DocumentID: mustUUID(docID),
+			Metadata:   md,
+			CreatedAt:  pgTime(now.Add(-10 * time.Minute)),
+		}},
+		Actions: []db.ActionItem{{
+			ID: mustUUID(uuid.New()), SignalID: mustUUID(sigID), Title: "Review forward",
+			Impact: "high", Status: "pending", ActionType: "review",
+			CreatedAt: pgTime(now.Add(-10 * time.Minute)), DueAt: pgTime(now.Add(time.Hour)), UpdatedAt: pgTime(now),
+		}},
+	})
+	if len(feed.Items) != 1 {
+		t.Fatalf("items=%d", len(feed.Items))
+	}
+	item := feed.Items[0]
+	if item.Product != ProductLeakWatch {
+		t.Fatalf("product=%s", item.Product)
+	}
+	wantNav := "/acme/links/" + linkID.String()
+	if item.NavigatePath != wantNav {
+		t.Fatalf("navigatePath=%s want %s", item.NavigatePath, wantNav)
+	}
+	wantEv := "/acme/documents/" + docID.String() + "?tab=content&page=3"
+	if item.EvidencePath != wantEv {
+		t.Fatalf("evidencePath=%s want %s (page stays on the evidence rail)", item.EvidencePath, wantEv)
+	}
+}
+
+func TestCompileAbuseGuardNavigatesToShareLinkNotDocument(t *testing.T) {
+	now := time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC)
+	sigID := uuid.New()
+	linkID := uuid.New()
+	docID := uuid.New()
+	md, err := json.Marshal(map[string]string{
+		"eventType":   "ask_ai_rate_limited",
+		"page_number": "2",
+		"document_id": docID.String(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	feed := Compile(CompileInput{
+		WorkspaceSlug: "acme",
+		Now:           now,
+		Signals: []db.Signal{{
+			ID:         mustUUID(sigID),
+			Type:       "risk_alert",
+			Subtype:    pgText(suggestions.SubtypeAnomaly),
+			Title:      "Ask rate limited",
+			Priority:   "medium",
+			LinkID:     mustUUID(linkID),
+			DocumentID: mustUUID(docID),
+			Metadata:   md,
+			CreatedAt:  pgTime(now.Add(-10 * time.Minute)),
+		}},
+		Actions: []db.ActionItem{{
+			ID: mustUUID(uuid.New()), SignalID: mustUUID(sigID), Title: "Review quota",
+			Impact: "medium", Status: "pending", ActionType: "review",
+			CreatedAt: pgTime(now.Add(-10 * time.Minute)), DueAt: pgTime(now.Add(time.Hour)), UpdatedAt: pgTime(now),
+		}},
+	})
+	if len(feed.Items) != 1 {
+		t.Fatalf("items=%d", len(feed.Items))
+	}
+	item := feed.Items[0]
+	if item.Product != ProductAbuseGuard {
+		t.Fatalf("product=%s", item.Product)
+	}
+	wantNav := "/acme/links/" + linkID.String()
+	if item.NavigatePath != wantNav {
+		t.Fatalf("navigatePath=%s want %s", item.NavigatePath, wantNav)
+	}
+}
+
 func TestCompileDealRoomAskNavigatesToQATab(t *testing.T) {
 	now := time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC)
 	roomID := "room-1"
