@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   actionNavigatePath,
   diligenceRemediationPath,
+  expiringLinkPath,
   formalAskSuggestionPath,
   isFormalAskReviewAction,
 } from "./actionNavigation";
@@ -142,6 +143,16 @@ describe("actionNavigatePath", () => {
     expect(path).not.toContain("/documents");
     expect(path).not.toMatch(/\/links\//);
   });
+
+  it("routes document-library expiring links to the expiry editor", () => {
+    expect(
+      actionNavigatePath("acme", {
+        sourceType: "expiring_link",
+        sourceId: "link-doc",
+        actionType: "renew",
+      }),
+    ).toBe("/acme/links/link-doc/edit?focus=expiry");
+  });
 });
 
 describe("isFormalAskReviewAction", () => {
@@ -191,5 +202,23 @@ describe("diligenceRemediationPath", () => {
 
   it("does not invent a path without room or link", () => {
     expect(diligenceRemediationPath("acme", {})).toBeNull();
+  });
+});
+
+describe("expiringLinkPath", () => {
+  it("sends document-library renew to the expiry editor", () => {
+    expect(expiringLinkPath("acme", "link-doc")).toBe(
+      "/acme/links/link-doc/edit?focus=expiry",
+    );
+  });
+
+  it("keeps deal-room shares on link detail, not the library editor", () => {
+    expect(expiringLinkPath("acme", "link-room", { dealRoomId: "room-1" })).toBe(
+      "/acme/links/link-room",
+    );
+  });
+
+  it("refuses empty ids", () => {
+    expect(expiringLinkPath("acme", "")).toBeNull();
   });
 });

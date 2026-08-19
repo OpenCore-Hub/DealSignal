@@ -43,11 +43,29 @@ func navigatePath(workspaceSlug string, sourceType, sourceID, targetID string, f
 			return ""
 		}
 		return libraryAskPath(slug, targetID, formalAsk)
-	case action.SourceTypeUploadedFile, action.SourceTypeExpiringLink:
+	case action.SourceTypeUploadedFile:
+		return "/" + slug + "/links/" + sourceID
+	case action.SourceTypeExpiringLink:
+		// Room vs library is decided in buildItem (needs LinkMeta.DealRoomID).
 		return "/" + slug + "/links/" + sourceID
 	default:
 		return ""
 	}
+}
+
+// expiringLinkPath is the host destination for operational link renew.
+// Library shares open the existing expiry editor. Deal-room shares stay on
+// link detail — the document-library bundle pipeline must not edit them.
+func expiringLinkPath(workspaceSlug, linkID, dealRoomID string) string {
+	slug := strings.TrimSpace(workspaceSlug)
+	link := strings.TrimSpace(linkID)
+	if slug == "" || link == "" {
+		return ""
+	}
+	if strings.TrimSpace(dealRoomID) != "" {
+		return "/" + slug + "/links/" + link
+	}
+	return "/" + slug + "/links/" + link + "/edit?focus=expiry"
 }
 
 // diligenceRemediationPath is the host destination for a Diligence gate item

@@ -92,7 +92,7 @@ export interface BundlePipelineState {
 
 export type BundlePipelineAction =
   | { type: "GO_STEP"; step: 1 | 2 | 3 }
-  | { type: "INIT_FOR_EDIT"; payload: { linkId: string; token: string; documents: Document[]; selectedDocuments: Document[]; config: PermissionConfig } }
+  | { type: "INIT_FOR_EDIT"; payload: { linkId: string; token: string; documents: Document[]; selectedDocuments: Document[]; config: PermissionConfig; step?: 1 | 2 | 3 } }
   | { type: "SET_DOCUMENTS"; documents: Document[] }
   | { type: "TOGGLE_DOCUMENT"; document: Document }
   | { type: "REMOVE_DOCUMENT"; documentId: string }
@@ -130,6 +130,10 @@ export function pipelineReducer(state: BundlePipelineState, action: BundlePipeli
 
     case "INIT_FOR_EDIT": {
       const { linkId, token, documents, selectedDocuments, config } = action.payload;
+      let step: 1 | 2 | 3 = action.payload.step ?? 1;
+      if (step > 1 && selectedDocuments.length === 0) {
+        step = 1;
+      }
       return {
         ...state,
         mode: "edit",
@@ -139,7 +143,7 @@ export function pipelineReducer(state: BundlePipelineState, action: BundlePipeli
         selectedDocuments,
         config,
         isDirty: false,
-        step: 1,
+        step,
       };
     }
 

@@ -290,5 +290,37 @@ describe("BundlePipelineState transitions", () => {
       expect(state.isDirty).toBe(false);
       expect(state.step).toBe(1);
     });
+
+    it("opens on Security when focus=expiry and documents are selected", () => {
+      const config = buildConfigFromPreset("standard");
+      state = pipelineReducer(state, {
+        type: "INIT_FOR_EDIT",
+        payload: {
+          linkId: "link-456",
+          token: "abc123",
+          documents: [mockDoc, mockDoc2],
+          selectedDocuments: [mockDoc],
+          config,
+          step: 2,
+        },
+      });
+      expect(state.step).toBe(2);
+    });
+
+    it("stays on documents when focus=expiry but nothing is selected", () => {
+      const config = buildConfigFromPreset("standard");
+      state = pipelineReducer(state, {
+        type: "INIT_FOR_EDIT",
+        payload: {
+          linkId: "link-456",
+          token: "abc123",
+          documents: [mockDoc],
+          selectedDocuments: [],
+          config,
+          step: 2,
+        },
+      });
+      expect(state.step).toBe(1);
+    });
   });
 });

@@ -50,6 +50,20 @@ func TestParseDealRoomAskTarget(t *testing.T) {
 	}
 }
 
+func TestExpiringLinkPath(t *testing.T) {
+	library := expiringLinkPath("acme", "link-doc", "")
+	if library != "/acme/links/link-doc/edit?focus=expiry" {
+		t.Fatalf("library=%q", library)
+	}
+	room := expiringLinkPath("acme", "link-room", "room-1")
+	if room != "/acme/links/link-room" {
+		t.Fatalf("deal-room share=%q", room)
+	}
+	if expiringLinkPath("acme", "", "") != "" {
+		t.Fatal("empty link must not invent a path")
+	}
+}
+
 func TestDiligenceRemediationPath(t *testing.T) {
 	room := diligenceRemediationPath("acme", "room-1", "link-9")
 	if room != "/acme/deal-rooms/room-1?tab=access&linkId=link-9" {

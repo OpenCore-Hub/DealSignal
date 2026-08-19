@@ -1300,3 +1300,71 @@ func pgTime(t time.Time) pgtype.Timestamptz {
 func jsonContext(m map[string]any) ([]byte, error) {
 	return json.Marshal(m)
 }
+
+func TestCompileExpiringLibraryLinkNavigatesToExpiryEditor(t *testing.T) {
+	now := time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC)
+	linkID := uuid.New()
+	feed := Compile(CompileInput{
+		WorkspaceSlug: "acme",
+		Now:           now,
+		Links: map[string]LinkMeta{
+			linkID.String(): {ID: linkID.String(), Name: "Deck"},
+		},
+		Actions: []db.ActionItem{{
+			ID:         mustUUID(uuid.New()),
+			Title:      "Link expires soon",
+			Impact:     "high",
+			Status:     "pending",
+			ActionType: "renew",
+			SourceType: pgText(action.SourceTypeExpiringLink),
+			SourceID:   pgText(linkID.String()),
+			CreatedAt:  pgTime(now.Add(-10 * time.Minute)),
+			DueAt:      pgTime(now.Add(48 * time.Hour)),
+			UpdatedAt:  pgTime(now),
+		}},
+	})
+	if len(feed.Items) != 1 {
+		t.Fatalf("items=%d", len(feed.Items))
+	}
+	got := feed.Items[0]
+	wantNav := "/acme/links/" + linkID.String() + "/edit?focus=expiry"
+	if got.NavigatePath != wantNav {
+		t.Fatalf("navigatePath=%s want %s", got.NavigatePath, wantNav)
+	}
+}
+
+func TestCompileExpiringDealRoomShareStaysOnLinkDetail(t *testing.T) {
+	now := time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC)
+	linkID := uuid.New()
+	roomID := uuid.New().String()
+	feed := Compile(CompileInput{
+		WorkspaceSlug: "acme",
+		Now:           now,
+		Rooms: map[string]RoomMeta{
+			roomID: {Name: "Fundraise"},
+		},
+		Links: map[string]LinkMeta{
+			linkID.String(): {ID: linkID.String(), Name: "Deck", DealRoomID: roomID},
+		},
+		Actions: []db.ActionItem{{
+			ID:         mustUUID(uuid.New()),
+			Title:      "Link expires soon",
+			Impact:     "high",
+			Status:     "pending",
+			ActionType: "renew",
+			SourceType: pgText(action.SourceTypeExpiringLink),
+			SourceID:   pgText(linkID.String()),
+			CreatedAt:  pgTime(now.Add(-10 * time.Minute)),
+			DueAt:      pgTime(now.Add(48 * time.Hour)),
+			UpdatedAt:  pgTime(now),
+		}},
+	})
+	if len(feed.Items) != 1 {
+		t.Fatalf("items=%d", len(feed.Items))
+	}
+	got := feed.Items[0]
+	wantNav := "/acme/links/" + linkID.String()
+	if got.NavigatePath != wantNav {
+		t.Fatalf("navigatePath=%s want %s (must not open the library editor)", got.NavigatePath, wantNav)
+	}
+}

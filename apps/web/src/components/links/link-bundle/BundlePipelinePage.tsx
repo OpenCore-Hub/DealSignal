@@ -1,6 +1,6 @@
 import { useEffect, useCallback } from "react";
 import { apiErrorMessage } from "@/lib/apiErrors";
-import { useParams } from "react-router";
+import { useParams, useSearchParams } from "react-router";
 import { motion } from "motion/react";
 import { useReducedMotion } from "@/hooks/useReducedMotion";
 import { useWorkspaceContacts } from "@/hooks/useWorkspaceContacts";
@@ -40,6 +40,8 @@ function BundlePipelineInner() {
   const { state, dispatch } = useBundlePipeline();
   const reducedMotion = useReducedMotion();
   const { id, workspaceSlug } = useParams<{ id: string; workspaceSlug: string }>();
+  const [searchParams] = useSearchParams();
+  const focusExpiry = searchParams.get("focus") === "expiry";
   const isEdit = !!id;
   const canProceedNav = state.selectedDocuments.length >= 1;
 
@@ -175,6 +177,7 @@ function BundlePipelineInner() {
               documents: pickerDocuments,
               selectedDocuments: selectedDocs,
               config,
+              step: focusExpiry && selectedDocs.length > 0 ? 2 : 1,
             },
           });
         }
@@ -188,7 +191,7 @@ function BundlePipelineInner() {
     return () => {
       cancelled = true;
     };
-  }, [isEdit, id, dispatch]);
+  }, [isEdit, id, dispatch, focusExpiry]);
 
   const step = state.step;
 

@@ -654,6 +654,9 @@ func buildItem(in CompileInput, a db.ActionItem, sig *db.Signal, product Product
 	}
 
 	nav := navigatePath(in.WorkspaceSlug, src, sourceID, targetID, isFormalAsk(a))
+	if src == action.SourceTypeExpiringLink {
+		nav = expiringLinkPath(in.WorkspaceSlug, sourceID, dealRoomID)
+	}
 	ev := evidencePath(in.WorkspaceSlug, docID, linkID, contactID, page)
 	// Gate holds are signal-backed (empty sourceType) — do not fall through
 	// to a single document or the empty Share request inbox. Rooms → Access.

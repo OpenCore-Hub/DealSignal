@@ -99,12 +99,33 @@ export function actionNavigatePath(
       });
 
     case "uploaded_file":
-    case "expiring_link":
       return `/${workspaceSlug}/links/${action.sourceId}`;
+
+    case "expiring_link":
+      return expiringLinkPath(workspaceSlug, action.sourceId);
 
     default:
       return null;
   }
+}
+
+/**
+ * Operational link renew. Library → existing expiry editor. Deal-room
+ * shares stay on link detail (bundle pipeline must not edit them).
+ * Mirrors apps/api/internal/radar/paths.go expiringLinkPath.
+ */
+export function expiringLinkPath(
+  workspaceSlug: string,
+  linkId: string,
+  opts?: { dealRoomId?: string },
+): string | null {
+  const slug = workspaceSlug.trim();
+  const id = linkId.trim();
+  if (!slug || !id) return null;
+  if (opts?.dealRoomId?.trim()) {
+    return `/${slug}/links/${id}`;
+  }
+  return `/${slug}/links/${id}/edit?focus=expiry`;
 }
 
 /**
