@@ -50,9 +50,12 @@ func navigatePath(workspaceSlug string, sourceType, sourceID, targetID string, f
 	}
 }
 
-// diligenceRemediationPath is the allowlist / access-request inbox for a
-// Diligence gate item that has no operational sourceType (blocked_attempt).
-// Document library and deal room must not cross.
+// diligenceRemediationPath is the host destination for a Diligence gate item
+// that has no operational sourceType (blocked_attempt / allowlist hold).
+// Rooms go to Access (allowlist). Library goes to the share link detail
+// (access log), not the Share request inbox — that inbox is empty unless
+// there is a pending link_access_request (those keep documentsSharePath via
+// navigatePath / sourceType). Document library and deal room must not cross.
 func diligenceRemediationPath(workspaceSlug, dealRoomID, linkID string) string {
 	slug := strings.TrimSpace(workspaceSlug)
 	roomID := strings.TrimSpace(dealRoomID)
@@ -64,7 +67,7 @@ func diligenceRemediationPath(workspaceSlug, dealRoomID, linkID string) string {
 		return dealRoomAccessPath(slug, roomID, link)
 	}
 	if link != "" {
-		return documentsSharePath(slug, link)
+		return insightsPath(slug, link, "")
 	}
 	return ""
 }

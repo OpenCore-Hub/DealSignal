@@ -108,9 +108,11 @@ export function actionNavigatePath(
 }
 
 /**
- * Allowlist / access inbox for Diligence gate holds that have no operational
- * sourceType (blocked_attempt). Document library and deal room must not cross.
- * Mirrors apps/api/internal/radar/paths.go diligenceRemediationPath.
+ * Host destination for Diligence gate holds that have no operational
+ * sourceType (blocked_attempt). Rooms → Access. Library → share link
+ * detail, not the Share request inbox. Operational approve still uses
+ * documentsSharePath via actionNavigatePath. Mirrors
+ * apps/api/internal/radar/paths.go diligenceRemediationPath.
  */
 export function diligenceRemediationPath(
   workspaceSlug: string,
@@ -124,7 +126,7 @@ export function diligenceRemediationPath(
     return dealRoomAccessPath(slug, roomId, linkId ? { linkId } : undefined);
   }
   if (linkId) {
-    return documentsSharePath(slug, { linkId });
+    return `/${slug}/links/${linkId}`;
   }
   return null;
 }

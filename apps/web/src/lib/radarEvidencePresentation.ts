@@ -247,7 +247,9 @@ export type RadarEvidenceOpenPaths = {
 };
 
 /**
- * Bottom-rail destination: Diligence → Share/Access; other products → the share
+ * Bottom-rail destination: Diligence rooms → Access; library gate holds →
+ * share link (`/links/:id`); library approve keeps the Share inbox when
+ * navigatePath already points there. Other products → the share
  * (`/links/:id` via insightsPath), never an arbitrary document in a bundle.
  */
 export function radarEvidenceOpenPath(input: RadarEvidenceOpenPaths): string | null {
@@ -259,6 +261,12 @@ export function radarEvidenceOpenPath(input: RadarEvidenceOpenPaths): string | n
       dealRoomId: input.dealRoomId,
       linkId: input.linkId,
     });
+    if (trimPath(input.dealRoomId)) {
+      return remediation || nav || insights || evidence || null;
+    }
+    if (isLibraryShareInboxPath(nav)) {
+      return nav;
+    }
     return remediation || nav || insights || evidence || null;
   }
   if (insights && !isWorkspaceInsightsOverview(insights)) {
@@ -267,8 +275,28 @@ export function radarEvidenceOpenPath(input: RadarEvidenceOpenPaths): string | n
   return evidence || nav || insights || null;
 }
 
-export function radarEvidenceOpenLabelKey(product: RadarProduct): string {
-  return product === "diligence_gate"
-    ? "radar.evidenceRail.openShareInbox"
-    : "radar.evidenceRail.openFull";
+export function radarEvidenceOpenLabelKey(
+  product: RadarProduct,
+  openPath?: string | null,
+): string {
+  if (product === "diligence_gate" && isShareOrAccessRemediationPath(openPath)) {
+    return "radar.evidenceRail.openShareInbox";
+  }
+  return "radar.evidenceRail.openFull";
+}
+
+function isLibraryShareInboxPath(path: string): boolean {
+  if (!path) return false;
+  const [pathname, query = ""] = path.split("?");
+  const clean = pathname.replace(/\/+$/, "");
+  if (!/(?:^|\/)documents$/.test(clean)) return false;
+  return new URLSearchParams(query).get("tab") === "shared";
+}
+
+function isShareOrAccessRemediationPath(path?: string | null): boolean {
+  const value = trimPath(path);
+  if (!value) return false;
+  if (isLibraryShareInboxPath(value)) return true;
+  const query = value.split("?")[1] ?? "";
+  return new URLSearchParams(query).get("tab") === "access";
 }

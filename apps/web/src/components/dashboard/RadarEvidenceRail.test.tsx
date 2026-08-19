@@ -646,6 +646,44 @@ describe("RadarEvidenceRail", () => {
     expect(screen.getByTestId("radar-evidence-open")).toHaveTextContent("Review in Share");
   });
 
+  it("sends a document-library gate hold to the share link, not the request inbox", async () => {
+    mockFns.getRadarEvidence.mockResolvedValue({
+      itemId: "act-gate-lib",
+      product: "diligence_gate",
+      headline: "Review block",
+      whyNowCode: "diligence_gate",
+      navigatePath: "/acme/documents/doc-1?tab=analytics",
+      insightsPath: "/acme/links/link-1",
+      linkId: "link-1",
+      securityEvents: [
+        {
+          eventType: "not_in_allow_list",
+          createdAt: "2026-08-11T17:00:00Z",
+        },
+      ],
+    } satisfies RadarEvidencePack);
+
+    await renderRail(
+      makeItem({
+        id: "act-gate-lib",
+        product: "diligence_gate",
+        verb: "review",
+        linkId: "link-1",
+      }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("radar-evidence-open")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("radar-evidence-open")).toHaveAttribute(
+      "href",
+      "/acme/links/link-1",
+    );
+    expect(screen.getByTestId("radar-evidence-open")).toHaveTextContent(
+      "Open full evidence",
+    );
+  });
+
   it("keeps solo-share top page labels as Page N when a document id is present", async () => {
     mockFns.getRadarEvidence.mockResolvedValue({
       itemId: "act-solo-page",

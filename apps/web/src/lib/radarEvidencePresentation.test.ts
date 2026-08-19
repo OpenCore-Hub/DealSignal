@@ -273,7 +273,7 @@ describe("radarEvidenceOpenPath", () => {
     ).toBe("/acme/deal-rooms/room-1?tab=access&linkId=link-9");
   });
 
-  it("sends a document-library gate hold to Share", () => {
+  it("sends a document-library gate hold to the share link, not the request inbox", () => {
     expect(
       radarEvidenceOpenPath({
         product: "diligence_gate",
@@ -281,15 +281,40 @@ describe("radarEvidenceOpenPath", () => {
         linkId: "link-doc",
         navigatePath: "/acme/documents/doc-1?tab=analytics",
       }),
+    ).toBe("/acme/links/link-doc");
+  });
+
+  it("keeps a document-library approve on the Share inbox", () => {
+    expect(
+      radarEvidenceOpenPath({
+        product: "diligence_gate",
+        workspaceSlug: "acme",
+        linkId: "link-doc",
+        navigatePath: "/acme/documents?tab=shared&linkId=link-doc",
+      }),
     ).toBe("/acme/documents?tab=shared&linkId=link-doc");
   });
 });
 
 describe("radarEvidenceOpenLabelKey", () => {
-  it("uses Share copy for every Diligence gate card", () => {
-    expect(radarEvidenceOpenLabelKey("diligence_gate")).toBe(
-      "radar.evidenceRail.openShareInbox",
+  it("uses Share copy only when the destination is Share or Access", () => {
+    expect(
+      radarEvidenceOpenLabelKey(
+        "diligence_gate",
+        "/acme/documents?tab=shared&linkId=link-doc",
+      ),
+    ).toBe("radar.evidenceRail.openShareInbox");
+    expect(
+      radarEvidenceOpenLabelKey(
+        "diligence_gate",
+        "/acme/deal-rooms/room-1?tab=access&linkId=link-9",
+      ),
+    ).toBe("radar.evidenceRail.openShareInbox");
+    expect(
+      radarEvidenceOpenLabelKey("diligence_gate", "/acme/links/link-doc"),
+    ).toBe("radar.evidenceRail.openFull");
+    expect(radarEvidenceOpenLabelKey("leak_watch")).toBe(
+      "radar.evidenceRail.openFull",
     );
-    expect(radarEvidenceOpenLabelKey("leak_watch")).toBe("radar.evidenceRail.openFull");
   });
 });

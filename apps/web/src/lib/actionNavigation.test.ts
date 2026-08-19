@@ -183,9 +183,9 @@ describe("diligenceRemediationPath", () => {
     ).toBe("/acme/deal-rooms/room-1?tab=access&linkId=link-9");
   });
 
-  it("sends document-library holds to Share", () => {
+  it("sends document-library holds to the share link, not the request inbox", () => {
     expect(diligenceRemediationPath("acme", { linkId: "link-doc" })).toBe(
-      "/acme/documents?tab=shared&linkId=link-doc",
+      "/acme/links/link-doc",
     );
   });
 

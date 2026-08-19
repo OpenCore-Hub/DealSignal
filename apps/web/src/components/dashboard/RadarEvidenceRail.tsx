@@ -291,7 +291,7 @@ export function RadarEvidenceRail({
               className="inline-flex items-center gap-1 text-sm font-medium text-foreground hover:underline"
               data-testid="radar-evidence-open"
             >
-              {t(radarEvidenceOpenLabelKey(item.product))}
+              {t(radarEvidenceOpenLabelKey(item.product, openHref))}
               <ArrowRight size={14} />
             </Link>
           ) : null}

@@ -60,7 +60,7 @@ func TestDiligenceRemediationPath(t *testing.T) {
 		t.Fatalf("room-only=%q", roomOnly)
 	}
 	doc := diligenceRemediationPath("acme", "", "link-doc")
-	if doc != "/acme/documents?tab=shared&linkId=link-doc" {
+	if doc != "/acme/links/link-doc" {
 		t.Fatalf("document link=%q", doc)
 	}
 	if diligenceRemediationPath("acme", "", "") != "" {

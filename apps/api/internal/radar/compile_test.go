@@ -470,7 +470,7 @@ func TestCompileBlockedAttemptKeepsReviewVerbInFundraisingPack(t *testing.T) {
 	}
 }
 
-func TestCompileBlockedAttemptDocumentLinkNavigatesToShare(t *testing.T) {
+func TestCompileBlockedAttemptDocumentLinkNavigatesToShareLink(t *testing.T) {
 	now := time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC)
 	sigID := uuid.New()
 	linkID := uuid.New()
@@ -507,9 +507,9 @@ func TestCompileBlockedAttemptDocumentLinkNavigatesToShare(t *testing.T) {
 		t.Fatalf("items=%d", len(feed.Items))
 	}
 	got := feed.Items[0]
-	wantNav := "/acme/documents?tab=shared&linkId=" + linkID.String()
+	wantNav := "/acme/links/" + linkID.String()
 	if got.NavigatePath != wantNav {
-		t.Fatalf("navigatePath=%s want %s (must not pick the document analytics tab)", got.NavigatePath, wantNav)
+		t.Fatalf("navigatePath=%s want %s (must not pick Share inbox or document analytics)", got.NavigatePath, wantNav)
 	}
 }
 
