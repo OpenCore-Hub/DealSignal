@@ -376,6 +376,32 @@ describe("DashboardPage inbox", () => {
     expect(firstPath).toContain("linkId=link-doc");
   });
 
+  it("sends expired-share review to the share link, not the document tab", async () => {
+    mockFns.getRadar.mockResolvedValue(
+      makeFeed([
+        makeItem({
+          id: "act-expired",
+          actionId: "act-expired",
+          product: "access_decay",
+          verb: "review",
+          headline: "Share expired",
+          navigatePath: "/acme/links/link-doc",
+          evidencePath: "/acme/documents/doc-1?tab=content&page=4",
+        }),
+      ]),
+    );
+
+    await renderPage();
+    const nextUp = await screen.findByTestId("radar-next-up");
+    fireEvent.click(within(nextUp).getByRole("button", { name: /^Review$/i }));
+    expect(mockFns.navigate).toHaveBeenCalledWith(
+      "/acme/links/link-doc",
+      expect.objectContaining({
+        state: expect.objectContaining({ returnTo: "/acme/dashboard" }),
+      }),
+    );
+  });
+
   it("toasts when primary CTA has no destination", async () => {
     const { toast } = await import("sonner");
     mockFns.getRadar.mockResolvedValue(

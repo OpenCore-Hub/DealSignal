@@ -1227,6 +1227,58 @@ func TestCompileAbuseGuardNavigatesToShareLinkNotDocument(t *testing.T) {
 	}
 }
 
+func TestCompileAccessDecayReviewNavigatesToShareLinkNotDocument(t *testing.T) {
+	now := time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC)
+	sigID := uuid.New()
+	linkID := uuid.New()
+	docID := uuid.New()
+	md, err := json.Marshal(map[string]string{
+		"page_number": "4",
+		"document_id": docID.String(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	feed := Compile(CompileInput{
+		WorkspaceSlug: "acme",
+		Now:           now,
+		Signals: []db.Signal{{
+			ID:         mustUUID(sigID),
+			Type:       "risk_alert",
+			Subtype:    pgText(suggestions.SubtypeExpired),
+			Title:      "Share expired",
+			Priority:   "medium",
+			LinkID:     mustUUID(linkID),
+			DocumentID: mustUUID(docID),
+			Metadata:   md,
+			CreatedAt:  pgTime(now.Add(-10 * time.Minute)),
+		}},
+		Actions: []db.ActionItem{{
+			ID: mustUUID(uuid.New()), SignalID: mustUUID(sigID), Title: "Review expiry",
+			Impact: "medium", Status: "pending", ActionType: "review",
+			CreatedAt: pgTime(now.Add(-10 * time.Minute)), DueAt: pgTime(now.Add(time.Hour)), UpdatedAt: pgTime(now),
+		}},
+	})
+	if len(feed.Items) != 1 {
+		t.Fatalf("items=%d", len(feed.Items))
+	}
+	item := feed.Items[0]
+	if item.Product != ProductAccessDecay {
+		t.Fatalf("product=%s", item.Product)
+	}
+	if item.Verb != VerbReview {
+		t.Fatalf("verb=%s want review (no scenario pack override)", item.Verb)
+	}
+	wantNav := "/acme/links/" + linkID.String()
+	if item.NavigatePath != wantNav {
+		t.Fatalf("navigatePath=%s want %s (must not open the document tab)", item.NavigatePath, wantNav)
+	}
+	wantEv := "/acme/documents/" + docID.String() + "?tab=content&page=4"
+	if item.EvidencePath != wantEv {
+		t.Fatalf("evidencePath=%s want %s (page stays on the evidence rail)", item.EvidencePath, wantEv)
+	}
+}
+
 func TestCompileDealRoomAskNavigatesToQATab(t *testing.T) {
 	now := time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC)
 	roomID := "room-1"

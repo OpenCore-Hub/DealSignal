@@ -671,9 +671,10 @@ func buildItem(in CompileInput, a db.ActionItem, sig *db.Signal, product Product
 	// Room expiry has no host editor. Do not copy evidence (or the default
 	// documents tab) onto NavigatePath as a fake renew.
 	roomExpiry := src == action.SourceTypeExpiringRoom
-	// Leak / abuse are signal-backed (empty sourceType). Primary CTA must
-	// match the evidence-rail share link, not a document content tab.
-	if nav == "" && (product == ProductLeakWatch || product == ProductAbuseGuard) && strings.TrimSpace(linkID) != "" {
+	// Leak / abuse / signal-backed access decay are empty sourceType.
+	// Primary CTA must match the evidence-rail share link, not a document
+	// content tab. Operational link renew already set nav via expiringLinkPath.
+	if nav == "" && (product == ProductLeakWatch || product == ProductAbuseGuard || product == ProductAccessDecay) && strings.TrimSpace(linkID) != "" {
 		nav = insightsPath(in.WorkspaceSlug, linkID, "")
 	}
 	if nav == "" && !emailAct && !roomExpiry {

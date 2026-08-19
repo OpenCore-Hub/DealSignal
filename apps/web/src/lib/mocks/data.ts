@@ -1218,7 +1218,14 @@ export function getMockRadarFeed(workspaceSlug = "acme-capital"): RadarFeed {
     const dest = operationalNav || evidenceDest;
     const emailAct = verb === "email" && Boolean(radarEmailContactLabel({ actor, contactEmail }));
     const roomExpiry = action.sourceType === "expiring_room";
-    const navigatePath = emailAct || roomExpiry ? operationalNav : dest;
+    const decayShareNav =
+      product === "access_decay" &&
+      !roomExpiry &&
+      !operationalNav &&
+      signal?.linkId
+        ? `/${workspaceSlug}/links/${signal.linkId}`
+        : null;
+    const navigatePath = emailAct || roomExpiry ? operationalNav : decayShareNav || dest;
     const confidence =
       product === "leak_watch"
         ? signal?.subtype === "forward" || signal?.subtype === "download"
