@@ -36,18 +36,6 @@ base_url = os.getenv("OPENAI_BASE_URL")
 if base_url:
     client_kwargs["base_url"] = base_url
 
-headers = {}
-referer = os.getenv("OPENAI_REFERER")
-if referer:
-    headers["HTTP-Referer"] = referer
-
-app_title = os.getenv("OPENAI_APP_TITLE")
-if app_title:
-    headers["X-Title"] = app_title
-
-if headers:
-    client_kwargs["default_headers"] = headers
-
 client = OpenAI(**client_kwargs)
 chat_model = os.getenv("OPENAI_CHAT_MODEL", "gpt-4o-mini")
 

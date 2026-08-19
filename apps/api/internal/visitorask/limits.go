@@ -13,7 +13,8 @@ const (
 	AskHostDailyWindow = 24 * time.Hour
 )
 
-// Default Ask AI abuse caps (per visitor + link). Monthly billing quota is link-level.
+// Default Ask AI abuse caps (per visitor + link). Monthly billing quota is the
+// workspace plan (plan.Limits.VisitorAskAIMonthly), not these env vars.
 const (
 	DefaultAskAIRPM        = 10
 	DefaultAskAIDailyLimit = 50

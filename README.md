@@ -113,7 +113,7 @@ docker-compose up --build
 - `VITE_API_BASE_URL`：前端调用的 API 地址；留空则回退到 MSW。
 - `DATABASE_URL`、`REDIS_URL`、`JWT_SECRET`、`S3_*`：后端必需配置。
 - `OPENAI_API_KEY`：后端可选；留空则禁用向量搜索与 AI assistant。
-- `OPENAI_BASE_URL`、`OPENAI_REFERER`、`OPENAI_APP_TITLE`：OpenAI-compatible / OpenRouter 配置。
+- `OPENAI_BASE_URL`：OpenAI-compatible 自定义网关，例如 OpenRouter。
 
 ## 设计文档
 

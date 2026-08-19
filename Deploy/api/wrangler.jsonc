@@ -1,0 +1,28 @@
+{
+	"name": "dealsignal-api",
+	"main": "src/index.ts",
+	"compatibility_date": "2026-08-19",
+	"compatibility_flags": ["nodejs_compat"],
+	"containers": [
+		{
+			"class_name": "DealSignal",
+			"image": "registry.cloudflare.com/beff214a72a1799850b0f029bee5fef9/dealsignal-api:v1.0.0",
+			"instance_type": "lite",
+			"max_instances": 2
+		}
+	],
+	"durable_objects": {
+		"bindings": [
+			{
+				"name": "DEALSIGNAL",
+				"class_name": "DealSignal"
+			}
+		]
+	},
+	"migrations": [
+		{
+			"tag": "v1",
+			"new_sqlite_classes": ["DealSignal"]
+		}
+	]
+}

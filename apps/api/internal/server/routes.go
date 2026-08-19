@@ -205,8 +205,6 @@ func (s *Server) registerRoutes() error {
 					APIKey:    s.cfg.OpenAIAPIKey,
 					BaseURL:   s.cfg.OpenAIBaseURL,
 					ChatModel: s.cfg.OpenAIChatModel,
-					Referer:   s.cfg.OpenAIReferer,
-					AppTitle:  s.cfg.OpenAIAppTitle,
 				})
 				if err != nil {
 					return fmt.Errorf("llm client: %w", err)

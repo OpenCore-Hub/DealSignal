@@ -7,9 +7,9 @@ services:
   postgres:
     image: postgres:17-alpine
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:?postgres user required}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?postgres password required}
-      POSTGRES_DB: ${POSTGRES_DB:?postgres db required}
+      POSTGRES_USER: dealsignal
+      POSTGRES_PASSWORD: dealsignal
+      POSTGRES_DB: dealsignal
     ports:
       # Override POSTGRES_HOST_PORT in .env when 5435 is taken (e.g. rag-platform).
       - "127.0.0.1:${POSTGRES_HOST_PORT:-5435}:5432"
@@ -24,7 +24,7 @@ services:
   redis:
     image: redis:7.4-alpine
     ports:
-      - "127.0.0.1:${REDIS_HOST_PORT:-6381}:6379"
+      - "127.0.0.1:6381:6379"
     # Ephemeral — no named volume.
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -40,7 +40,7 @@ services:
       MINIO_ROOT_USER: ${S3_ACCESS_KEY:-minioadmin}
       MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-minioadmin}
     ports:
-      - "127.0.0.1:${MINIO_HOST_PORT:-9003}:9000"
+      - "127.0.0.1:9003:9000"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 10s
@@ -74,9 +74,11 @@ services:
       JWT_ENABLED: "true"
       JWT_SECRET: ${ONLYOFFICE_JWT_SECRET:?ONLYOFFICE_JWT_SECRET required}
     ports:
-      - "127.0.0.1:${ONLYOFFICE_HOST_PORT:-8085}:80"
+      - "127.0.0.1:8081:80"
 
   api:
+    image: dealsignal-api:latest
+    platform: linux/amd64
     build:
       context: .
       dockerfile: Dockerfile
@@ -86,12 +88,13 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
-      # Always listen on 8080 inside the container; host publish via API_HOST_PORT.
+      # Always listen on 8080 inside the container.
       PORT: "8080"
       # Long-running knowledge SSE asks; must exceed DOCLING_RAG_HTTP_TIMEOUT_MS + headroom.
       HTTP_WRITE_TIMEOUT_SECONDS: ${HTTP_WRITE_TIMEOUT_SECONDS:-210}
       HTTP_READ_TIMEOUT_SECONDS: ${HTTP_READ_TIMEOUT_SECONDS:-30}
-      DATABASE_URL: postgres://${POSTGRES_USER:-dealsignal}:${POSTGRES_PASSWORD:-dealsignal}@postgres:5432/${POSTGRES_DB:-dealsignal}?sslmode=disable
+      # Use .env as-is. For this compose network the host must be `postgres`, not 127.0.0.1.
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL required}
       REDIS_URL: redis:6379
       # Queue all transactional mail by default; a deployment can explicitly opt out.
       EMAIL_QUEUE_ENABLED: ${EMAIL_QUEUE_ENABLED:-true}
@@ -100,8 +103,7 @@ services:
       ONLYOFFICE_URL: http://onlyoffice:80
       APP_BASE_URL: ${APP_BASE_URL:-http://127.0.0.1:8080}
     ports:
-      # Override API_HOST_PORT when 8080 is taken (e.g. vlogbin zitadel-proxy).
-      - "127.0.0.1:${API_HOST_PORT:-8080}:8080"
+      - "127.0.0.1:8080:8080"
     depends_on:
       postgres:
         condition: service_healthy

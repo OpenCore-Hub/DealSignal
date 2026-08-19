@@ -40,7 +40,6 @@ Key variables in `.env`:
 | `S3_BUCKET` / `S3_ACCESS_KEY` / `S3_SECRET_KEY` | yes | MinIO / S3-compatible storage |
 | `OPENAI_API_KEY` | no | OpenAI-compatible API key. Leave empty to disable LLM suggestion enrichment. Ask Docs / Diligence removed. |
 | `OPENAI_BASE_URL` | no | Custom base URL, e.g. `https://openrouter.ai/api/v1` |
-| `OPENAI_REFERER` / `OPENAI_APP_TITLE` | no | Optional headers for OpenRouter-compatible providers |
 | `ONLYOFFICE_URL` | yes | OnlyOffice Document Server URL |
 
 ## End-to-end verification

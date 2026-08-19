@@ -72,11 +72,9 @@ func TestCustomBaseURL(t *testing.T) {
 	}
 }
 
-func TestCustomHeadersSent(t *testing.T) {
-	var gotReferer, gotTitle, gotAuth string
+func TestAuthorizationHeaderSent(t *testing.T) {
+	var gotAuth string
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotReferer = r.Header.Get("HTTP-Referer")
-		gotTitle = r.Header.Get("X-Title")
 		gotAuth = r.Header.Get("Authorization")
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
@@ -102,8 +100,6 @@ func TestCustomHeadersSent(t *testing.T) {
 		APIKey:     "sk-test",
 		BaseURL:    ts.URL,
 		ChatModel:  "gpt-4o-mini",
-		Referer:    "https://example.com",
-		AppTitle:   "TestApp",
 		HTTPClient: ts.Client(),
 	})
 	if err != nil {
@@ -115,12 +111,6 @@ func TestCustomHeadersSent(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if gotReferer != "https://example.com" {
-		t.Fatalf("expected HTTP-Referer header %q, got %q", "https://example.com", gotReferer)
-	}
-	if gotTitle != "TestApp" {
-		t.Fatalf("expected X-Title header %q, got %q", "TestApp", gotTitle)
-	}
 	if gotAuth != "Bearer sk-test" {
 		t.Fatalf("expected Authorization header %q, got %q", "Bearer sk-test", gotAuth)
 	}

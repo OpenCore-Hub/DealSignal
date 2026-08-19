@@ -26,12 +26,10 @@ Readiness probe: `curl http://localhost:8080/readyz`
 - `IP_HASH_KEY` — required in production. HMAC key for hashing visitor IP addresses.
 - `OPENAI_API_KEY` — optional. Leave empty to disable LLM-backed suggestion enrichment. Ask Docs / Diligence have been removed.
 - `OPENAI_BASE_URL` — e.g. `https://openrouter.ai/api/v1`
-- `OPENAI_REFERER` / `OPENAI_APP_TITLE` — optional headers for OpenRouter-compatible providers.
 - `KNOWLEDGE_QA_REWRITE_ENABLED` — optional (default `true`). Set `false` to disable elliptical retrieve-query rewrite without disabling follow-up chips.
 - `KNOWLEDGE_QA_MEMBER_RPM` / `KNOWLEDGE_QA_FOLLOWUP_RPM` — optional per-member ask / follow-up chip RPM gates.
-- `VISITOR_ASK_AI_RPM` — optional visitor AI lane RPM per link+visitor (default `10`).
-- `VISITOR_ASK_AI_DAILY_LIMIT` — optional visitor AI lane daily cap (default `50`).
-- `VISITOR_ASK_AI_MONTHLY_QUOTA_DEFAULT` — link-level monthly AI cap when `ask_ai_monthly_quota` is NULL (default `500`).
+- `VISITOR_ASK_AI_RPM` — optional visitor AI lane RPM per link+visitor (default `10`). Abuse guard, not a billing quota.
+- `VISITOR_ASK_AI_DAILY_LIMIT` — optional visitor AI lane daily cap per link+visitor (default `50`). Abuse guard, not a billing quota.
 - `VISITOR_ASK_FORMAL_DAILY_LIMIT` — optional Formal-mode visitor Ask daily cap per link+visitor (default `20`).
 - `VISITOR_ASK_UNIFIED` — set `1` to expose unified visitor Ask UI on public links (Phase A/B rollout gate).
 - `FORMAL_PUBLISH_INTERVAL_SECONDS` — Formal Q&A due-sweep worker interval (default `15`). Lazy-on-read remains as fallback.

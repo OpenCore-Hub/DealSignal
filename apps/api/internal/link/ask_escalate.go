@@ -13,13 +13,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-func (s *Service) defaultAskAIQuota() int32 {
-	if s != nil && s.cfg != nil && s.cfg.DefaultAskAIMonthlyQuota > 0 {
-		return s.cfg.DefaultAskAIMonthlyQuota
-	}
-	return 500
-}
-
 // EscalatePublicAskTurn moves an AI turn into the host queue without duplicating the question.
 func (s *Service) EscalatePublicAskTurn(
 	ctx context.Context,

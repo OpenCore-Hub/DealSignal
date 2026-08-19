@@ -35,8 +35,6 @@ type Config struct {
 	OpenAIAPIKey    string
 	OpenAIBaseURL   string
 	OpenAIChatModel string
-	OpenAIReferer   string // optional, e.g. for OpenRouter
-	OpenAIAppTitle  string // optional, e.g. for OpenRouter
 
 	BaseDomain             string
 	CNAMETarget            string
@@ -123,10 +121,9 @@ type Config struct {
 	// VisitorAskUnifiedEnabled gates the unified visitor Ask UI (Phase A rollout).
 	// Set VISITOR_ASK_UNIFIED=1 to enable; API dual-write remains active regardless.
 	VisitorAskUnifiedEnabled bool
-	// DefaultAskAIMonthlyQuota is unused for plan SKUs. Visitor Ask monthly
-	// caps come from workspace plan_code (see plan.Limits.VisitorAskAIMonthly).
-	// Per-link links.ask_ai_monthly_quota remains an optional tighter cap.
-	DefaultAskAIMonthlyQuota int32
+	// Visitor Ask monthly caps come from workspace plan_code
+	// (see plan.Limits.VisitorAskAIMonthly). Per-link links.ask_ai_monthly_quota
+	// remains an optional tighter cap.
 	// VisitorAskAIRPM caps AI lane requests per visitor+link per minute (abuse guard).
 	VisitorAskAIRPM int
 	// VisitorAskAIDailyLimit caps AI lane requests per visitor+link per day.
@@ -231,8 +228,6 @@ func Load() (*Config, error) {
 		OpenAIAPIKey:    os.Getenv("OPENAI_API_KEY"),
 		OpenAIBaseURL:   os.Getenv("OPENAI_BASE_URL"),
 		OpenAIChatModel: os.Getenv("OPENAI_CHAT_MODEL"),
-		OpenAIReferer:   os.Getenv("OPENAI_REFERER"),
-		OpenAIAppTitle:  os.Getenv("OPENAI_APP_TITLE"),
 
 		BaseDomain:             getEnv("BASE_DOMAIN", "dealsignal.com"),
 		CNAMETarget:            getEnv("CNAME_TARGET", "cname.dealsignal.com"),
@@ -338,7 +333,6 @@ func Load() (*Config, error) {
 		KnowledgeQATableLaneEnabled:    strings.ToLower(getEnv("KNOWLEDGE_QA_TABLE_LANE_ENABLED", "true")) == "true",
 		KnowledgeQAMultiHopEnabled:     strings.ToLower(getEnv("KNOWLEDGE_QA_MULTI_HOP_ENABLED", "true")) == "true",
 		VisitorAskUnifiedEnabled:       visitorAskUnifiedEnabledFromEnv(),
-		DefaultAskAIMonthlyQuota:       int32(getEnvInt("VISITOR_ASK_AI_MONTHLY_QUOTA_DEFAULT", 500)),
 		VisitorAskAIRPM:                getEnvInt("VISITOR_ASK_AI_RPM", 10),
 		VisitorAskAIDailyLimit:         getEnvInt("VISITOR_ASK_AI_DAILY_LIMIT", 50),
 		VisitorAskFormalDailyLimit:     getEnvInt("VISITOR_ASK_FORMAL_DAILY_LIMIT", 20),

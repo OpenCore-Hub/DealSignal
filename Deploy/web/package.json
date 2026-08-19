@@ -1,0 +1,14 @@
+{
+	"name": "dealsignal-web",
+	"private": true,
+	"scripts": {
+		"build:spa": "VITE_API_BASE_URL= pnpm --dir ../../apps/web exec vite build",
+		"sync-assets": "rm -rf dist && cp -R ../../apps/web/dist dist",
+		"deploy": "npm run build:spa && npm run sync-assets && wrangler deploy",
+		"dev": "wrangler dev",
+		"cf-typegen": "wrangler types"
+	},
+	"devDependencies": {
+		"wrangler": "^4.124.0"
+	}
+}
