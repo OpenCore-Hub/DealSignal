@@ -122,9 +122,12 @@ export function DashboardPage() {
 
   const handlePrimary = (item: RadarWorkItem) => {
     setSelectedId(item.id);
-    // Warm-card email is a suggestion, not an in-app send. Do not open a
-    // compose demo or fall through to the document evidence tab.
+    // Warm-card email is a suggestion, not an in-app send. Empty-recipient
+    // cards demote to open but still must not fall through to the document tab.
     if (item.verb === "email") {
+      return;
+    }
+    if (item.product === "buying_window" && item.verb === "open") {
       return;
     }
     const path = item.navigatePath || item.evidencePath;

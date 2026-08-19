@@ -1072,6 +1072,66 @@ func TestCompileBuyingWindowEmailActDoesNotUseEvidencePath(t *testing.T) {
 	}
 }
 
+func TestCompileBuyingWindowEmptyEmailDoesNotNavigateToDocument(t *testing.T) {
+	now := time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC)
+	sigID := uuid.New()
+	actID := uuid.New()
+	docID := uuid.New()
+	ctx, err := jsonContext(map[string]any{
+		"contactName":   "张姐",
+		"documentTitle": "Deck",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	md, err := json.Marshal(map[string]string{
+		"page_number": "8",
+		"document_id": docID.String(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	feed := Compile(CompileInput{
+		WorkspaceSlug: "acme",
+		Now:           now,
+		Signals: []db.Signal{{
+			ID:        mustUUID(sigID),
+			Type:      "hot_signal",
+			Subtype:   pgText(suggestions.SubtypeHot),
+			Title:     "Hot",
+			Priority:  "high",
+			Context:   ctx,
+			Metadata:  md,
+			CreatedAt: pgTime(now.Add(-time.Hour)),
+		}},
+		Actions: []db.ActionItem{{
+			ID:         mustUUID(actID),
+			SignalID:   mustUUID(sigID),
+			Title:      "Email",
+			Impact:     "high",
+			Status:     "pending",
+			ActionType: "email",
+			CreatedAt:  pgTime(now.Add(-time.Hour)),
+			DueAt:      pgTime(now.Add(time.Hour)),
+			UpdatedAt:  pgTime(now),
+		}},
+	})
+	if len(feed.Items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(feed.Items))
+	}
+	item := feed.Items[0]
+	if item.Verb != VerbOpen {
+		t.Fatalf("verb=%s want open", item.Verb)
+	}
+	wantEv := "/acme/documents/" + docID.String() + "?tab=content&page=8"
+	if item.EvidencePath != wantEv {
+		t.Fatalf("evidencePath=%s want %s", item.EvidencePath, wantEv)
+	}
+	if item.NavigatePath != "" {
+		t.Fatalf("navigatePath=%s want empty (confirm-recipient is not the document tab)", item.NavigatePath)
+	}
+}
+
 func TestCompileDealRoomAskNavigatesToQATab(t *testing.T) {
 	now := time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC)
 	roomID := "room-1"

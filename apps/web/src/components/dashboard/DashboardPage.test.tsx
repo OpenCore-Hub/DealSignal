@@ -94,6 +94,7 @@ async function renderPage(waitForLoad = true, entry = "/acme/dashboard") {
       "radar.cta.reply": "Reply",
       "radar.cta.email": "Email",
       "radar.suggestion.email": "Suggested: email {{contact}}",
+      "radar.ctaByProduct.buying_window.confirmRecipient": "Confirm who to email",
       "radar.cta.renew": "Renew",
       "radar.cta.review": "Review",
       "radar.cta.open": "Open",
@@ -424,6 +425,31 @@ describe("DashboardPage inbox", () => {
     expect(openSpy).not.toHaveBeenCalled();
 
     openSpy.mockRestore();
+  });
+
+  it("does not open the document tab when the warm card only asks to confirm the recipient", async () => {
+    mockFns.getRadar.mockResolvedValue(
+      makeFeed([
+        makeItem({
+          id: "act-hot",
+          actionId: "act-hot",
+          product: "buying_window",
+          verb: "open",
+          headline: "Follow up with buyer",
+          actor: "张姐",
+          contactEmail: undefined,
+          navigatePath: undefined,
+          evidencePath: "/acme/documents/doc-1?tab=content&page=8",
+        }),
+      ]),
+    );
+
+    await renderPage();
+    const nextUp = await screen.findByTestId("radar-next-up");
+    fireEvent.click(
+      within(nextUp).getByRole("button", { name: /^Confirm who to email$/i }),
+    );
+    expect(mockFns.navigate).not.toHaveBeenCalled();
   });
 
   it("refetches after direct complete on buying_window", async () => {

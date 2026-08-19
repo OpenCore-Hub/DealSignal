@@ -660,9 +660,10 @@ func buildItem(in CompileInput, a db.ActionItem, sig *db.Signal, product Product
 	if nav == "" && product == ProductDiligenceGate {
 		nav = diligenceRemediationPath(in.WorkspaceSlug, dealRoomID, linkID)
 	}
-	// Email ACT is in-radar compose. Do not copy EvidencePath (document
-	// content/analytics) onto NavigatePath — that path is for the evidence rail.
-	emailAct := verb == VerbEmail && strings.TrimSpace(email) != ""
+	// Warm-card email is a suggestion, not a send. Do not copy EvidencePath
+	// (document content/analytics) onto NavigatePath — including when the
+	// card later demotes to open because no recipient email is present.
+	emailAct := verb == VerbEmail
 	if nav == "" && !emailAct {
 		nav = ev
 	}
