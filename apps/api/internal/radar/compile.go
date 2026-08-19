@@ -677,7 +677,13 @@ func buildItem(in CompileInput, a db.ActionItem, sig *db.Signal, product Product
 	if nav == "" && (product == ProductLeakWatch || product == ProductAbuseGuard || product == ProductAccessDecay) && strings.TrimSpace(linkID) != "" {
 		nav = insightsPath(in.WorkspaceSlug, linkID, "")
 	}
-	if nav == "" && !emailAct && !roomExpiry {
+	// Signal-backed Ask (empty sourceType) still classifies as Reply.
+	// Operational Ask already set nav via navigatePath. Do not copy
+	// evidence (share analytics / document tab) onto the Reply CTA.
+	if nav == "" && product == ProductCommitmentAsk {
+		nav = askInboxPath(in.WorkspaceSlug, dealRoomID, linkID, isFormalAsk(a))
+	}
+	if nav == "" && !emailAct && !roomExpiry && product != ProductCommitmentAsk {
 		nav = ev
 	}
 	if verb == VerbEmail && email == "" {

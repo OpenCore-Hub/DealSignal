@@ -88,3 +88,25 @@ func TestDiligenceRemediationPath(t *testing.T) {
 		t.Fatal("empty ids must not invent a path")
 	}
 }
+
+func TestAskInboxPath(t *testing.T) {
+	room := askInboxPath("acme", "room-1", "link-9", false)
+	if room != "/acme/deal-rooms/room-1?askInbox=needs_host&linkId=link-9&tab=qa" {
+		t.Fatalf("room+link=%q", room)
+	}
+	roomFormal := askInboxPath("acme", "room-1", "link-9", true)
+	if roomFormal != "/acme/deal-rooms/room-1?askInbox=formal_queue&linkId=link-9&tab=qa" {
+		t.Fatalf("room formal=%q", roomFormal)
+	}
+	roomOnly := askInboxPath("acme", "room-1", "", false)
+	if roomOnly != "/acme/deal-rooms/room-1?askInbox=needs_host&tab=qa" {
+		t.Fatalf("room-only=%q", roomOnly)
+	}
+	lib := askInboxPath("acme", "", "link-lib", false)
+	if lib != "/acme/links/link-lib?askInbox=needs_host" {
+		t.Fatalf("library=%q", lib)
+	}
+	if askInboxPath("acme", "", "", false) != "" {
+		t.Fatal("empty ids must not invent a path")
+	}
+}

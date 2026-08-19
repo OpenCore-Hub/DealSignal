@@ -92,6 +92,27 @@ func diligenceRemediationPath(workspaceSlug, dealRoomID, linkID string) string {
 	return ""
 }
 
+// askInboxPath is the host destination for Commitment Ask when there is no
+// operational sourceType (signal-backed escalate / question suggestion).
+// Rooms open the QA tab. Library shares open the link Ask inbox. Must not
+// fall through to share analytics or a document tab — those are evidence.
+// Document library and deal room must not cross.
+func askInboxPath(workspaceSlug, dealRoomID, linkID string, formalQueue bool) string {
+	slug := strings.TrimSpace(workspaceSlug)
+	roomID := strings.TrimSpace(dealRoomID)
+	link := strings.TrimSpace(linkID)
+	if slug == "" {
+		return ""
+	}
+	if roomID != "" {
+		return dealRoomAskPath(slug, roomID, link, formalQueue)
+	}
+	if link != "" {
+		return libraryAskPath(slug, link, formalQueue)
+	}
+	return ""
+}
+
 func evidencePath(workspaceSlug, documentID, linkID, contactID, page string) string {
 	slug := strings.TrimSpace(workspaceSlug)
 	if slug == "" {

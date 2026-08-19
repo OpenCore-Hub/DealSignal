@@ -1279,6 +1279,89 @@ func TestCompileAccessDecayReviewNavigatesToShareLinkNotDocument(t *testing.T) {
 	}
 }
 
+func TestCompileSignalAskEscalatedDealRoomNavigatesToQAInbox(t *testing.T) {
+	now := time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC)
+	sigID := uuid.New()
+	linkID := uuid.New()
+	docID := uuid.New()
+	roomID := uuid.New().String()
+	md, err := json.Marshal(map[string]string{"eventType": "ask_escalated", "ruleId": "security_ask_escalated"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	feed := Compile(CompileInput{
+		WorkspaceSlug: "acme",
+		Now:           now,
+		Links: map[string]LinkMeta{
+			linkID.String(): {ID: linkID.String(), Name: "test", DealRoomID: roomID, DocumentID: docID.String()},
+		},
+		Rooms: map[string]RoomMeta{roomID: {Name: "创业融资"}},
+		Signals: []db.Signal{{
+			ID: mustUUID(sigID), Type: "risk_alert", Subtype: pgText(suggestions.SubtypeAnomaly),
+			Title: "Escalated", Suggestion: "Open Ask inbox and respond to the escalated question",
+			Priority: "high", LinkID: mustUUID(linkID), DocumentID: mustUUID(docID),
+			Metadata: md, CreatedAt: pgTime(now.Add(-10 * time.Minute)),
+		}},
+		Actions: []db.ActionItem{{
+			ID: mustUUID(uuid.New()), SignalID: mustUUID(sigID),
+			Title: "Open Ask inbox and respond to the escalated question",
+			Impact: "high", Status: "pending", ActionType: "review",
+			CreatedAt: pgTime(now.Add(-10 * time.Minute)), DueAt: pgTime(now.Add(time.Hour)), UpdatedAt: pgTime(now),
+		}},
+	})
+	if len(feed.Items) != 1 {
+		t.Fatalf("items=%d", len(feed.Items))
+	}
+	item := feed.Items[0]
+	if item.Product != ProductCommitmentAsk || item.Verb != VerbReply {
+		t.Fatalf("product=%s verb=%s", item.Product, item.Verb)
+	}
+	wantNav := "/acme/deal-rooms/" + roomID + "?askInbox=needs_host&linkId=" + linkID.String() + "&tab=qa"
+	if item.NavigatePath != wantNav {
+		t.Fatalf("navigatePath=%s want %s (must not copy share analytics)", item.NavigatePath, wantNav)
+	}
+	wantEv := "/acme/documents/" + docID.String() + "?tab=analytics"
+	if item.EvidencePath != wantEv {
+		t.Fatalf("evidencePath=%s want %s (document stays on the evidence rail)", item.EvidencePath, wantEv)
+	}
+}
+
+func TestCompileSignalAskEscalatedLibraryNavigatesToLinkInbox(t *testing.T) {
+	now := time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC)
+	sigID := uuid.New()
+	linkID := uuid.New()
+	md, err := json.Marshal(map[string]string{"eventType": "ask_escalated"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	feed := Compile(CompileInput{
+		WorkspaceSlug: "acme",
+		Now:           now,
+		Links:         map[string]LinkMeta{linkID.String(): {ID: linkID.String(), Name: "Deck"}},
+		Signals: []db.Signal{{
+			ID: mustUUID(sigID), Type: "risk_alert", Subtype: pgText(suggestions.SubtypeAnomaly),
+			Title: "Escalated", Priority: "high", LinkID: mustUUID(linkID),
+			Metadata: md, CreatedAt: pgTime(now.Add(-10 * time.Minute)),
+		}},
+		Actions: []db.ActionItem{{
+			ID: mustUUID(uuid.New()), SignalID: mustUUID(sigID), Title: "Open Ask inbox",
+			Impact: "high", Status: "pending", ActionType: "review",
+			CreatedAt: pgTime(now.Add(-10 * time.Minute)), DueAt: pgTime(now.Add(time.Hour)), UpdatedAt: pgTime(now),
+		}},
+	})
+	if len(feed.Items) != 1 {
+		t.Fatalf("items=%d", len(feed.Items))
+	}
+	item := feed.Items[0]
+	wantNav := "/acme/links/" + linkID.String() + "?askInbox=needs_host"
+	if item.NavigatePath != wantNav {
+		t.Fatalf("navigatePath=%s want %s", item.NavigatePath, wantNav)
+	}
+	if item.EvidencePath != "/acme/links/"+linkID.String() {
+		t.Fatalf("evidencePath=%s want share link without askInbox", item.EvidencePath)
+	}
+}
+
 func TestCompileDealRoomAskNavigatesToQATab(t *testing.T) {
 	now := time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC)
 	roomID := "room-1"
