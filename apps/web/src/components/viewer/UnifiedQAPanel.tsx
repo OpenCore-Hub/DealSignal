@@ -32,6 +32,7 @@ export function UnifiedQAPanel({
   const {
     turns,
     loading,
+    refreshing,
     error,
     submitting,
     escalatingId,
@@ -40,6 +41,7 @@ export function UnifiedQAPanel({
     escalateToHost,
     resolveKnowledgeTurn,
     stopStream,
+    refreshTurns,
   } = useVisitorAskPanel({
     token,
     sessionToken,
@@ -77,15 +79,27 @@ export function UnifiedQAPanel({
     }
   }, [turns, submitting]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const busy = submitting;
+
+  const sendQuestion = async () => {
     const text = input.trim();
-    if (!text) return;
+    if (!text || busy) return;
     setInput("");
     await submitQuestion(text);
   };
 
-  const busy = submitting;
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await sendQuestion();
+  };
+
+  const handleComposerKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key !== "Enter" || e.shiftKey) return;
+    // IME 选词回车（中文等）不能当发送。
+    if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+    e.preventDefault();
+    void sendQuestion();
+  };
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-transparent">
@@ -127,6 +141,8 @@ export function UnifiedQAPanel({
               escalating={escalatingId === turn.id}
               stopped={stoppedTurnIds.has(turn.id)}
               onOpenCitation={onOpenCitation}
+              onRefresh={refreshTurns}
+              refreshing={refreshing}
               onStopStream={streaming ? () => stopStream(turn.id) : undefined}
               onEscalate={
                 turn.route_reason !== "pinned_faq" &&
@@ -150,6 +166,7 @@ export function UnifiedQAPanel({
           <Textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleComposerKeyDown}
             placeholder={t("viewer.askUnifiedPlaceholder")}
             maxLength={500}
             rows={2}

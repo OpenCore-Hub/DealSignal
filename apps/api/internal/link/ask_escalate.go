@@ -8,7 +8,6 @@ import (
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/logger"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/visitorask"
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 )
@@ -45,29 +44,6 @@ func (s *Service) EscalatePublicAskTurn(
 	}
 	s.recordAskEscalated(ctx, link, visitorID, visitorEmail, routeReasonUserEscalate)
 	return mapPublicAskTurnWithAI(updated), nil
-}
-
-func (s *Service) maybeAutoEscalateSupervisedRefuse(
-	ctx context.Context,
-	link db.Link,
-	visitorID string,
-	turn db.LinkAskTurn,
-) {
-	policy := loadAskPolicy(link)
-	if policy.Mode != AskModeSupervised {
-		return
-	}
-	if turn.Status != askStatusAIRefused {
-		return
-	}
-	if _, err := s.attachHostQueueToAITurn(ctx, link, visitorID, "", turn, routeReasonLowConfidence); err != nil {
-		logger.InfoCtx(ctx, "supervised ask auto-escalate failed",
-			logger.Attr("turn_id", uuid.UUID(turn.ID.Bytes).String()),
-			logger.Attr("error", err.Error()),
-		)
-		return
-	}
-	s.recordAskEscalated(ctx, link, visitorID, "", routeReasonLowConfidence)
 }
 
 func (s *Service) recordAskEscalated(ctx context.Context, link db.Link, visitorID, email, reason string) {

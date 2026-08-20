@@ -37,6 +37,13 @@ func TestIsUngroundedAnswer(t *testing.T) {
 	if !looksLikeNonRoomFactMeta("提供的上下文中未包含2025年GMV年增长数据。") {
 		t.Fatal("中未包含 variant")
 	}
+	citedGap := "上下文中没有提供 GMV 增长率的数据。[1] 只提到“管理广告流水”统一值为 48,000 万，口径为近 12 个月累计，但未给出增长率。"
+	if isUngroundedAnswer(citedGap) {
+		t.Fatal("cited mixed gap must keep evidence rail")
+	}
+	if !looksLikeNonRoomFactMeta(citedGap) {
+		t.Fatal("cited mixed gap remains composer meta")
+	}
 }
 
 func TestLooksLikeOutOfRoomGeneralKnowledge(t *testing.T) {
@@ -80,6 +87,12 @@ func TestClassifyTurnResultTypedRefusal(t *testing.T) {
 	refused, status, info = classifyTurnResult("ok [1]", 1)
 	if refused || status != "answered" || info != nil {
 		t.Fatalf("got refused=%v status=%q info=%#v", refused, status, info)
+	}
+
+	citedGap := "上下文中没有提供 GMV 增长率的数据。[1] 只提到“管理广告流水”统一值为 48,000 万。"
+	refused, status, info = classifyTurnResult(citedGap, 1)
+	if refused || status != "answered" || info != nil {
+		t.Fatalf("cited mixed gap: refused=%v status=%q info=%#v", refused, status, info)
 	}
 }
 

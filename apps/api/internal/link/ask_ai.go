@@ -320,12 +320,6 @@ func (s *Service) persistAIAskTurn(
 	}
 
 	s.softInvalidateRoomList(ctx, link.WorkspaceID)
-	if status == askStatusAIRefused {
-		updatedTurn := turn
-		updatedTurn.Status = status
-		updatedTurn.AiPayload = payloadBytes
-		s.maybeAutoEscalateSupervisedRefuse(ctx, link, visitorID, updatedTurn)
-	}
 	return knowledge.VisitorAskStreamResult{
 		TurnID:       uuid.UUID(turn.ID.Bytes).String(),
 		Query:        turn.Question,

@@ -25,6 +25,16 @@ describe("trustGates", () => {
         "提供的上下文未包含2025年GMV年增长数据。材料中可见 Managed Ad Spend 约 4.8 亿元。",
       ),
     ).toBe(false);
+    expect(
+      isUngroundedKnowledgeAnswer(
+        "上下文中没有提供 GMV 增长率的数据。[1] 只提到“管理广告流水”统一值为 48,000 万。",
+      ),
+    ).toBe(false);
+    expect(
+      looksLikeNonRoomFactMeta(
+        "上下文中没有提供 GMV 增长率的数据。[1] 只提到“管理广告流水”统一值为 48,000 万。",
+      ),
+    ).toBe(true);
   });
 
   it("blocks industry trivia from desk promotion", () => {

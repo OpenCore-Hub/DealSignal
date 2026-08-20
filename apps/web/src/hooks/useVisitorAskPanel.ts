@@ -36,6 +36,8 @@ export function useVisitorAskPanel(opts: {
   const [stoppedTurnIds, setStoppedTurnIds] = useState<Set<string>>(() => new Set());
   const [refreshKey, setRefreshKey] = useState(0);
   const streamAbortRef = useRef<Record<string, AbortController>>({});
+  const streamInFlightRef = useRef(new Set<string>());
+  const streamCompletedRef = useRef(new Set<string>());
 
   const [refreshing, setRefreshing] = useState(false);
 
@@ -64,7 +66,9 @@ export function useVisitorAskPanel(opts: {
   const streamTurn = useCallback(
     async (turn: PublicAskTurn) => {
       if (!turnNeedsAIStream(turn)) return;
-      streamAbortRef.current[turn.id]?.abort();
+      if (streamCompletedRef.current.has(turn.id)) return;
+      if (streamInFlightRef.current.has(turn.id)) return;
+      streamInFlightRef.current.add(turn.id);
       const ac = new AbortController();
       streamAbortRef.current[turn.id] = ac;
       let live = createKnowledgeTurn(turn.question, turn.id);
@@ -79,6 +83,7 @@ export function useVisitorAskPanel(opts: {
             setLiveByTurnId((prev) => ({ ...prev, [turn.id]: live }));
           },
         });
+        streamCompletedRef.current.add(turn.id);
         setRefreshKey((k) => k + 1);
       } catch (e) {
         if (e instanceof DOMException && e.name === "AbortError") return;
@@ -88,10 +93,15 @@ export function useVisitorAskPanel(opts: {
           setError(t("viewer.askAiCorpusNotReady"));
         } else if (e instanceof ApiError && e.code === "rate_limit_exceeded") {
           setError(t("viewer.askAiRateLimited"));
+        } else if (e instanceof ApiError && e.code === "invalid_input") {
+          // Auto-escalate / completed AI turns are no longer streamable.
+          streamCompletedRef.current.add(turn.id);
+          setRefreshKey((k) => k + 1);
         } else if (!(e instanceof ApiError && e.code === "stream_incomplete")) {
           setError(t("viewer.askError"));
         }
       } finally {
+        streamInFlightRef.current.delete(turn.id);
         delete streamAbortRef.current[turn.id];
         setLiveByTurnId((prev) => {
           const next = { ...prev };
@@ -107,6 +117,7 @@ export function useVisitorAskPanel(opts: {
     if (loading) return;
     for (const turn of turns) {
       if (stoppedTurnIds.has(turn.id)) continue;
+      if (streamCompletedRef.current.has(turn.id) || streamInFlightRef.current.has(turn.id)) continue;
       if (turnNeedsAIStream(turn) && !liveByTurnId[turn.id] && !streamAbortRef.current[turn.id]) {
         void streamTurn(turn);
       }

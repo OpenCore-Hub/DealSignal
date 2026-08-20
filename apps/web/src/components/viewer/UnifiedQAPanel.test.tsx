@@ -6,11 +6,12 @@ import i18n from "i18next";
 import { UnifiedQAPanel } from "./UnifiedQAPanel";
 import enDocuments from "@/i18n/locales/en/documents.json";
 
-const { listPublicAskTurnsMock, createPublicAskMock, streamPublicAskTurnMock, listPublicAskFAQsMock } = vi.hoisted(() => ({
+const { listPublicAskTurnsMock, createPublicAskMock, streamPublicAskTurnMock, listPublicAskFAQsMock, escalatePublicAskTurnMock } = vi.hoisted(() => ({
   listPublicAskTurnsMock: vi.fn(),
   createPublicAskMock: vi.fn(),
   streamPublicAskTurnMock: vi.fn(),
   listPublicAskFAQsMock: vi.fn(),
+  escalatePublicAskTurnMock: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({
@@ -19,6 +20,7 @@ vi.mock("@/lib/api", () => ({
     listPublicAskFAQs: listPublicAskFAQsMock,
     createPublicAsk: createPublicAskMock,
     streamPublicAskTurn: streamPublicAskTurnMock,
+    escalatePublicAskTurn: escalatePublicAskTurnMock,
   },
 }));
 
@@ -46,6 +48,7 @@ describe("UnifiedQAPanel (unified Ask host lane)", () => {
     listPublicAskFAQsMock.mockReset();
     createPublicAskMock.mockReset();
     streamPublicAskTurnMock.mockReset();
+    escalatePublicAskTurnMock.mockReset();
     listPublicAskTurnsMock.mockResolvedValue({ data: [] });
     listPublicAskFAQsMock.mockResolvedValue({ data: [] });
     streamPublicAskTurnMock.mockResolvedValue(null);
@@ -122,6 +125,99 @@ describe("UnifiedQAPanel (unified Ask host lane)", () => {
     });
   });
 
+  it("does not restart a successful AI stream while the list still shows ai_streaming", async () => {
+    listPublicAskTurnsMock.mockResolvedValue({
+      data: [
+        {
+          id: "turn_ai_once",
+          session_id: "sess1",
+          question: "是吗",
+          lane: "ai",
+          status: "ai_streaming",
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:00Z",
+        },
+      ],
+    });
+    await renderPanel();
+    await waitFor(() => {
+      expect(streamPublicAskTurnMock).toHaveBeenCalledTimes(1);
+    });
+    await waitFor(() => {
+      expect(listPublicAskTurnsMock.mock.calls.length).toBeGreaterThanOrEqual(2);
+    });
+    expect(streamPublicAskTurnMock).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText(/Failed to submit question/i)).not.toBeInTheDocument();
+  });
+
+  it("does not start a second stream when submit and the list effect race", async () => {
+    let resolveStream: (() => void) | undefined;
+    streamPublicAskTurnMock.mockImplementation(
+      () => new Promise<null>((resolve) => {
+        resolveStream = () => resolve(null);
+      }),
+    );
+    createPublicAskMock.mockResolvedValue({
+      data: {
+        id: "turn_submit_ai",
+        session_id: "sess1",
+        question: "是吗",
+        lane: "ai",
+        status: "ai_streaming",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+    });
+    await renderPanel();
+    fireEvent.change(screen.getByPlaceholderText(/materials you can access/i), {
+      target: { value: "是吗" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Ask/i }));
+    await waitFor(() => {
+      expect(streamPublicAskTurnMock).toHaveBeenCalledTimes(1);
+    });
+    expect(streamPublicAskTurnMock).toHaveBeenCalledTimes(1);
+    resolveStream?.();
+    await waitFor(() => {
+      expect(listPublicAskTurnsMock.mock.calls.length).toBeGreaterThan(1);
+    });
+    expect(streamPublicAskTurnMock).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText(/Failed to submit question/i)).not.toBeInTheDocument();
+  });
+
+  it("does not treat a post-escalate stream 400 as submit failure", async () => {
+    const { ApiError } = await import("@/lib/apiClient");
+    streamPublicAskTurnMock.mockRejectedValue(
+      new ApiError({
+        status: 400,
+        code: "invalid_input",
+        message: "turn is not ai lane",
+        requestId: "r-lane",
+      }),
+    );
+    listPublicAskTurnsMock.mockResolvedValue({
+      data: [
+        {
+          id: "turn_escalated_lane",
+          session_id: "sess1",
+          question: "是吗",
+          lane: "ai",
+          status: "ai_streaming",
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:00Z",
+        },
+      ],
+    });
+    await renderPanel();
+    await waitFor(() => {
+      expect(streamPublicAskTurnMock).toHaveBeenCalled();
+    });
+    await waitFor(() => {
+      expect(listPublicAskTurnsMock.mock.calls.length).toBeGreaterThanOrEqual(2);
+    });
+    expect(screen.queryByText(/Failed to submit question/i)).not.toBeInTheDocument();
+  });
+
   it("renders answered host turns", async () => {
     listPublicAskTurnsMock.mockResolvedValue({
       data: [
@@ -167,8 +263,80 @@ describe("UnifiedQAPanel (unified Ask host lane)", () => {
     const aiRefuse = await screen.findByText(/couldn't find supporting material/i);
     const hostReply = screen.getByText("Not public yet, pending finance.");
     expect(aiRefuse.compareDocumentPosition(hostReply) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(screen.queryByText(/send this to the host for confirmation/i)).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Send to host/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/send this to human support for confirmation/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Send to human support/i })).not.toBeInTheDocument();
+  });
+
+  it("keeps a refused AI turn on the visitor until they send it to the host", async () => {
+    listPublicAskTurnsMock.mockResolvedValue({
+      data: [
+        {
+          id: "turn_refused",
+          session_id: "sess1",
+          question: "What is GMV growth?",
+          lane: "ai",
+          status: "ai_refused",
+          ai_payload: {
+            answer: "",
+            refused: true,
+            resultStatus: "no_hits",
+            hits: [],
+          },
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:00Z",
+        },
+      ],
+    });
+    await renderPanel();
+    expect(await screen.findByText(/couldn't find supporting material/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Send to human support/i })).toBeInTheDocument();
+    expect(screen.queryByTestId("visitor-ask-refresh")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Waiting for human support/i)).not.toBeInTheDocument();
+  });
+
+  it("shows refresh and waiting copy after the visitor sends a refused turn to the host", async () => {
+    const refusedTurn = {
+      id: "turn_refused_click",
+      session_id: "sess1",
+      question: "What is GMV growth?",
+      lane: "ai" as const,
+      status: "ai_refused" as const,
+      ai_payload: {
+        answer: "",
+        refused: true,
+        resultStatus: "no_hits",
+        hits: [],
+      },
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    };
+    listPublicAskTurnsMock.mockResolvedValue({ data: [refusedTurn] });
+    escalatePublicAskTurnMock.mockImplementation(async () => {
+      listPublicAskTurnsMock.mockResolvedValue({
+        data: [
+          {
+            ...refusedTurn,
+            lane: "hybrid",
+            status: "host_escalated",
+            route_reason: "user_escalate",
+            updated_at: "2026-01-01T00:01:00Z",
+          },
+        ],
+      });
+      return { data: { ...refusedTurn, lane: "hybrid", status: "host_escalated" } };
+    });
+    await renderPanel();
+    fireEvent.click(await screen.findByRole("button", { name: /Send to human support/i }));
+    await waitFor(() => {
+      expect(escalatePublicAskTurnMock).toHaveBeenCalledWith(
+        "tok123",
+        "turn_refused_click",
+        { sessionToken: "sess456" },
+      );
+    });
+    expect(await screen.findByTestId("visitor-ask-refresh")).toBeInTheDocument();
+    expect(screen.getByText(/Waiting for human support/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Send to human support/i })).not.toBeInTheDocument();
   });
 
   it("refreshes pending host turns without hiding the thread", async () => {
@@ -202,6 +370,8 @@ describe("UnifiedQAPanel (unified Ask host lane)", () => {
     const composer = screen.getByPlaceholderText(/materials you can access/i);
     fireEvent.change(composer, { target: { value: "What was 2025 revenue?" } });
     fireEvent.keyDown(composer, { key: "Enter", shiftKey: true });
+    expect(createPublicAskMock).not.toHaveBeenCalled();
+    fireEvent.keyDown(composer, { key: "Enter", keyCode: 229 });
     expect(createPublicAskMock).not.toHaveBeenCalled();
     fireEvent.keyDown(composer, { key: "Enter" });
     await waitFor(() => {

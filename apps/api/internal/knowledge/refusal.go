@@ -35,7 +35,6 @@ var ungroundedAnswerNeedles = []string{
 	"未找到相关",
 	"没有匹配",
 	"无法从提供的",
-	"上下文中没有",
 	"资料中没有",
 	// Soft Chinese refusals (often mixed with NDA/hit prose — still not room facts).
 	"无法根据现有上下文",
@@ -101,6 +100,7 @@ func looksLikeNonRoomFactMeta(text string) bool {
 		// Kept here (not in isUngroundedAnswer) so mixed answers still show citations.
 		"提供的上下文未包含",
 		"提供的上下文中未包含",
+		"上下文中没有",
 		"the provided context does not include",
 		"provided context does not include",
 		"现有材料不足以",

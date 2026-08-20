@@ -39,25 +39,3 @@ func TestRecordAskEscalated_NoRecorder(t *testing.T) {
 	svc := &Service{}
 	svc.recordAskEscalated(context.Background(), db.Link{}, "visitor-1", "", routeReasonLowConfidence)
 }
-
-func TestMaybeAutoEscalateSupervisedRefuse_SkipsSelfServe(t *testing.T) {
-	rec := &mockAskSecurityRecorder{}
-	svc := &Service{askSecurity: rec}
-	link := db.Link{AskMode: AskModeSelfServe}
-	turn := db.LinkAskTurn{Status: askStatusAIRefused}
-	svc.maybeAutoEscalateSupervisedRefuse(context.Background(), link, "visitor-1", turn)
-	if len(rec.eventTypes) != 0 {
-		t.Fatalf("expected no security events, got %v", rec.eventTypes)
-	}
-}
-
-func TestMaybeAutoEscalateSupervisedRefuse_SkipsAnsweredTurn(t *testing.T) {
-	rec := &mockAskSecurityRecorder{}
-	svc := &Service{askSecurity: rec}
-	link := db.Link{AskMode: AskModeSupervised}
-	turn := db.LinkAskTurn{Status: askStatusAIAnswered}
-	svc.maybeAutoEscalateSupervisedRefuse(context.Background(), link, "visitor-1", turn)
-	if len(rec.eventTypes) != 0 {
-		t.Fatalf("expected no security events, got %v", rec.eventTypes)
-	}
-}

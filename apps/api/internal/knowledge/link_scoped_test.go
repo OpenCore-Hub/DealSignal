@@ -57,6 +57,19 @@ func TestClassifyVisitorAskResult_RefusedWhenUngrounded(t *testing.T) {
 	}
 }
 
+func TestClassifyVisitorAskResult_CitedMixedGapKeepsHits(t *testing.T) {
+	answer, hits, refused, status, info := ClassifyVisitorAskResult(QueryResponse{
+		Answer:  "上下文中没有提供 GMV 增长率的数据。[1] 只提到“管理广告流水”统一值为 48,000 万。",
+		Results: []QueryHit{{ChunkID: "c1", DocumentID: "d1", Text: "管理广告流水 48,000万"}},
+	}, nil)
+	if refused || status != "answered" || info != nil {
+		t.Fatalf("refused=%v status=%q info=%+v", refused, status, info)
+	}
+	if len(hits) != 1 || answer == "" {
+		t.Fatalf("hits=%d answer=%q", len(hits), answer)
+	}
+}
+
 func TestClassifyVisitorAskResult_Error(t *testing.T) {
 	_, _, refused, status, info := ClassifyVisitorAskResult(QueryResponse{}, ErrUnavailable)
 	if !refused || status != "error" || info == nil || info.Kind != RefusalKindError {
