@@ -180,21 +180,21 @@ func rateLimitForCategory(cat rateLimitCategory, cfg *config.Config) (int, time.
 	case categoryAuthRegister:
 		limit := cfg.RateLimitRegisterLimit
 		if limit <= 0 {
-			limit = 5
+			limit = config.DefaultRateLimitRegisterLimit
 		}
 		window := cfg.RateLimitRegisterWindow
 		if window <= 0 {
-			window = 15 * time.Minute
+			window = time.Duration(config.DefaultRateLimitRegisterWindowMinutes) * time.Minute
 		}
 		return limit, window
 	case categoryAuthResend, categoryAuthForgot:
 		limit := cfg.RateLimitResendLimit
 		if limit <= 0 {
-			limit = 3
+			limit = config.DefaultRateLimitResendLimit
 		}
 		window := cfg.RateLimitResendWindow
 		if window <= 0 {
-			window = 15 * time.Minute
+			window = time.Duration(config.DefaultRateLimitResendWindowMinutes) * time.Minute
 		}
 		return limit, window
 	case categoryUpload:

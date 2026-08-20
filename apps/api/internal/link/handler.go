@@ -1921,7 +1921,7 @@ func (h *Handler) Access(c *gin.Context) {
 
 	// Rate-limit access attempts to prevent brute-force attacks on
 	// verification codes and passwords. Each IP+token pair is limited
-	// to 10 attempts per minute (all attempts, success or failure).
+	// to 60 attempts per minute (all attempts, success or failure).
 	// Session-reuse requests skip this check entirely.
 	if err := h.service.checkAccessAttemptRateLimit(c.Request.Context(), token, c.ClientIP()); err != nil {
 		c.JSON(http.StatusTooManyRequests, gin.H{

@@ -2488,13 +2488,19 @@ func isValidEmail(email string) bool {
 	return false
 }
 
+const (
+	accessRequestLimitPerHour = 30
+	accessAttemptLimitPerMin  = 60
+	emailCodeSendLimitPerMin  = 3
+)
+
 // AllowAccessRequest checks the per-IP per-link rate limit for access requests.
 func (s *Service) AllowAccessRequest(ctx context.Context, clientIP, publicToken string) (bool, error) {
 	if s.redisClient == nil {
 		return true, nil
 	}
 	key := "access_request:" + clientIP + ":" + publicToken
-	allowed, _, err := s.redisClient.RateLimitAllow(ctx, key, 5, time.Hour)
+	allowed, _, err := s.redisClient.RateLimitAllow(ctx, key, accessRequestLimitPerHour, time.Hour)
 	return allowed, err
 }
 
@@ -4022,21 +4028,21 @@ func (s *Service) allowEmailCodeSend(ctx context.Context, token, email string) (
 		logger.InfoCtx(ctx, "redis unavailable for email code resend rate limiting; allowing send")
 		return true, nil
 	}
-	return s.redisClient.AllowEmailCodeSend(ctx, resendRateLimitKey(token, email), 3, time.Minute)
+	return s.redisClient.AllowEmailCodeSend(ctx, resendRateLimitKey(token, email), emailCodeSendLimitPerMin, time.Minute)
 }
 
 // checkAccessAttemptRateLimit enforces a sliding-window rate limit on access
 // attempts (POST /v1/public/links/:token). Returns nil if allowed, or an
 // error if the limit has been exceeded. Each IP+token pair is limited to
-// 10 attempts per minute to prevent brute-force attacks on access codes
-// and passwords. Redis is required; if unavailable, the check is skipped
-// with a logged warning (fail-open for availability).
+// 60 attempts per minute to prevent brute-force attacks on access codes
+// and passwords while remaining usable behind office NAT. Redis is required;
+// if unavailable, the check is skipped with a logged warning (fail-open).
 func (s *Service) checkAccessAttemptRateLimit(ctx context.Context, token, ip string) error {
 	if s.redisClient == nil {
 		return nil
 	}
 	key := fmt.Sprintf("link:access:ratelimit:%s:%s", token, hashIPForRateLimit(s.cfg.IPHashKey, ip))
-	allowed, _, err := s.redisClient.RateLimitAllow(ctx, key, 10, time.Minute)
+	allowed, _, err := s.redisClient.RateLimitAllow(ctx, key, accessAttemptLimitPerMin, time.Minute)
 	if err != nil {
 		logger.ErrorCtx(ctx, "access rate limit check failed", err)
 		return nil // fail-open

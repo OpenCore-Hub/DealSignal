@@ -9,22 +9,22 @@ import (
 
 // Hard limits for visitor Ask Host (per visitor + link).
 const (
-	AskHostDailyLimit  = 30
+	AskHostDailyLimit  = 100
 	AskHostDailyWindow = 24 * time.Hour
 )
 
 // Default Ask AI abuse caps (per visitor + link). Monthly billing quota is the
 // workspace plan (plan.Limits.VisitorAskAIMonthly), not these env vars.
 const (
-	DefaultAskAIRPM        = 10
-	DefaultAskAIDailyLimit = 50
+	DefaultAskAIRPM        = 30
+	DefaultAskAIDailyLimit = 150
 	AskAIRPMWindow         = time.Minute
 	AskAIDailyWindow       = 24 * time.Hour
 )
 
 // Formal Q&A abuse caps (per visitor + link). Stricter than host lane (Phase C).
 const (
-	DefaultAskFormalDailyLimit = 20
+	DefaultAskFormalDailyLimit = 50
 	AskFormalDailyWindow       = 24 * time.Hour
 )
 
@@ -86,7 +86,7 @@ func AllowAskAI(ctx context.Context, lim Limiter, linkID, visitorID string, limi
 	return ok, nil
 }
 
-// AllowAskHost enforces 30/day.
+// AllowAskHost enforces 100/day.
 func AllowAskHost(ctx context.Context, lim Limiter, linkID, visitorID string) (bool, error) {
 	if lim == nil {
 		return true, nil

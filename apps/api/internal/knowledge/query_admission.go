@@ -19,8 +19,8 @@ func memberQueryGateKey(roomID, userID string) string {
 }
 
 const (
-	defaultKnowledgeQAMemberRPM   = 20
-	defaultKnowledgeQAFollowUpRPM = 40
+	defaultKnowledgeQAMemberRPM   = 60
+	defaultKnowledgeQAFollowUpRPM = 80
 	knowledgeQAInflightTTL        = 5 * time.Minute
 	knowledgeQARPMWindow          = time.Minute
 

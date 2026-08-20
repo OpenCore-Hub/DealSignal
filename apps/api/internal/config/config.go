@@ -200,6 +200,25 @@ type Config struct {
 	DoclingRAG DoclingRAGConfig
 }
 
+// Production rate-limit defaults. Sized for global SaaS: corporate NAT/CGNAT,
+// multi-tab dashboards, batch diligence uploads, and stream reconnects.
+// These are abuse guards, not billing quotas.
+const (
+	DefaultRateLimitPublicRPM             = 600
+	DefaultRateLimitAuthRPM               = 120
+	DefaultRateLimitRegisterLimit         = 10
+	DefaultRateLimitRegisterWindowMinutes = 15
+	DefaultRateLimitResendLimit           = 8
+	DefaultRateLimitResendWindowMinutes   = 15
+	DefaultRateLimitUploadRPM             = 240
+	DefaultRateLimitWorkspaceRPM          = 600
+	DefaultKnowledgeQAMemberRPM           = 60
+	DefaultKnowledgeQAFollowUpRPM         = 80
+	DefaultVisitorAskAIRPM                = 30
+	DefaultVisitorAskAIDailyLimit         = 150
+	DefaultVisitorAskFormalDailyLimit     = 50
+)
+
 // Load parses environment variables into Config and validates required fields.
 func Load() (*Config, error) {
 	cfg := &Config{
@@ -271,18 +290,18 @@ func Load() (*Config, error) {
 		HubSpotClientID:           os.Getenv("HUBSPOT_CLIENT_ID"),
 		HubSpotClientSecret:       os.Getenv("HUBSPOT_CLIENT_SECRET"),
 
-		RateLimitPublicRPM: getEnvInt("RATE_LIMIT_PUBLIC_RPM", 100),
-		RateLimitAuthRPM:   getEnvInt("RATE_LIMIT_AUTH_RPM", 20),
+		RateLimitPublicRPM: getEnvInt("RATE_LIMIT_PUBLIC_RPM", DefaultRateLimitPublicRPM),
+		RateLimitAuthRPM:   getEnvInt("RATE_LIMIT_AUTH_RPM", DefaultRateLimitAuthRPM),
 		// Register is tighter than login/refresh so one IP cannot mint Trial accounts
 		// in a burst. Window is minutes; 0/negative falls back to 15.
-		RateLimitRegisterLimit:  getEnvInt("RATE_LIMIT_REGISTER_LIMIT", 5),
-		RateLimitRegisterWindow: time.Duration(getEnvInt("RATE_LIMIT_REGISTER_WINDOW_MINUTES", 15)) * time.Minute,
-		RateLimitResendLimit:    getEnvInt("RATE_LIMIT_RESEND_LIMIT", 3),
-		RateLimitResendWindow:   time.Duration(getEnvInt("RATE_LIMIT_RESEND_WINDOW_MINUTES", 15)) * time.Minute,
-		// Batch deal-room folder uploads issue one create per file; 10/min is too
-		// low for normal diligence packs (dozens of xlsx/pdf). Default 60/min.
-		RateLimitUploadRPM:     getEnvInt("RATE_LIMIT_UPLOAD_RPM", 60),
-		RateLimitWorkspaceRPM:  getEnvInt("RATE_LIMIT_WORKSPACE_RPM", 200),
+		RateLimitRegisterLimit:  getEnvInt("RATE_LIMIT_REGISTER_LIMIT", DefaultRateLimitRegisterLimit),
+		RateLimitRegisterWindow: time.Duration(getEnvInt("RATE_LIMIT_REGISTER_WINDOW_MINUTES", DefaultRateLimitRegisterWindowMinutes)) * time.Minute,
+		RateLimitResendLimit:    getEnvInt("RATE_LIMIT_RESEND_LIMIT", DefaultRateLimitResendLimit),
+		RateLimitResendWindow:   time.Duration(getEnvInt("RATE_LIMIT_RESEND_WINDOW_MINUTES", DefaultRateLimitResendWindowMinutes)) * time.Minute,
+		// Batch deal-room folder uploads issue one create per file; 60/min still
+		// clips a 100-file diligence pack. Default 240/min.
+		RateLimitUploadRPM:     getEnvInt("RATE_LIMIT_UPLOAD_RPM", DefaultRateLimitUploadRPM),
+		RateLimitWorkspaceRPM:  getEnvInt("RATE_LIMIT_WORKSPACE_RPM", DefaultRateLimitWorkspaceRPM),
 		IdempotencyTTLHours:    getEnvInt("IDEMPOTENCY_TTL_HOURS", 24),
 		IdempotencyMaxBodySize: getEnvInt("IDEMPOTENCY_MAX_BODY_SIZE", 1<<20),
 
@@ -326,16 +345,16 @@ func Load() (*Config, error) {
 		PageViewsRetentionDays:         getEnvInt("PAGE_VIEWS_RETENTION_DAYS", 90),
 		SecurityEventsRetentionDays:    getEnvInt("SECURITY_EVENTS_RETENTION_DAYS", 180),
 		KnowledgeQARetentionDays:       getEnvInt("KNOWLEDGE_QA_RETENTION_DAYS", 90),
-		KnowledgeQAMemberRPM:           getEnvInt("KNOWLEDGE_QA_MEMBER_RPM", 20),
-		KnowledgeQAFollowUpRPM:         getEnvInt("KNOWLEDGE_QA_FOLLOWUP_RPM", 40),
+		KnowledgeQAMemberRPM:           getEnvInt("KNOWLEDGE_QA_MEMBER_RPM", DefaultKnowledgeQAMemberRPM),
+		KnowledgeQAFollowUpRPM:         getEnvInt("KNOWLEDGE_QA_FOLLOWUP_RPM", DefaultKnowledgeQAFollowUpRPM),
 		KnowledgeQARewriteEnabled:      strings.ToLower(getEnv("KNOWLEDGE_QA_REWRITE_ENABLED", "true")) == "true",
 		KnowledgeQARewriteCacheEnabled: strings.ToLower(getEnv("KNOWLEDGE_QA_REWRITE_CACHE_ENABLED", "true")) == "true",
 		KnowledgeQATableLaneEnabled:    strings.ToLower(getEnv("KNOWLEDGE_QA_TABLE_LANE_ENABLED", "true")) == "true",
 		KnowledgeQAMultiHopEnabled:     strings.ToLower(getEnv("KNOWLEDGE_QA_MULTI_HOP_ENABLED", "true")) == "true",
 		VisitorAskUnifiedEnabled:       visitorAskUnifiedEnabledFromEnv(),
-		VisitorAskAIRPM:                getEnvInt("VISITOR_ASK_AI_RPM", 10),
-		VisitorAskAIDailyLimit:         getEnvInt("VISITOR_ASK_AI_DAILY_LIMIT", 50),
-		VisitorAskFormalDailyLimit:     getEnvInt("VISITOR_ASK_FORMAL_DAILY_LIMIT", 20),
+		VisitorAskAIRPM:                getEnvInt("VISITOR_ASK_AI_RPM", DefaultVisitorAskAIRPM),
+		VisitorAskAIDailyLimit:         getEnvInt("VISITOR_ASK_AI_DAILY_LIMIT", DefaultVisitorAskAIDailyLimit),
+		VisitorAskFormalDailyLimit:     getEnvInt("VISITOR_ASK_FORMAL_DAILY_LIMIT", DefaultVisitorAskFormalDailyLimit),
 
 		TurnstileSiteKey: strings.TrimSpace(os.Getenv("TURNSTILE_SITE_KEY")),
 		TurnstileSecret:  strings.TrimSpace(os.Getenv("TURNSTILE_SECRET")),
