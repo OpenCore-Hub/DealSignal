@@ -103,6 +103,8 @@ export function ShareAccessRequestsPanel({
       onReject={(request: PendingLinkAccessRequest) => {
         void reject(request.link_id, request);
       }}
+      // Pending document inbox is already reviewer-scoped by the API.
+      canReview
     />
   );
 }

@@ -79,3 +79,20 @@ export function canMutateShareLink(input: {
   }
   return input.workspaceCanWrite === true;
 }
+
+/**
+ * Approve/reject visitor access requests.
+ * Deal-room links require room manage; document links are creator-only
+ * (backend canReviewAccessRequests). Workspace write is not sufficient.
+ */
+export function canReviewShareAccessRequests(input: {
+  dealRoomId?: string | null;
+  roomCanManage?: boolean;
+  linkCanReviewAccessRequests?: boolean;
+}): boolean {
+  if (typeof input.linkCanReviewAccessRequests === "boolean") {
+    return input.linkCanReviewAccessRequests;
+  }
+  if (input.dealRoomId) return input.roomCanManage === true;
+  return false;
+}

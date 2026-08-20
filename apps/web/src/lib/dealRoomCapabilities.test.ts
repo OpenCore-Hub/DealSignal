@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canContributeToRoom, canManageAskHost, canManageRoom, canManageRoomMember, canMutateShareLink, canViewRoomAccessPolicy, canViewRoomKnowledge, grantableRoomRoles } from "./dealRoomCapabilities";
+import { canContributeToRoom, canManageAskHost, canManageRoom, canManageRoomMember, canMutateShareLink, canReviewShareAccessRequests, canViewRoomAccessPolicy, canViewRoomKnowledge, grantableRoomRoles } from "./dealRoomCapabilities";
 
 describe("dealRoomCapabilities", () => {
   it("treats isAdmin as manage", () => {
@@ -76,5 +76,20 @@ describe("dealRoomCapabilities", () => {
     ).toBe(true);
     expect(canMutateShareLink({ workspaceCanWrite: true })).toBe(true);
     expect(canMutateShareLink({ workspaceCanWrite: false })).toBe(false);
+  });
+
+  it("gates access-request review by backend flag, not workspace write", () => {
+    expect(canReviewShareAccessRequests({})).toBe(false);
+    expect(canReviewShareAccessRequests({ linkCanReviewAccessRequests: true })).toBe(true);
+    expect(canReviewShareAccessRequests({ linkCanReviewAccessRequests: false })).toBe(false);
+    expect(canReviewShareAccessRequests({ dealRoomId: "r1", roomCanManage: true })).toBe(true);
+    expect(canReviewShareAccessRequests({ dealRoomId: "r1", roomCanManage: false })).toBe(false);
+    expect(
+      canReviewShareAccessRequests({
+        dealRoomId: "r1",
+        roomCanManage: true,
+        linkCanReviewAccessRequests: false,
+      }),
+    ).toBe(false);
   });
 });

@@ -124,6 +124,8 @@ export interface Link {
   dealRoomId?: string;
   /** True when the caller can reply / Formal-publish / pin FAQ on this link. */
   canManageAsk?: boolean;
+  /** True when the caller may approve/reject visitor access requests on this link. */
+  canReviewAccessRequests?: boolean;
   /** Custom hostname used for the public link URL. */
   customDomain?: string;
   /** Link type: "share" or "file_request" (available from v2.8+ backend). */

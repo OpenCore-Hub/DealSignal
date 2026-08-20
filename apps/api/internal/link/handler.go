@@ -195,6 +195,27 @@ func (h *Handler) loadLinkForMutate(c *gin.Context) (db.Link, bool) {
 	return link, true
 }
 
+// loadLinkForReview gates visitor access-request approve/reject.
+// This is not share-link mutate: document links are creator-only; deal-room
+// links require NeedManage. Unauthorized reviewers get an opaque 404.
+func (h *Handler) loadLinkForReview(c *gin.Context) (db.Link, bool) {
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	link, err := h.service.GetByID(c.Request.Context(), c.Param("id"), workspaceID)
+	if err != nil {
+		if errors.Is(err, ErrNotFoundInWorkspace) {
+			writeAccessRequestReviewError(c, ErrAccessRequestNotFound)
+			return db.Link{}, false
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+		return db.Link{}, false
+	}
+	if !canReviewLinkRequests(c.Request.Context(), h.service.queries, link, middleware.UserIDFrom(c)) {
+		writeAccessRequestReviewError(c, ErrAccessRequestForbidden)
+		return db.Link{}, false
+	}
+	return link, true
+}
+
 func (h *Handler) rejectIfLinkViewForbidden(c *gin.Context, link db.Link) bool {
 	err := authorizeLinkView(c.Request.Context(), h.service.queries, link.WorkspaceID, link.DealRoomID, middleware.UserIDFrom(c))
 	if err == nil {
@@ -1159,7 +1180,7 @@ func (h *Handler) ListPendingAccessRequests(c *gin.Context) {
 
 // ApproveAccessRequest approves a pending access request.
 func (h *Handler) ApproveAccessRequest(c *gin.Context) {
-	if _, ok := h.loadLinkForMutate(c); !ok {
+	if _, ok := h.loadLinkForReview(c); !ok {
 		return
 	}
 	userID := middleware.UserIDFrom(c)
@@ -1194,7 +1215,7 @@ func writeApproveAccessRequestResponse(c *gin.Context, ar LinkAccessRequest, err
 
 // RejectAccessRequest rejects a pending access request.
 func (h *Handler) RejectAccessRequest(c *gin.Context) {
-	if _, ok := h.loadLinkForMutate(c); !ok {
+	if _, ok := h.loadLinkForReview(c); !ok {
 		return
 	}
 	userID := middleware.UserIDFrom(c)
@@ -2991,6 +3012,12 @@ func (h *Handler) linkResponse(c *gin.Context, link db.Link) (gin.H, error) {
 		link.DealRoomID,
 		middleware.UserIDFrom(c),
 	) == nil
+	item["canReviewAccessRequests"] = canReviewLinkRequests(
+		ctx,
+		h.service.queries,
+		link,
+		middleware.UserIDFrom(c),
+	)
 	if link.NdaDocumentID.Valid {
 		item["ndaDocumentId"] = uuidToString(link.NdaDocumentID)
 	}

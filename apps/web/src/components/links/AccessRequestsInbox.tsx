@@ -11,7 +11,6 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { formatRelativeTime } from "@/lib/formatters";
-import { useWorkspaceAccess } from "@/hooks/useWorkspaceAccess";
 import { cn } from "@/lib/utils";
 import type { LinkAccessRequest } from "@/types";
 
@@ -32,7 +31,7 @@ interface AccessRequestsInboxProps {
   itemTestIdPrefix: string;
   onApprove: (request: AccessRequestInboxItem) => void;
   onReject: (request: AccessRequestInboxItem) => void;
-  /** When omitted, falls back to workspace write (document-library inbox). */
+  /** When omitted, actions stay hidden (review is not workspace write). */
   canReview?: boolean;
 }
 
@@ -49,8 +48,7 @@ export function AccessRequestsInbox({
   canReview,
 }: AccessRequestsInboxProps) {
   const { t } = useTranslation("linkShare");
-  const { canWrite } = useWorkspaceAccess();
-  const showActions = canReview ?? canWrite;
+  const showActions = canReview === true;
   const focusRef = useRef<HTMLDivElement | null>(null);
   const focusRequestId = useMemo(() => {
     if (!focusLinkId) return null;

@@ -44,7 +44,7 @@ import {
   roomSecurityFloors,
 } from "@/components/deal-rooms/roomAccessPolicy";
 import { useNdaPickerSources } from "./hooks";
-import { canMutateShareLink } from "@/lib/dealRoomCapabilities";
+import { canReviewShareAccessRequests } from "@/lib/dealRoomCapabilities";
 import { resolveNdaDocumentFallback } from "./ndaPicker";
 import { resolveShareViewerDomains } from "./viewerDomains";
 import type { DraftLink } from "./types";
@@ -149,10 +149,9 @@ function LinkShareDialogContent({
   const [highlightedFields, setHighlightedFields] = useState<string[]>([]);
 
   const link = data?.link ?? null;
-  const canReviewRequests = canMutateShareLink({
+  const canReviewRequests = canReviewShareAccessRequests({
     dealRoomId: link?.dealRoomId,
-    linkCanManageAsk: link?.canManageAsk,
-    workspaceCanWrite: canWrite,
+    linkCanReviewAccessRequests: link?.canReviewAccessRequests,
   });
   const policy = data?.policy ?? null;
   const floors = roomSecurityFloors(policy);
