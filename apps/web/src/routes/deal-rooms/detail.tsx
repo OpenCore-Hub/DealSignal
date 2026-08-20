@@ -90,7 +90,7 @@ export function DealRoomDetailPage() {
   const { loading: accessLoading } = useWorkspaceAccess(workspaceSlug);
   const navigate = useNavigate();
   const location = useLocation();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const deepLinkAccessLinkId = searchParams.get("linkId") ?? undefined;
   const deepLinkAskInbox = parseOwnerAskInboxView(searchParams.get("askInbox"));
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -100,7 +100,6 @@ export function DealRoomDetailPage() {
   const [linksRevision, setLinksRevision] = useState(0);
   const [roomLinks, setRoomLinks] = useState<Link[]>([]);
   const [descriptionExpanded, setDescriptionExpanded] = useState(false);
-  const [accessLinkId, setAccessLinkId] = useState<string | undefined>();
   const [accessPolicyDirty, setAccessPolicyDirty] = useState(false);
   const [pendingLeaveTab, setPendingLeaveTab] = useState<DealRoomTab | null>(null);
   const [forbiddenSwitching, setForbiddenSwitching] = useState(false);
@@ -129,7 +128,6 @@ export function DealRoomDetailPage() {
   const stayOnAccessTab = useCallback(() => {
     setPendingLeaveTab(null);
   }, []);
-  const resolvedAccessLinkId = accessLinkId ?? deepLinkAccessLinkId;
   const reducedMotion = useReducedMotion();
   const setBreadcrumbTail = useUIStore((state) => state.setBreadcrumbTail);
   const navSignals = useDealRoomNavStore();
@@ -700,7 +698,7 @@ export function DealRoomDetailPage() {
           {tab === "access" && canViewAccess && (
             <DealRoomAccessControlTab
               roomId={room.id}
-              initialLinkId={resolvedAccessLinkId}
+              initialLinkId={deepLinkAccessLinkId}
               focusLinkId={deepLinkAccessLinkId}
               canManage={canManage}
               onDirtyChange={setAccessPolicyDirty}
@@ -718,8 +716,13 @@ export function DealRoomDetailPage() {
               refreshKey={linksRevision}
               onLinksChanged={bumpLinksRevision}
               onManageAccess={(linkId) => {
-                setAccessLinkId(linkId);
-                requestTabChange("access");
+                // Links tab only: write tab + linkId in one replace. setTab
+                // would keep a leftover linkId after a full-inbox banner jump.
+                const next = new URLSearchParams(searchParams);
+                next.set("tab", "access");
+                if (linkId) next.set("linkId", linkId);
+                else next.delete("linkId");
+                setSearchParams(next, { replace: true });
               }}
             />
           )}

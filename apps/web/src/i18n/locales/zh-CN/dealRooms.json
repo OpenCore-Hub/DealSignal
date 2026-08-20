@@ -655,7 +655,8 @@
         "delete": "删除"
       },
       "pendingRequestsBadge": "{{count}} 待审批",
-      "pendingRequestsBanner": "有 {{count}} 条访问申请待审批。打开对应链接，在「访问控制」中批准或拒绝。",
+      "pendingRequestsBanner": "有 {{count}} 条访问申请待审批。打开「访问策略」批准或拒绝。",
+      "pendingRequestsBadgeOpen": "打开访问策略，处理该链接的 {{count}} 条待审批申请",
       "pendingRequestsLoadFailed": "加载待审批访问申请失败",
       "sendCode": {
         "title": "发送验证码",

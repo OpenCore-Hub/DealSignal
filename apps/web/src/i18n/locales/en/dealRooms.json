@@ -658,7 +658,8 @@
         "delete": "Delete"
       },
       "pendingRequestsBadge": "{{count}} pending",
-      "pendingRequestsBanner": "{{count}} access request(s) waiting for approval. Open a link and use Access Control to approve or reject.",
+      "pendingRequestsBanner": "{{count}} access request(s) waiting for approval. Open Access policy to approve or reject.",
+      "pendingRequestsBadgeOpen": "Open Access policy to review {{count}} pending request(s) for this link",
       "pendingRequestsLoadFailed": "Failed to load pending access requests",
       "sendCode": {
         "title": "Send verification code",

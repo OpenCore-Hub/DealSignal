@@ -57,8 +57,8 @@ interface FolderPermissionsSectionProps {
   refreshKey?: number;
   /** Notify parent so documents/analytics active-link signals stay in sync. */
   onLinksChanged?: () => void;
-  /** Open Room Security tab for a specific link (approval inbox deep link). */
-  onManageAccess?: (linkId: string) => void;
+  /** Open Access policy. Pass a link id to highlight that share-link's applicants. */
+  onManageAccess?: (linkId?: string) => void;
   canManage?: boolean;
 }
 
@@ -84,6 +84,7 @@ export function FolderPermissionsSection({
   canManage = false,
 }: FolderPermissionsSectionProps) {
   const { t } = useTranslation("dealRooms");
+  const canJumpToAccessRequests = Boolean(onManageAccess && canManage);
   const emptyCell = t("common:emDash");
   const [page, setPage] = useState(1);
   // null = default newest-first load; first header click locks to desc, then toggles.
@@ -285,6 +286,9 @@ export function FolderPermissionsSection({
     }
   };
 
+  const pendingBannerClassName =
+    "mb-4 w-full rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm";
+  const pendingBannerText = t("permissions.links.pendingRequestsBanner", { count: totalPending });
   const pendingBanner = pendingError ? (
     <div
       className="mb-4 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm"
@@ -302,13 +306,24 @@ export function FolderPermissionsSection({
       </Button>
     </div>
   ) : totalPending > 0 ? (
-    <div
-      className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm"
-      role="status"
-      data-testid="deal-room-pending-access-requests"
-    >
-      {t("permissions.links.pendingRequestsBanner", { count: totalPending })}
-    </div>
+    canJumpToAccessRequests ? (
+      <button
+        type="button"
+        className={`${pendingBannerClassName} text-left transition-colors hover:bg-amber-500/10`}
+        data-testid="deal-room-pending-access-requests"
+        onClick={() => onManageAccess?.()}
+      >
+        {pendingBannerText}
+      </button>
+    ) : (
+      <div
+        className={pendingBannerClassName}
+        role="status"
+        data-testid="deal-room-pending-access-requests"
+      >
+        {pendingBannerText}
+      </div>
+    )
   ) : null;
 
   const showEmptyState = !loading && total === 0 && !debouncedQ;
@@ -459,11 +474,33 @@ export function FolderPermissionsSection({
                           <div className="flex items-center gap-2">
                             <span>{displayName}</span>
                             {pendingCount > 0 ? (
-                              <Badge variant="warm">
-                                {t("permissions.links.pendingRequestsBadge", {
-                                  count: pendingCount,
-                                })}
-                              </Badge>
+                              canJumpToAccessRequests ? (
+                                <button
+                                  type="button"
+                                  className="rounded-full"
+                                  data-testid={`deal-room-link-pending-${link.id}`}
+                                  aria-label={t("permissions.links.pendingRequestsBadgeOpen", {
+                                    count: pendingCount,
+                                  })}
+                                  onClick={(e) => {
+                                    stopRowActivation(e);
+                                    onManageAccess?.(link.id);
+                                  }}
+                                  onPointerDown={stopRowActivation}
+                                >
+                                  <Badge variant="warm">
+                                    {t("permissions.links.pendingRequestsBadge", {
+                                      count: pendingCount,
+                                    })}
+                                  </Badge>
+                                </button>
+                              ) : (
+                                <Badge variant="warm">
+                                  {t("permissions.links.pendingRequestsBadge", {
+                                    count: pendingCount,
+                                  })}
+                                </Badge>
+                              )
                             ) : null}
                           </div>
                         </TableCell>
@@ -539,7 +576,7 @@ export function FolderPermissionsSection({
                                 <PencilSimple size={16} />
                               </Button>
                             ) : null}
-                            {pendingCount > 0 && onManageAccess && canManage ? (
+                            {pendingCount > 0 && canJumpToAccessRequests ? (
                               <Button
                                 type="button"
                                 size="icon-sm"

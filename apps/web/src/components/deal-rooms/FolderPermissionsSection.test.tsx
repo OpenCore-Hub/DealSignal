@@ -52,9 +52,15 @@ i18nInstance.use(initReactI18next).init({
             actions: {
               view: "View",
               edit: "Edit",
+              approveRequests: "Review access requests",
               sendCode: "Send code",
               delete: "Delete",
             },
+            pendingRequestsBadge: "{{count}} pending",
+            pendingRequestsBanner:
+              "{{count}} access request(s) waiting for approval. Open Access policy to approve or reject.",
+            pendingRequestsBadgeOpen:
+              "Open Access policy to review {{count}} pending request(s) for this link",
             delete: {
               title: "Delete",
               description: "Delete {{name}}?",
@@ -407,5 +413,35 @@ describe("FolderPermissionsSection refresh", () => {
     });
     const [[message]] = vi.mocked(toast.error).mock.calls;
     expect(String(message)).toMatch(/share link limit/i);
+  });
+});
+
+describe("FolderPermissionsSection access-request jump", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    vi.mocked(api.getDealRoomLinks).mockResolvedValue(
+      pageResponse([makeLink({ id: "link-1", name: "Investor pack" })]),
+    );
+    vi.mocked(api.getPendingLinkAccessRequests).mockResolvedValue({
+      data: [{ id: "req-1", link_id: "link-1", email: "v@example.com", status: "pending" }],
+    } as never);
+  });
+
+  it("opens Access policy from the pending banner and from the row badge", async () => {
+    const onManageAccess = vi.fn();
+    render(
+      <I18nextProvider i18n={i18nInstance}>
+        <FolderPermissionsSection roomId="room-1" canManage onManageAccess={onManageAccess} />
+      </I18nextProvider>,
+    );
+
+    const banner = await screen.findByTestId("deal-room-pending-access-requests");
+    expect(banner).toHaveAccessibleName(/1 access request/);
+    fireEvent.click(banner);
+    expect(onManageAccess).toHaveBeenCalledWith();
+
+    fireEvent.click(screen.getByTestId("deal-room-link-pending-link-1"));
+    expect(onManageAccess).toHaveBeenCalledWith("link-1");
   });
 });
