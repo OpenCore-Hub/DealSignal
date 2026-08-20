@@ -16,11 +16,11 @@ const (
 
 // Shared API / security-event codes for Visitor Ask gates.
 const (
-	CodeRateLimitExceeded  = "rate_limit_exceeded"
-	CodeLimiterUnavailable = "limiter_unavailable"
-	EventTypeRateLimited   = "rate_limit_exceeded"
-	EventTypeAskAIRateLimited = "ask_ai_rate_limited"
-	EventTypeAskEscalated     = "ask_escalated"
+	CodeRateLimitExceeded       = "rate_limit_exceeded"
+	CodeLimiterUnavailable      = "limiter_unavailable"
+	EventTypeRateLimited        = "rate_limit_exceeded"
+	EventTypeAskAIRateLimited   = "ask_ai_rate_limited"
+	EventTypeAskEscalated       = "ask_escalated"
 	EventTypeAskFormalSubmitted = "ask_formal_submitted"
 )
 
@@ -42,7 +42,7 @@ func Check(ctx context.Context, lim Limiter, ch Channel, linkID, visitorID strin
 	var err error
 	switch ch {
 	case ChannelAskHost:
-		ok, err = AllowAskHost(ctx, lim, linkID, visitorID)
+		ok, err = AllowAskHost(ctx, lim, linkID, visitorID, limits)
 	case ChannelAskAI:
 		ok, err = AllowAskAI(ctx, lim, linkID, visitorID, limits)
 	case ChannelAskFormal:

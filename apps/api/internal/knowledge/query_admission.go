@@ -19,20 +19,12 @@ func memberQueryGateKey(roomID, userID string) string {
 }
 
 const (
-	defaultKnowledgeQAMemberRPM   = 60
-	defaultKnowledgeQAFollowUpRPM = 80
-	knowledgeQAInflightTTL        = 5 * time.Minute
-	knowledgeQARPMWindow          = time.Minute
+	knowledgeQAInflightTTL = 5 * time.Minute
+	knowledgeQARPMWindow   = time.Minute
 
 	askAdmissionScope      = "ask"
 	followUpAdmissionScope = "followups"
 )
-
-// DefaultMemberRPM is the default per-member session-ask quota (per minute).
-func DefaultMemberRPM() int { return defaultKnowledgeQAMemberRPM }
-
-// DefaultFollowUpRPM is the default per-member follow-up generation quota (per minute).
-func DefaultFollowUpRPM() int { return defaultKnowledgeQAFollowUpRPM }
 
 // NewMemoryAskAdmission builds a process-local admission controller (tests / no Redis).
 func NewMemoryAskAdmission(rpm int) AskAdmission {

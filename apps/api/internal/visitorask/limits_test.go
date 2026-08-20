@@ -23,7 +23,7 @@ func (m *mockLimiter) RateLimitAllow(_ context.Context, key string, _ int, _ tim
 
 func TestAllowAskHostDeniesWhenOverLimit(t *testing.T) {
 	lim := &mockLimiter{allow: false}
-	ok, err := AllowAskHost(context.Background(), lim, "link-1", "v1")
+	ok, err := AllowAskHost(context.Background(), lim, "link-1", "v1", Limits{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -37,7 +37,7 @@ func TestAllowAskHostDeniesWhenOverLimit(t *testing.T) {
 
 func TestAllowAskHostAllowsWhenUnderLimit(t *testing.T) {
 	lim := &mockLimiter{allow: true}
-	ok, err := AllowAskHost(context.Background(), lim, "link-1", "v1")
+	ok, err := AllowAskHost(context.Background(), lim, "link-1", "v1", Limits{})
 	if err != nil || !ok {
 		t.Fatalf("expected Ask Host allowed, ok=%v err=%v", ok, err)
 	}
@@ -45,7 +45,7 @@ func TestAllowAskHostAllowsWhenUnderLimit(t *testing.T) {
 
 func TestAllowAskHostFailsClosedOnRedisError(t *testing.T) {
 	lim := &mockLimiter{allow: true, err: errors.New("redis down")}
-	ok, err := AllowAskHost(context.Background(), lim, "link-1", "v1")
+	ok, err := AllowAskHost(context.Background(), lim, "link-1", "v1", Limits{})
 	if ok {
 		t.Fatal("expected Ask Host deny when Redis errors")
 	}
@@ -55,7 +55,7 @@ func TestAllowAskHostFailsClosedOnRedisError(t *testing.T) {
 }
 
 func TestAllowAskHostNilLimiterAllows(t *testing.T) {
-	ok, err := AllowAskHost(context.Background(), nil, "link-1", "v1")
+	ok, err := AllowAskHost(context.Background(), nil, "link-1", "v1", Limits{})
 	if err != nil || !ok {
 		t.Fatalf("expected allow with nil limiter, ok=%v err=%v", ok, err)
 	}

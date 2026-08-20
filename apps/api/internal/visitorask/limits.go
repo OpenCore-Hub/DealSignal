@@ -5,27 +5,16 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
 )
 
-// Hard limits for visitor Ask Host (per visitor + link).
+// Windows for visitor Ask abuse caps (per visitor + link).
 const (
-	AskHostDailyLimit  = 100
-	AskHostDailyWindow = 24 * time.Hour
-)
-
-// Default Ask AI abuse caps (per visitor + link). Monthly billing quota is the
-// workspace plan (plan.Limits.VisitorAskAIMonthly), not these env vars.
-const (
-	DefaultAskAIRPM        = 30
-	DefaultAskAIDailyLimit = 150
-	AskAIRPMWindow         = time.Minute
-	AskAIDailyWindow       = 24 * time.Hour
-)
-
-// Formal Q&A abuse caps (per visitor + link). Stricter than host lane (Phase C).
-const (
-	DefaultAskFormalDailyLimit = 50
-	AskFormalDailyWindow       = 24 * time.Hour
+	AskHostDailyWindow   = 24 * time.Hour
+	AskAIRPMWindow       = time.Minute
+	AskAIDailyWindow     = 24 * time.Hour
+	AskFormalDailyWindow = 24 * time.Hour
 )
 
 // ErrLimiterUnavailable is returned when Redis/limiter fails (fail-closed deny).
@@ -37,32 +26,28 @@ type Limiter interface {
 	RateLimitAllow(ctx context.Context, key string, limit int, window time.Duration) (bool, int, error)
 }
 
-// Limits configures visitor Ask rate limits. Zero values fall back to package defaults.
+// Limits configures visitor Ask rate limits. Zero values fall back to config defaults.
 type Limits struct {
+	AskHostDailyLimit   int
 	AskAIRPM            int
 	AskAIDailyLimit     int
 	AskFormalDailyLimit int
 }
 
+func (l Limits) askHostDaily() int {
+	return config.RateLimitOrDefault(l.AskHostDailyLimit, config.DefaultVisitorAskHostDailyLimit)
+}
+
 func (l Limits) askAIRPM() int {
-	if l.AskAIRPM > 0 {
-		return l.AskAIRPM
-	}
-	return DefaultAskAIRPM
+	return config.RateLimitOrDefault(l.AskAIRPM, config.DefaultVisitorAskAIRPM)
 }
 
 func (l Limits) askAIDaily() int {
-	if l.AskAIDailyLimit > 0 {
-		return l.AskAIDailyLimit
-	}
-	return DefaultAskAIDailyLimit
+	return config.RateLimitOrDefault(l.AskAIDailyLimit, config.DefaultVisitorAskAIDailyLimit)
 }
 
 func (l Limits) askFormalDaily() int {
-	if l.AskFormalDailyLimit > 0 {
-		return l.AskFormalDailyLimit
-	}
-	return DefaultAskFormalDailyLimit
+	return config.RateLimitOrDefault(l.AskFormalDailyLimit, config.DefaultVisitorAskFormalDailyLimit)
 }
 
 // AllowAskAI enforces RPM then daily caps for the AI lane stream path.
@@ -86,20 +71,20 @@ func AllowAskAI(ctx context.Context, lim Limiter, linkID, visitorID string, limi
 	return ok, nil
 }
 
-// AllowAskHost enforces 100/day.
-func AllowAskHost(ctx context.Context, lim Limiter, linkID, visitorID string) (bool, error) {
+// AllowAskHost enforces the Host-lane daily cap.
+func AllowAskHost(ctx context.Context, lim Limiter, linkID, visitorID string, limits Limits) (bool, error) {
 	if lim == nil {
 		return true, nil
 	}
 	key := fmt.Sprintf("ask_host_day:%s:%s", linkID, visitorID)
-	ok, _, err := lim.RateLimitAllow(ctx, key, AskHostDailyLimit, AskHostDailyWindow)
+	ok, _, err := lim.RateLimitAllow(ctx, key, limits.askHostDaily(), AskHostDailyWindow)
 	if err != nil {
 		return false, fmt.Errorf("%w: %v", ErrLimiterUnavailable, err)
 	}
 	return ok, nil
 }
 
-// AllowAskFormal enforces Formal-mode daily caps (stricter than host).
+// AllowAskFormal enforces Formal-mode daily caps.
 func AllowAskFormal(ctx context.Context, lim Limiter, linkID, visitorID string, limits Limits) (bool, error) {
 	if lim == nil {
 		return true, nil

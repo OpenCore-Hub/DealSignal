@@ -130,6 +130,7 @@ func (h *Handler) visitorAskLimits() visitorask.Limits {
 		return visitorask.Limits{}
 	}
 	return visitorask.Limits{
+		AskHostDailyLimit:   h.cfg.VisitorAskHostDailyLimit,
 		AskAIRPM:            h.cfg.VisitorAskAIRPM,
 		AskAIDailyLimit:     h.cfg.VisitorAskAIDailyLimit,
 		AskFormalDailyLimit: h.cfg.VisitorAskFormalDailyLimit,

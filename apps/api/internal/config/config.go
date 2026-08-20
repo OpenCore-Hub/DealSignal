@@ -78,16 +78,19 @@ type Config struct {
 	HubSpotClientID           string
 	HubSpotClientSecret       string
 
-	RateLimitPublicRPM      int
-	RateLimitAuthRPM        int
-	RateLimitRegisterLimit  int
-	RateLimitRegisterWindow time.Duration
-	RateLimitResendLimit    int
-	RateLimitResendWindow   time.Duration
-	RateLimitUploadRPM      int
-	RateLimitWorkspaceRPM   int
-	IdempotencyTTLHours     int
-	IdempotencyMaxBodySize  int
+	RateLimitPublicRPM            int
+	RateLimitAuthRPM              int
+	RateLimitRegisterLimit        int
+	RateLimitRegisterWindow       time.Duration
+	RateLimitResendLimit          int
+	RateLimitResendWindow         time.Duration
+	RateLimitUploadRPM            int
+	RateLimitWorkspaceRPM         int
+	RateLimitAccessRequestPerHour int
+	RateLimitAccessAttemptPerMin  int
+	RateLimitEmailCodePerMin      int
+	IdempotencyTTLHours           int
+	IdempotencyMaxBodySize        int
 
 	LinkOpenDedupWindow time.Duration
 	PageViewDedupWindow time.Duration
@@ -124,11 +127,13 @@ type Config struct {
 	// Visitor Ask monthly caps come from workspace plan_code
 	// (see plan.Limits.VisitorAskAIMonthly). Per-link links.ask_ai_monthly_quota
 	// remains an optional tighter cap.
+	// VisitorAskHostDailyLimit caps Host-lane asks per visitor+link per day.
+	VisitorAskHostDailyLimit int
 	// VisitorAskAIRPM caps AI lane requests per visitor+link per minute (abuse guard).
 	VisitorAskAIRPM int
 	// VisitorAskAIDailyLimit caps AI lane requests per visitor+link per day.
 	VisitorAskAIDailyLimit int
-	// VisitorAskFormalDailyLimit caps Formal-mode asks per visitor+link per day (stricter than host).
+	// VisitorAskFormalDailyLimit caps Formal-mode asks per visitor+link per day.
 	VisitorAskFormalDailyLimit int
 
 	SignalRulesPath string
@@ -204,20 +209,53 @@ type Config struct {
 // multi-tab dashboards, batch diligence uploads, and stream reconnects.
 // These are abuse guards, not billing quotas.
 const (
-	DefaultRateLimitPublicRPM             = 600
-	DefaultRateLimitAuthRPM               = 120
+	DefaultRateLimitPublicRPM             = 3000
+	DefaultRateLimitAuthRPM               = 600
 	DefaultRateLimitRegisterLimit         = 10
 	DefaultRateLimitRegisterWindowMinutes = 15
 	DefaultRateLimitResendLimit           = 8
 	DefaultRateLimitResendWindowMinutes   = 15
-	DefaultRateLimitUploadRPM             = 240
-	DefaultRateLimitWorkspaceRPM          = 600
-	DefaultKnowledgeQAMemberRPM           = 60
-	DefaultKnowledgeQAFollowUpRPM         = 80
-	DefaultVisitorAskAIRPM                = 30
-	DefaultVisitorAskAIDailyLimit         = 150
-	DefaultVisitorAskFormalDailyLimit     = 50
+	DefaultRateLimitUploadRPM             = 600
+	DefaultRateLimitWorkspaceRPM          = 2000
+	DefaultRateLimitAccessRequestPerHour  = 120
+	DefaultRateLimitAccessAttemptPerMin   = 60
+	DefaultRateLimitEmailCodePerMin       = 5
+	DefaultKnowledgeQAMemberRPM           = 120
+	DefaultKnowledgeQAFollowUpRPM         = 160
+	DefaultVisitorAskHostDailyLimit       = 200
+	DefaultVisitorAskAIRPM                = 60
+	DefaultVisitorAskAIDailyLimit         = 400
+	DefaultVisitorAskFormalDailyLimit     = 100
 )
+
+// RateLimitOrDefault returns v when it is a positive override, otherwise fallback.
+func RateLimitOrDefault(v, fallback int) int {
+	if v > 0 {
+		return v
+	}
+	return fallback
+}
+
+func (c *Config) AccessRequestPerHour() int {
+	if c == nil {
+		return DefaultRateLimitAccessRequestPerHour
+	}
+	return RateLimitOrDefault(c.RateLimitAccessRequestPerHour, DefaultRateLimitAccessRequestPerHour)
+}
+
+func (c *Config) AccessAttemptPerMin() int {
+	if c == nil {
+		return DefaultRateLimitAccessAttemptPerMin
+	}
+	return RateLimitOrDefault(c.RateLimitAccessAttemptPerMin, DefaultRateLimitAccessAttemptPerMin)
+}
+
+func (c *Config) EmailCodePerMin() int {
+	if c == nil {
+		return DefaultRateLimitEmailCodePerMin
+	}
+	return RateLimitOrDefault(c.RateLimitEmailCodePerMin, DefaultRateLimitEmailCodePerMin)
+}
 
 // Load parses environment variables into Config and validates required fields.
 func Load() (*Config, error) {
@@ -297,12 +335,15 @@ func Load() (*Config, error) {
 		RateLimitRegisterWindow: time.Duration(getEnvInt("RATE_LIMIT_REGISTER_WINDOW_MINUTES", DefaultRateLimitRegisterWindowMinutes)) * time.Minute,
 		RateLimitResendLimit:    getEnvInt("RATE_LIMIT_RESEND_LIMIT", DefaultRateLimitResendLimit),
 		RateLimitResendWindow:   time.Duration(getEnvInt("RATE_LIMIT_RESEND_WINDOW_MINUTES", DefaultRateLimitResendWindowMinutes)) * time.Minute,
-		// Batch deal-room folder uploads issue one create per file; 60/min still
-		// clips a 100-file diligence pack. Default 240/min.
-		RateLimitUploadRPM:     getEnvInt("RATE_LIMIT_UPLOAD_RPM", DefaultRateLimitUploadRPM),
-		RateLimitWorkspaceRPM:  getEnvInt("RATE_LIMIT_WORKSPACE_RPM", DefaultRateLimitWorkspaceRPM),
-		IdempotencyTTLHours:    getEnvInt("IDEMPOTENCY_TTL_HOURS", 24),
-		IdempotencyMaxBodySize: getEnvInt("IDEMPOTENCY_MAX_BODY_SIZE", 1<<20),
+		// Batch deal-room folder uploads issue one create per file; 240/min still
+		// clips a 400-file diligence pack with retries. Default 600/min.
+		RateLimitUploadRPM:            getEnvInt("RATE_LIMIT_UPLOAD_RPM", DefaultRateLimitUploadRPM),
+		RateLimitWorkspaceRPM:         getEnvInt("RATE_LIMIT_WORKSPACE_RPM", DefaultRateLimitWorkspaceRPM),
+		RateLimitAccessRequestPerHour: getEnvInt("RATE_LIMIT_ACCESS_REQUEST_PER_HOUR", DefaultRateLimitAccessRequestPerHour),
+		RateLimitAccessAttemptPerMin:  getEnvInt("RATE_LIMIT_ACCESS_ATTEMPT_PER_MIN", DefaultRateLimitAccessAttemptPerMin),
+		RateLimitEmailCodePerMin:      getEnvInt("RATE_LIMIT_EMAIL_CODE_PER_MIN", DefaultRateLimitEmailCodePerMin),
+		IdempotencyTTLHours:           getEnvInt("IDEMPOTENCY_TTL_HOURS", 24),
+		IdempotencyMaxBodySize:        getEnvInt("IDEMPOTENCY_MAX_BODY_SIZE", 1<<20),
 
 		LinkOpenDedupWindow: time.Duration(getEnvInt("LINK_OPEN_DEDUP_WINDOW_MINUTES", 30)) * time.Minute,
 		PageViewDedupWindow: time.Duration(getEnvInt("PAGE_VIEW_DEDUP_WINDOW_MINUTES", 5)) * time.Minute,
@@ -351,6 +392,7 @@ func Load() (*Config, error) {
 		KnowledgeQATableLaneEnabled:    strings.ToLower(getEnv("KNOWLEDGE_QA_TABLE_LANE_ENABLED", "true")) == "true",
 		KnowledgeQAMultiHopEnabled:     strings.ToLower(getEnv("KNOWLEDGE_QA_MULTI_HOP_ENABLED", "true")) == "true",
 		VisitorAskUnifiedEnabled:       visitorAskUnifiedEnabledFromEnv(),
+		VisitorAskHostDailyLimit:       getEnvInt("VISITOR_ASK_HOST_DAILY_LIMIT", DefaultVisitorAskHostDailyLimit),
 		VisitorAskAIRPM:                getEnvInt("VISITOR_ASK_AI_RPM", DefaultVisitorAskAIRPM),
 		VisitorAskAIDailyLimit:         getEnvInt("VISITOR_ASK_AI_DAILY_LIMIT", DefaultVisitorAskAIDailyLimit),
 		VisitorAskFormalDailyLimit:     getEnvInt("VISITOR_ASK_FORMAL_DAILY_LIMIT", DefaultVisitorAskFormalDailyLimit),

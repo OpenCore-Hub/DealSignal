@@ -78,8 +78,6 @@ const (
 	workspaceRoleAdmin  = "admin"
 	workspaceRoleMember = "member"
 	workspaceRoleGuest  = "guest"
-
-	publicAccessRequestLimitPerHour = 30
 )
 
 // Beginner starts a database transaction.
@@ -1586,7 +1584,7 @@ func (s *Service) checkPublicAccessRequestRateLimit(ctx context.Context, roomSlu
 		ip = "unknown"
 	}
 	key := fmt.Sprintf("dealroom:access-request:%s:%s", roomSlug, ip)
-	allowed, _, err := s.rateLimiter.RateLimitAllow(ctx, key, publicAccessRequestLimitPerHour, time.Hour)
+	allowed, _, err := s.rateLimiter.RateLimitAllow(ctx, key, s.cfg.AccessRequestPerHour(), time.Hour)
 	if err != nil {
 		// Fail open: rate limiter outage must not block legitimate requests.
 		logger.ErrorCtx(ctx, "dealroom access request rate limit check failed", err)

@@ -27,10 +27,14 @@ Readiness probe: `curl http://localhost:8080/readyz`
 - `OPENAI_API_KEY` — optional. Leave empty to disable LLM-backed suggestion enrichment. Ask Docs / Diligence have been removed.
 - `OPENAI_BASE_URL` — e.g. `https://openrouter.ai/api/v1`
 - `KNOWLEDGE_QA_REWRITE_ENABLED` — optional (default `true`). Set `false` to disable elliptical retrieve-query rewrite without disabling follow-up chips.
-- `KNOWLEDGE_QA_MEMBER_RPM` / `KNOWLEDGE_QA_FOLLOWUP_RPM` — optional per-member ask / follow-up chip RPM gates (defaults `60` / `80`).
-- `VISITOR_ASK_AI_RPM` — optional visitor AI lane RPM per link+visitor (default `30`). Abuse guard, not a billing quota.
-- `VISITOR_ASK_AI_DAILY_LIMIT` — optional visitor AI lane daily cap per link+visitor (default `150`). Abuse guard, not a billing quota.
-- `VISITOR_ASK_FORMAL_DAILY_LIMIT` — optional Formal-mode visitor Ask daily cap per link+visitor (default `50`).
+- `RATE_LIMIT_PUBLIC_RPM` / `RATE_LIMIT_AUTH_RPM` / `RATE_LIMIT_UPLOAD_RPM` / `RATE_LIMIT_WORKSPACE_RPM` — HTTP buckets (defaults `3000` / `600` / `600` / `2000` per minute). Abuse guards, not billing quotas.
+- `RATE_LIMIT_REGISTER_LIMIT` / `RATE_LIMIT_RESEND_LIMIT` — register `10` per 15m; resend-verification and forgot-password `8` per 15m.
+- `RATE_LIMIT_ACCESS_REQUEST_PER_HOUR` / `RATE_LIMIT_ACCESS_ATTEMPT_PER_MIN` / `RATE_LIMIT_EMAIL_CODE_PER_MIN` — share-link and public deal-room access (`120`/h, `60`/min, `5`/min).
+- `KNOWLEDGE_QA_MEMBER_RPM` / `KNOWLEDGE_QA_FOLLOWUP_RPM` — optional per-member ask / follow-up chip RPM gates (defaults `120` / `160`).
+- `VISITOR_ASK_HOST_DAILY_LIMIT` — optional visitor Ask Host daily cap per link+visitor (default `200`).
+- `VISITOR_ASK_AI_RPM` — optional visitor AI lane RPM per link+visitor (default `60`). Abuse guard, not a billing quota.
+- `VISITOR_ASK_AI_DAILY_LIMIT` — optional visitor AI lane daily cap per link+visitor (default `400`). Abuse guard, not a billing quota.
+- `VISITOR_ASK_FORMAL_DAILY_LIMIT` — optional Formal-mode visitor Ask daily cap per link+visitor (default `100`).
 - `VISITOR_ASK_UNIFIED` — set `1` to expose unified visitor Ask UI on public links (Phase A/B rollout gate).
 - `FORMAL_PUBLISH_INTERVAL_SECONDS` — Formal Q&A due-sweep worker interval (default `15`). Lazy-on-read remains as fallback.
 - `FORMAL_PUBLISH_BATCH_SIZE` — max scheduled Formal turns published per worker tick (default `50`).

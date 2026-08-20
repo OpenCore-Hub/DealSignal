@@ -98,8 +98,8 @@ func NewHandler(service *Service, opts ...HandlerOption) *Handler {
 		runner:            service,
 		quota:             service,
 		corpus:            service,
-		admission:         newMemoryAskAdmission(defaultKnowledgeQAMemberRPM),
-		followUpAdmission: newMemoryMemberAdmission(followUpAdmissionScope, defaultKnowledgeQAFollowUpRPM),
+		admission:         newMemoryAskAdmission(config.DefaultKnowledgeQAMemberRPM),
+		followUpAdmission: newMemoryMemberAdmission(followUpAdmissionScope, config.DefaultKnowledgeQAFollowUpRPM),
 	}
 	for _, opt := range opts {
 		opt(h)
