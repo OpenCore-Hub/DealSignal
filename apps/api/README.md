@@ -9,6 +9,10 @@ cd apps/api
 cp .env.example .env
 # adjust values as needed
 go run ./cmd/server
+# or: go build -o server ./cmd/server && ./server
+# Both load .env from the current directory. Compose DNS hosts (`postgres`,
+# `redis`, `minio`) only resolve inside docker-compose; for a host binary use
+# 127.0.0.1 and the published ports.
 ```
 
 ## Docker Compose
@@ -36,6 +40,7 @@ Key variables in `.env`:
 |----------|----------|-------------|
 | `DATABASE_URL` | yes | PostgreSQL connection string |
 | `REDIS_URL` | yes | Redis connection string |
+| `APP_BASE_URL` | yes | Public API origin (emails, OAuth, HMAC file proxy) |
 | `JWT_SECRET` | yes | Signing secret for JWT tokens |
 | `S3_BUCKET` / `S3_ACCESS_KEY` / `S3_SECRET_KEY` | yes | MinIO / S3-compatible storage |
 | `OPENAI_API_KEY` | no | OpenAI-compatible API key. Leave empty to disable LLM suggestion enrichment. Ask Docs / Diligence removed. |

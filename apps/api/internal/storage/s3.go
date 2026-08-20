@@ -17,12 +17,11 @@ import (
 
 // Client wraps an S3-compatible client (MinIO / AWS S3).
 type Client struct {
-	bucket          string
-	client          *s3.Client
-	presigner       *s3.PresignClient
-	publicPresigner *s3.PresignClient
-	endpoint        string
-	pathStyle       bool
+	bucket    string
+	client    *s3.Client
+	presigner *s3.PresignClient
+	endpoint  string
+	pathStyle bool
 }
 
 // NewS3Client creates a storage client from config.
@@ -39,24 +38,13 @@ func NewS3Client(cfg *config.Config) (*Client, error) {
 	}
 
 	client := newS3Client(awsCfg, pathStyle)
-	c := &Client{
+	return &Client{
 		bucket:    cfg.S3Bucket,
 		client:    client,
 		presigner: s3.NewPresignClient(client),
 		endpoint:  cfg.S3Endpoint,
 		pathStyle: pathStyle,
-	}
-
-	if cfg.S3PublicEndpoint != "" {
-		publicCfg, err := loadAWSConfig(region, cfg.S3AccessKey, cfg.S3SecretKey, cfg.S3PublicEndpoint)
-		if err != nil {
-			return nil, fmt.Errorf("load public aws config: %w", err)
-		}
-		publicClient := newS3Client(publicCfg, pathStyle)
-		c.publicPresigner = s3.NewPresignClient(publicClient)
-	}
-
-	return c, nil
+	}, nil
 }
 
 func loadAWSConfig(region, accessKey, secretKey, endpoint string) (aws.Config, error) {
@@ -117,11 +105,7 @@ func (c *Client) GetObject(ctx context.Context, key string) (io.ReadCloser, erro
 
 // PresignedGetURL returns a temporary URL for reading an object.
 func (c *Client) PresignedGetURL(ctx context.Context, key string, expiry time.Duration) (string, error) {
-	presigner := c.presigner
-	if c.publicPresigner != nil {
-		presigner = c.publicPresigner
-	}
-	req, err := presigner.PresignGetObject(ctx, &s3.GetObjectInput{
+	req, err := c.presigner.PresignGetObject(ctx, &s3.GetObjectInput{
 		Bucket: c.bucketPtr(),
 		Key:    c.keyPtr(key),
 	}, func(o *s3.PresignOptions) {
@@ -133,19 +117,10 @@ func (c *Client) PresignedGetURL(ctx context.Context, key string, expiry time.Du
 	return req.URL, nil
 }
 
-// PresignedGetURLInternal returns a temporary URL using the internal S3 endpoint (e.g. http://minio:9000).
-// Use this for server-side downloads where the caller runs inside the same Docker network as MinIO.
+// PresignedGetURLInternal returns a temporary URL for server-side downloads
+// (same endpoint as PresignedGetURL; kept for existing callers).
 func (c *Client) PresignedGetURLInternal(ctx context.Context, key string, expiry time.Duration) (string, error) {
-	req, err := c.presigner.PresignGetObject(ctx, &s3.GetObjectInput{
-		Bucket: c.bucketPtr(),
-		Key:    c.keyPtr(key),
-	}, func(o *s3.PresignOptions) {
-		o.Expires = expiry
-	})
-	if err != nil {
-		return "", fmt.Errorf("presign get internal %s: %w", key, err)
-	}
-	return req.URL, nil
+	return c.PresignedGetURL(ctx, key, expiry)
 }
 
 // PublicURLInternal returns a non-signed URL using the internal S3 endpoint.
@@ -160,11 +135,7 @@ func (c *Client) PublicURLInternal(key string) string {
 
 // PresignedPutURL returns a temporary URL for uploading an object.
 func (c *Client) PresignedPutURL(ctx context.Context, key string, expiry time.Duration, contentType string) (string, error) {
-	presigner := c.presigner
-	if c.publicPresigner != nil {
-		presigner = c.publicPresigner
-	}
-	req, err := presigner.PresignPutObject(ctx, &s3.PutObjectInput{
+	req, err := c.presigner.PresignPutObject(ctx, &s3.PutObjectInput{
 		Bucket:      c.bucketPtr(),
 		Key:         c.keyPtr(key),
 		ContentType: &contentType,
@@ -177,7 +148,7 @@ func (c *Client) PresignedPutURL(ctx context.Context, key string, expiry time.Du
 	return req.URL, nil
 }
 
-func (c *Client) bucketPtr() *string { return &c.bucket }
+func (c *Client) bucketPtr() *string        { return &c.bucket }
 func (c *Client) keyPtr(key string) *string { return &key }
 
 // ObjectKey builds a tenant/workspace-scoped object key.

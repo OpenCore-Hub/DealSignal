@@ -14,6 +14,7 @@ func requiredLoadEnv(t *testing.T) {
 	t.Setenv("S3_BUCKET", "bucket")
 	t.Setenv("S3_ACCESS_KEY", "key")
 	t.Setenv("S3_SECRET_KEY", "secret")
+	t.Setenv("APP_BASE_URL", "http://127.0.0.1:8080")
 }
 
 func TestTurnstileOptionalOutsideProduction(t *testing.T) {

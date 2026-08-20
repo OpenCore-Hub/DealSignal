@@ -1,5 +1,6 @@
 /bin/
 /tmp/
+/server
 *.env
 !.env.example
 coverage.out

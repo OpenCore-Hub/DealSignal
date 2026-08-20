@@ -12,6 +12,7 @@ import (
 )
 
 func main() {
+	loadDotEnv(".env")
 	cfg := config.MustLoad()
 
 	ctx := context.Background()

@@ -21,13 +21,12 @@ type Config struct {
 	LogLevel           string
 	Version            string
 
-	S3Endpoint       string
-	S3PublicEndpoint string
-	S3Bucket         string
-	S3AccessKey      string
-	S3SecretKey      string
-	S3Region         string
-	S3UsePathStyle   string
+	S3Endpoint     string
+	S3Bucket       string
+	S3AccessKey    string
+	S3SecretKey    string
+	S3Region       string
+	S3UsePathStyle string
 
 	OnlyOfficeURL       string
 	OnlyOfficeJWTSecret string
@@ -36,9 +35,10 @@ type Config struct {
 	OpenAIBaseURL   string
 	OpenAIChatModel string
 
-	BaseDomain             string
-	CNAMETarget            string
-	CertProvider           string
+	BaseDomain   string
+	CNAMETarget  string
+	CertProvider string
+	// AppBaseURL is the public API origin (emails, OAuth, HMAC file proxy). Required.
 	AppBaseURL             string
 	FrontendURL            string
 	ViewerBaseURL          string
@@ -233,13 +233,12 @@ func Load() (*Config, error) {
 		LinkSessionSecret:  os.Getenv("LINK_SESSION_SECRET"),
 		InviteTokenHashKey: os.Getenv("INVITE_TOKEN_HASH_KEY"),
 
-		S3Endpoint:       os.Getenv("S3_ENDPOINT"),
-		S3PublicEndpoint: os.Getenv("S3_PUBLIC_ENDPOINT"),
-		S3Bucket:         os.Getenv("S3_BUCKET"),
-		S3AccessKey:      os.Getenv("S3_ACCESS_KEY"),
-		S3SecretKey:      os.Getenv("S3_SECRET_KEY"),
-		S3Region:         os.Getenv("S3_REGION"),
-		S3UsePathStyle:   os.Getenv("S3_USE_PATH_STYLE"),
+		S3Endpoint:     os.Getenv("S3_ENDPOINT"),
+		S3Bucket:       os.Getenv("S3_BUCKET"),
+		S3AccessKey:    os.Getenv("S3_ACCESS_KEY"),
+		S3SecretKey:    os.Getenv("S3_SECRET_KEY"),
+		S3Region:       os.Getenv("S3_REGION"),
+		S3UsePathStyle: os.Getenv("S3_USE_PATH_STYLE"),
 
 		OnlyOfficeURL:       os.Getenv("ONLYOFFICE_URL"),
 		OnlyOfficeJWTSecret: os.Getenv("ONLYOFFICE_JWT_SECRET"),
@@ -251,7 +250,7 @@ func Load() (*Config, error) {
 		BaseDomain:             getEnv("BASE_DOMAIN", "dealsignal.com"),
 		CNAMETarget:            getEnv("CNAME_TARGET", "cname.dealsignal.com"),
 		CertProvider:           getEnv("CERT_PROVIDER", "noop"),
-		AppBaseURL:             getEnv("APP_BASE_URL", "http://localhost:8080"),
+		AppBaseURL:             strings.TrimSpace(os.Getenv("APP_BASE_URL")),
 		FrontendURL:            getEnv("FRONTEND_URL", "http://localhost:5173"),
 		ViewerBaseURL:          getEnv("VIEWER_BASE_URL", getEnv("FRONTEND_URL", "http://localhost:5173")),
 		SMTPHost:               os.Getenv("SMTP_HOST"),
@@ -377,6 +376,9 @@ func Load() (*Config, error) {
 	}
 	cfg.HTTPWriteTimeout = resolveHTTPWriteTimeout(cfg.DoclingRAG, writeOverrideSec)
 
+	if cfg.AppBaseURL == "" {
+		return nil, fmt.Errorf("APP_BASE_URL is required")
+	}
 	if cfg.DatabaseURL == "" {
 		return nil, fmt.Errorf("DATABASE_URL is required")
 	}
