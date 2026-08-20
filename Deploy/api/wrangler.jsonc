@@ -1,13 +1,52 @@
 {
+	"$schema": "./node_modules/wrangler/config-schema.json",
 	"name": "dealsignal-api",
 	"main": "src/index.ts",
 	"compatibility_date": "2026-08-19",
 	"compatibility_flags": ["nodejs_compat"],
+	"observability": {
+		"enabled": true
+	},
+	// Non-secrets. Worker secrets do not reach the Go process unless src/index.ts
+	// copies them into Container.envVars. Do not add RATE_LIMIT_* here — Go
+	// production defaults in apps/api/internal/config are the numeric source.
+	"vars": {
+		"APP_ENV": "production",
+		"PORT": "8080",
+		"LOG_LEVEL": "info",
+		"PPROF_ENABLED": "false",
+		"METRICS_ENABLED": "true",
+		"S3_USE_PATH_STYLE": "true",
+		"S3_REGION": "auto",
+		// R2 S3 API. Replace ACCOUNT_ID if this Worker moves accounts.
+		"S3_ENDPOINT": "https://beff214a72a1799850b0f029bee5fef9.r2.cloudflarestorage.com",
+		"S3_BUCKET": "dealsignal",
+		// Public HTTPS origin of Deploy/web (SPA + same-origin /api). Not the container.
+		"APP_BASE_URL": "https://dealsignal.com",
+		"FRONTEND_URL": "https://dealsignal.com",
+		"VIEWER_BASE_URL": "https://dealsignal.com",
+		"CORS_ALLOWED_ORIGINS": "https://dealsignal.com"
+	},
+	"secrets": {
+		"required": [
+			"DATABASE_URL",
+			"REDIS_URL",
+			"JWT_SECRET",
+			"URL_SIGNING_SECRET",
+			"LINK_SESSION_SECRET",
+			"IP_HASH_KEY",
+			"INVITE_TOKEN_HASH_KEY",
+			"S3_ACCESS_KEY",
+			"S3_SECRET_KEY",
+			"TURNSTILE_SITE_KEY",
+			"TURNSTILE_SECRET"
+		]
+	},
 	"containers": [
 		{
 			"class_name": "DealSignal",
 			"image": "registry.cloudflare.com/beff214a72a1799850b0f029bee5fef9/dealsignal-api:v1.0.0",
-			"instance_type": "lite",
+			"instance_type": "standard-1",
 			"max_instances": 2
 		}
 	],

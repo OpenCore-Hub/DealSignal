@@ -1,0 +1,14 @@
+# Never bake secrets or a host .env into the image.
+.env
+.env.*
+!.env.example
+
+# Local / CI artifacts
+.git
+server
+bin
+tmp
+coverage.out
+coverage.html
+*.coverage
+e2e-test.pdf

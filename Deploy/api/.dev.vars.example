@@ -1,0 +1,14 @@
+# Copy to .dev.vars for `wrangler dev`. Never commit .dev.vars.
+# Worker secrets do not enter the container unless mapped in src/index.ts envVars.
+
+DATABASE_URL=postgres://dealsignal:dealsignal@127.0.0.1:5435/dealsignal?sslmode=disable
+REDIS_URL=127.0.0.1:6381
+JWT_SECRET=change-me-in-production
+URL_SIGNING_SECRET=change-me-in-production
+LINK_SESSION_SECRET=change-me-in-production
+IP_HASH_KEY=change-me-in-production
+INVITE_TOKEN_HASH_KEY=change-me-in-production
+S3_ACCESS_KEY=minioadmin
+S3_SECRET_KEY=minioadmin
+TURNSTILE_SITE_KEY=1x00000000000000000000AA
+TURNSTILE_SECRET=1x0000000000000000000000000000000AA
